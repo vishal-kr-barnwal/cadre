@@ -148,7 +148,7 @@ For each regular worker task:
 5. Main records `awaiting_approval` and presents the evidence.
 6. After approval, the worker commits only that task.
 7. Main verifies the clean worktree and records the commit SHA.
-8. Main previews and applies integration when a branch boundary exists.
+8. Main calls adaptive integration when a branch boundary exists.
 
 Every regular task receives a distinct Conventional Commit and recorded SHA,
 including tasks handled sequentially by one phase worker.

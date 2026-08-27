@@ -21,7 +21,8 @@ skills/                  # create, track, implement, review, revise, archive,
                          # refresh, revert, status, and wisp
 agents/                  # Claude phase and task worker definitions
 dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
-templates/v1/            # immutable project, track, styleguide, and operation templates
+templates/v1/            # immutable published legacy templates
+templates/v2/            # active compact templates
 .codex-plugin/           # Codex manifest
 .claude-plugin/          # Claude manifest
 ```
@@ -44,21 +45,22 @@ One does not imply another. Installing Cadre's narrow MCP allow rules removes
 repetitive client prompts, but it never approves a specification, plan, commit,
 merge, review, or lifecycle change.
 
-## Preview And Apply
+## Adaptive Commands
 
-Deterministic MCP mutations generally come in pairs:
+Deterministic MCP mutations take one call. Only a genuine human decision uses
+the adaptive two-step shape:
 
 ```text
-preview(current inputs) -> exact proposal + SHA-256 digest
+prepare(current inputs) -> exact proposal + SHA-256 digest + token
 human approval
-apply(opaque proposal token)
+apply(token only)
 ```
 
-Apply recomputes the proposal against current state. Any changed file, state,
-branch, commit, selection, or input invalidates the digest and requires a new
-preview. Important pairs cover project initialization, execution start and
-finish, semantic execution checkpoints, worktree creation/integration/cleanup,
-clean review completion, archive batches, and the derived track index.
+Apply recomputes against current state. Changed files, state, branches, commits,
+selection, or input invalidate the digest and require a new prepare. The second
+call is retained only for initialization, archive selection, clean review, and
+governed integration. Worktree creation/start and cleanup/completion are each
+coalesced into one resumable call.
 
 The MCP server cannot infer approval from a prior conversation or approve a
 proposal itself.

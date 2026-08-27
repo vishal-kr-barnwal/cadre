@@ -24,7 +24,7 @@ The workflow:
 4. Identifies bundled workflow/styleguide defaults concisely and asks only
    about unresolved material choices.
 5. Presents one complete initialization authorization envelope.
-6. Applies initialization atomically behind a preview digest.
+6. Applies initialization atomically after approval of its prepare digest.
 7. Initializes Git when included in that envelope and no repository exists.
 8. Validates, commits, and records provenance without follow-up approvals.
 

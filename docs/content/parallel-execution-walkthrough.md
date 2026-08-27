@@ -130,7 +130,7 @@ C0──A(T1.1)
              C(T1.3)
 ```
 
-Main previews and applies their merges into the clean P1 integration worktree,
+Main integrates their branches into the clean P1 integration worktree,
 one at a time:
 
 ```text

@@ -7,29 +7,52 @@ order: 230
 
 # Release Notes
 
-## Unreleased
+## 3.4.0 - 2026-08-27
 
-### File-backed artifact proposals
+Cadre 3.4 is a breaking MCP and template-efficiency release. It reduces the
+public surface to 22 tools, makes adaptive schemas honest, coalesces execution
+bookkeeping, and introduces compact v2 project workflow defaults.
 
-- Adds the visible project-local `.cadre-stage/<candidate-id>/` proposal area,
-  with traversal, symlink, entry-type, per-file, and total-size protections.
-- Adds `artifact_candidate_manifest`, `execution_graph_validate_candidate`,
-  adaptive `project_init_candidate`, and adaptive `archive_batch_candidate`.
-- Cadre skills now write proposed artifact bodies to files, bind approval to
-  path/SHA-256 manifests, and send only identifiers and metadata through MCP.
-- Candidate-backed proposal records remain restart-safe without duplicating
-  complete workflow, plan, pattern, index, or learning bodies in the MCP
-  runtime cache.
-- Removes the superseded content-bearing initialization, draft-plan, and
-  archive MCP tools. Direct clients must stage artifacts and use the candidate
-  tool family.
-- Template responses expose eventual artifact destinations instead of provider
-  package paths, so creation cannot misinterpret the internal `init/` template
-  directory as `.cadre/init/`.
-- Replaces eleven preview/apply pairs with one adaptive command per operation.
-  Already-authorized deterministic mutations now take one call; genuine human
-  boundaries return `approval_required` and use the same command with a token
-  only after approval. This reduces the MCP surface from 36 to 25 tools.
+### Breaking MCP migration
+
+- Every approval-aware command now requires `mode: "prepare" | "apply"` and
+  rejects mixed shapes. Apply accepts only `proposalToken`.
+- `candidate_inspect` replaces separate manifest and staged-plan reads.
+- `project_status` gains project, track, and implementation views; implementation
+  preflight is one call.
+- Template discovery and individual reads use MCP resources; known bundles use
+  `template_get_many`. Template bodies occur once as embedded resources and
+  structured data contains descriptors only.
+- Apply receipts contain status, digest/checkpoint, counts, and changed paths
+  instead of repeated manifests or canonical bodies.
+
+### Candidate and initialization safety
+
+- Candidate staging now lives under `.cadre/stage/<candidate-id>/`; Cadre
+  enforces `/stage/` in `.cadre/.gitignore` before files are written.
+- `.cadre/init/*` is never a project destination. During initial creation the
+  `.cadre` bootstrap shell may contain only `.gitignore` and `stage`.
+- Initialization requires staged product, guidelines, and tech-stack files.
+  The MCP generates unchanged workflow and selected styleguide defaults, binds
+  them into the approval digest, and accepts staged overrides.
+
+### v1 to v2 refresh
+
+- Published v1 templates remain immutable and readable; new projects use v2.
+- Existing v1 projects report `upgradeRequired`. Status, wisp, and explicit
+  refresh remain available; other mutations fail with
+  `PROJECT_REFRESH_REQUIRED`.
+- Upgrade occurs only through a human-approved refresh containing the compact
+  v2 workflow, runtime/template versions, and ignore rule. Nothing rewrites a
+  legacy project automatically.
+
+### Execution and budgets
+
+- Worktree creation records start, integration records merge state, and cleanup
+  records completion. Lost-response retries finish only the missing half.
+- A normal delegated task uses four MCP calls; governed integration uses five.
+- Regression budgets cap the tool catalog at 18 KiB, workflow at 6 KiB, common
+  template/status bundles at 4–8 KiB, and checkpoint/apply receipts at 4 KiB.
 
 ## 3.3.0 - 2026-08-09
 

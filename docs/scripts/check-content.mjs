@@ -110,8 +110,8 @@ function checkMcpCoverage(docsBySlug) {
   const tools = [...source.matchAll(/registerTool\("([a-z_]+)"/g)].map((match) => match[1])
   const reference = docsBySlug.get("mcp-reference")?.content ?? ""
 
-  if (tools.length !== 25) {
-    fail(`Expected 25 current MCP tools, found ${tools.length}`)
+  if (tools.length !== 22) {
+    fail(`Expected 22 current MCP tools, found ${tools.length}`)
   }
   for (const tool of tools) {
     if (!reference.includes(`## ${tool}\n`)) {

@@ -39,7 +39,7 @@ Primary sources are:
 - `harness/agents/` worker definitions;
 - `harness/src/domain/` and `harness/src/mcp/`;
 - `harness/scripts/*.ts`;
-- `harness/templates/v1/`;
+- `harness/templates/v1/` (immutable) and active `harness/templates/v2/`;
 - tracked plugin manifests, MCP configs, and marketplace catalogs;
 - `harness/test/`;
 - `docs/content/` and the docs application.

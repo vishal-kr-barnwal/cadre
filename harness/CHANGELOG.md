@@ -1,31 +1,27 @@
 # Changelog
 
-## Unreleased
+## [3.4.0] - 2026-08-27
 
 ### Added
 
-- Added bounded, symlink-safe project-local artifact staging under
-  `.cadre-stage/<candidate-id>/`.
-- Added `artifact_candidate_manifest`, `execution_graph_validate_candidate`,
-  adaptive `project_init_candidate`, and adaptive `archive_batch_candidate`.
-- Added approved path/SHA-256 manifests to newly rendered operation journals
-  and setup commit-tree verification for initialization artifacts.
+- Added bounded, Git-ignored staging under `.cadre/stage/<candidate-id>/` and
+  one `candidate_inspect` call for manifests plus optional plan validation.
+- Added scoped project/track/implementation status views, immutable v2
+  templates, explicit legacy upgrade reporting, and approved v1→v2 refresh.
+- Added honest adaptive schemas requiring `mode`, embedded template resources,
+  compact descriptors/receipts, and resumable composite worktree transitions.
 
 ### Changed
 
-- Cadre workflows now send artifact paths and metadata through MCP while
-  keeping complete proposal bodies in visible files through the commit
-  checkpoint.
-- Removed the superseded content-bearing initialization, draft-plan, and
-  archive MCP tools; direct clients must use candidate stages.
-- Template MCP responses now expose eventual `artifactPath` values instead of
-  provider package source paths, preventing `init/` from being mistaken for a
-  project directory during creation.
-- Replaced eleven external preview/apply pairs with adaptive commands. Seven
-  deterministic operations and phase/autonomous integration now validate and
-  mutate in one call; initialization, archive selection, clean review, and
-  governed integration return `approval_required` and accept a token only
-  after the human decision. The MCP surface is reduced from 36 to 25 tools.
+- New initialization generates unchanged v2 workflow/styleguide defaults in
+  MCP and stages only authored context or explicit overrides. `.cadre/init/*`
+  remains invalid.
+- Removed retired template and candidate tools; resources cover discovery and
+  individual reads. The MCP surface is 22 tools.
+- Coalesced worktree start, integration, and completion bookkeeping, reducing a
+  delegated task to four calls (five for governed integration).
+- Legacy projects remain readable but fail closed for mutation until an
+  explicit approved refresh upgrades runtime/template versions.
 
 ## [3.3.0] - 2026-08-09
 

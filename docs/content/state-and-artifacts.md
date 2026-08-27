@@ -38,6 +38,7 @@ The installed plugin owns the runtime and immutable template catalog.
 │       ├── bugs/
 │       └── revisions/
 ├── archive/
+├── stage/                  # ignored unapproved candidate artifacts
 ├── .worktrees/             # ignored execution worktrees
 └── wisps/                  # ignored disposable exploration output
 ```
@@ -104,5 +105,6 @@ until the approved index repair is applied.
 ## Versioning
 
 `runtimeVersion` identifies Cadre behavior. `templateSetVersion` identifies the
-immutable artifact format bundle. Cadre 3.0 ships template set `v1`. Template
-resources use `cadre://templates/v1/...` URIs and include SHA-256 hashes.
+immutable artifact format bundle. Cadre 3.4 creates v2 projects; published v1
+projects remain readable and upgrade only through approved refresh. Active
+resources use `cadre://templates/v2/...` URIs and include SHA-256 hashes.

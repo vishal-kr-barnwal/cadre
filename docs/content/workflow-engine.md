@@ -55,10 +55,10 @@ A decision-ready proposal contains exact artifacts, paths, state consequences,
 Git consequences, verification, and risks. Approval binds only that proposal.
 
 When content or consequences change, the workflow rebuilds the proposal and
-asks again. Where a deterministic MCP preview exists, its digest binds the
+asks again. Where an adaptive MCP prepare result exists, its digest binds the
 approval to current state.
 
-Approval forms are bound to that preview digest or to an immutable verification
+Approval forms are bound to that proposal digest or to an immutable verification
 checkpoint containing the relevant track, execution/node, and commit. The form
 does not mutate state or approve on the MCP server's behalf. Only an explicit
 `approved` response authorizes the already-presented binding; request-changes,

@@ -39,8 +39,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.3.0") {
-  errors.push("package: expected publish identity cadre-ai@3.3.0");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.4.0") {
+  errors.push("package: expected publish identity cadre-ai@3.4.0");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
@@ -83,7 +83,7 @@ for (const skill of skills) {
   }
 }
 
-const templateRoot = join(root, "templates", "v1");
+const templateRoot = join(root, "templates", "v2");
 const projectTemplate = join(templateRoot, "init");
 for (const file of [
   "gitignore.template", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",

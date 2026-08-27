@@ -21,7 +21,7 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Primary MCP:** template bundle, styleguide resolution,
   adaptive `project_init_candidate`, setup checkpoint tools, validation,
   and derived tracks index.
-- **Proposal transport:** rendered files live under `.cadre-stage/create/`;
+- **Proposal transport:** rendered files live under `.cadre/stage/create/`;
   MCP receives only their paths and metadata. Base files are staged directly as
   `product.md`, `guidelines.md`, `tech-stack.md`, `workflow.md`, and
   `styleguides/general.md`; there is no `.cadre/init/` directory.
@@ -34,7 +34,7 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 - **Use for:** a new/resumed feature or bug.
 - **Requires:** substantive scope, acceptance, dependencies, and plan evidence.
 - **Primary MCP:** project status, template bundles,
-  `artifact_candidate_manifest`, staged graph validation, state validation, and
+  `candidate_stage_prepare`, `candidate_inspect`, state validation, and
   atomic tracks index rendering.
 - **Approvals:** one combined specification-and-plan decision by default;
   staged review only when explicitly requested.
@@ -113,8 +113,8 @@ Invoke a skill as `$cadre:<name>` in Codex or `/cadre:<name>` in Claude Code.
 ## status
 
 - **Use for:** progress, blockers, health, and next legal action.
-- **Primary MCP:** `project_status`, `worktree_status`, and active
-  `execution_status`.
+- **Primary MCP:** one `project_status` call using the narrow project, track, or
+  implementation view.
 - **Writes:** nothing.
 - **Reports:** setup/operation checkpoints, tracks, dependencies, execution
   nodes, worktrees, review/archive readiness, validation, and dirty Cadre state.

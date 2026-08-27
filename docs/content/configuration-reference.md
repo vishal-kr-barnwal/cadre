@@ -12,7 +12,7 @@ Cadre 3.0 configuration and state are distributed across explicit approved
 artifacts. There is no current `cadre/config.json`.
 
 Unapproved artifact proposals live temporarily beneath
-`<project-root>/.cadre-stage/<candidate-id>/`. They are visible filesystem
+`<project-root>/.cadre/stage/<candidate-id>/`. They are visible filesystem
 drafts, never canonical `.cadre/` state or Git history. Approval binds their
 path/SHA-256 manifest; the matching stage is retained through the artifact
 commit checkpoint and then removed.
@@ -108,6 +108,7 @@ provenance, and the resulting commit when known.
 
 `.cadre/.gitignore` excludes:
 
+- `stage/` — unapproved, human-inspectable candidate artifacts;
 - `.worktrees/` — temporary Cadre-managed execution worktrees;
 - `wisps/` — disposable untracked exploration output.
 

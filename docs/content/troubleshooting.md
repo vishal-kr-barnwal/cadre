@@ -141,7 +141,7 @@ completed.
 
 Every selected track must already be completed with a clean review bound to its
 current execution and plan. One ineligible track rejects the whole batch. Fix
-or remove that selection and preview the complete batch again.
+or remove that selection and prepare the complete batch again.
 
 ## Source Checkout Validation Fails
 
