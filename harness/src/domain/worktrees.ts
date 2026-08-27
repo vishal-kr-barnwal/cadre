@@ -290,13 +290,29 @@ export function previewWorktreeCleanup(input: WorktreeIntegrationInput): {
   targetPath: string;
   targetBranch: string;
   head: string;
+  alreadyRemoved: boolean;
   digest: string;
 } {
   assertJournalAllowsCleanup(input);
   const root = assertRepository(input.projectRoot);
   const source = worktreeIdentity(root, input.trackId, input.executionId, input.nodeId);
   const target = targetIdentity(root, input);
-  if (!existsSync(source.path)) throw new Error(`worktree is missing: ${source.path}`);
+  if (!existsSync(source.path)) {
+    const branch = branchHead(root, source.branch);
+    const targetHead = git(target.path, ["rev-parse", "HEAD"]).stdout.trim();
+    if (branch && git(root, ["merge-base", "--is-ancestor", branch, target.branch], true).status !== 0) {
+      throw new Error(`${source.branch} is not integrated into ${target.branch}`);
+    }
+    const proposal = {
+      path: source.path,
+      branch: source.branch,
+      targetPath: target.path,
+      targetBranch: target.branch,
+      head: branch ?? targetHead,
+      alreadyRemoved: true
+    };
+    return { ...proposal, digest: hash(proposal) };
+  }
   if (lstatSync(source.path).isSymbolicLink()) throw new Error("refusing to clean up a symbolic-link worktree");
   cleanWorktree(source.path);
   const head = git(source.path, ["rev-parse", "HEAD"]).stdout.trim();
@@ -307,7 +323,8 @@ export function previewWorktreeCleanup(input: WorktreeIntegrationInput): {
     branch: source.branch,
     targetPath: target.path,
     targetBranch: target.branch,
-    head
+    head,
+    alreadyRemoved: false
   };
   return { ...proposal, digest: hash(proposal) };
 }
@@ -323,8 +340,8 @@ export function applyWorktreeCleanup(
   const proposal = preparedProposal ?? previewWorktreeCleanup(input);
   if (proposal.digest !== proposalDigest) throw new Error("cleanup proposal is stale; preview it again");
   const root = assertRepository(input.projectRoot);
-  git(root, ["worktree", "remove", proposal.path]);
-  git(proposal.targetPath, ["branch", "-d", proposal.branch]);
+  if (!proposal.alreadyRemoved) git(root, ["worktree", "remove", proposal.path]);
+  if (branchHead(root, proposal.branch)) git(proposal.targetPath, ["branch", "-d", proposal.branch]);
   const managedRoot = join(root, ".cadre", ".worktrees");
   let directory = dirname(proposal.path);
   while (directory.startsWith(`${managedRoot}/`)) {

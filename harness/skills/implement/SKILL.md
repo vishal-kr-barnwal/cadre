@@ -1,106 +1,57 @@
 ---
 name: implement
-description: Execute or resume an approved Cadre plan as a dependency DAG, using parallel workers by default when safe, sequential execution when requested, isolated Git worktrees, main-agent integration, incremental learning, verification, and commit provenance. Use for the implement command on a planned or in-progress track.
+description: Execute or resume an approved Cadre plan as a dependency DAG, using bounded parallel workers when useful, isolated Git worktrees, verified integration, learning, and commit provenance. Use for implement on a planned or in-progress track.
 ---
 
 # Cadre Implement
 
-Treat the approved `plan.md` as the source of truth. Implement only `planned` or `in_progress` tracks. The main agent is the sole scheduler and Cadre-state owner: workers must never spawn workers, edit `.cadre/**`, merge branches, resolve integration conflicts, remove worktrees, or record human approval.
+Treat approved `plan.md` as the source of truth. Implement only `planned` or `in_progress` tracks. Main is the sole scheduler and `.cadre/**` owner; workers never spawn workers, edit Cadre state, integrate branches, resolve conflicts, clean worktrees, or record human approval.
 
-At every required clarification or manual-verification boundary, show concise evidence. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the execution ID, node ID, and verified commit. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
+At a clarification or manual-verification boundary, inspect host policy before `workflow_elicit`. Under approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise use a concise form bound to execution ID, node ID, and verified commit. Treat only `approved` as approval. On `fallback_required`, or an immediate policy-driven `declined`, ask once in chat; policy rejection is not a human decline. Never request secrets or retry the form.
 
-Call `project_status`, `execution_graph_validate`, and `worktree_status` before selecting work. Use the structured validation embedded in `project_status`; do not repeat `state_validate` at command entry. If the required Cadre MCP is unavailable, stop at the current checkpoint.
+## Conditional references
 
-## Select and persist execution modes
+Read only the references required by current state:
 
-- Default to `parallel` when the human does not specify a mode.
-- Use `sequential` only when explicitly requested.
-- Parallel mode creates workers only when at least two safe executable nodes are ready. Otherwise execute in main without worktree overhead.
-- Bound worker count by ready nodes, host capacity, and the workflow maximum.
-- Persist requested/effective mode in the execution journal. Changing it during execution requires a clean safe boundary, a presented proposal, and approval.
+- parallel or delegated work: `references/parallel-workers.md`
+- `governed` approval mode: `references/governed-mode.md`
+- an integration conflict: `references/conflict-handling.md`
+- interrupted or inconsistent execution: `references/resume-recovery.md`
 
-Select and persist one approval mode independently of scheduling:
+## Entry and modes
 
-- `governed`: present every regular task diff before commit, every conflict resolution, every manual-verification barrier, and every integration or other material mutation required by the approved workflow.
-- `phase` (default): run all regular work inside a phase autonomously, but pause once for each phase's final `User Manual Verification` task.
-- `autonomous`: run regular work and phase-level verification autonomously. Pause only for the `Track-level User Manual Verification` task.
+1. Call `project_status` once with `view: "implementation"`, `trackId`, and the known `executionId` if resuming. This is the complete preflight: validation, graph, scheduler, dependency, and worktree state. Do not repeat `state_validate`, `execution_graph_validate`, `execution_status`, or a separate worktree call at entry. Stop if `upgradeRequired` is true or the MCP is unavailable.
+2. Read `.cadre/workflow.md`, track spec/plan/learning/state, relevant dependency learning, pattern/styleguide context, and repository instructions. Read before editing.
+3. Scheduling defaults to `parallel`; use `sequential` only when requested. Approval mode defaults to `phase`; use `governed` or `autonomous` only when explicitly requested. Resume journaled modes. A mode authorizes only work bounded by the approved spec and plan.
+4. For a new execution, the implement invocation authorizes `execution_start`; call it once with the modes. Do not add a start approval outside `governed`. Resume an existing operation instead of creating another.
 
-Use `phase` unless the human explicitly requests `governed` or `autonomous`. On resume, inherit the journaled mode. Record it in both the execution journal and active track operation. A mode authorizes only work already bounded by the approved spec and plan; any material ambiguity, scope divergence, failed required check, unsafe state, or need for new authority is a blocker or clarification, not an approval prompt. Changing approval mode during execution requires an approved clean boundary and a journaled update.
+`governed` pauses for regular task diffs and integrations. `phase` runs regular phase work autonomously and pauses at each phase's final `User Manual Verification`. `autonomous` also performs phase verification autonomously and pauses only at `Track-level User Manual Verification`.
 
-For a new execution, the human's `implement` invocation authorizes an exact execution start using the requested modes or their documented defaults. Call `execution_start` once; it derives the execution ID, timestamp, and current Git base, validates the proposal internally, and writes it atomically. Do not add an execution-start approval prompt outside `governed`; report a concise start summary and proceed. Generated bookkeeping is a deterministic consequence of the same authorization. For an existing `implement` operation, reconcile it instead of creating another execution.
+Host security permission is distinct from Cadre approval. Request only a narrow required command permission, centralize shared network/dependency preparation in main, use existing scripts, and run independent read-only checks in parallel. A permission prompt never approves an artifact, commit, merge, or lifecycle transition.
 
-## Resume before scheduling
+## Execute ready work
 
-1. Read `.cadre/workflow.md`, project and track state, spec, plan, execution journal, marked Pattern Seed, dependency-phase learning, patterns/styleguides, and declared track dependencies.
-2. Reconcile journal nodes with worker identities, `git worktree list`, branch tips, dirty files, commits, and merges. Never repeat a committed or integrated node.
-3. Block when a declared track dependency is not completed or archived after completion.
-4. Stop and present any journal/Git mismatch. Never reset, discard, reconstruct, force-delete, or silently restart.
+Use the scheduler returned by the preflight or latest mutation receipt. Plan order only breaks ties.
 
-## Preflight host permissions
+- Execute one ready task directly in main when delegation adds no value. Use standalone `execution_checkpoint` for its `start`, `record_commit`, blockers/resume, manual verification, and `complete` transitions.
+- Delegate only independent or cohesive work. Read `references/parallel-workers.md` before doing so.
+- Never checkpoint evidence before it exists. Each regular task has one Conventional Commit and a distinct recorded SHA. `record_commit` includes focused verification and authorization evidence.
+- A `.cadre/**`-only bookkeeping commit does not invalidate product verification while product files, tests, inputs, and verification policy remain unchanged.
 
-Before creating workers, inspect the approved plan, repository scripts, lockfiles, and likely verification commands. Distinguish host security permission from Cadre lifecycle approval: a shell/network/listener prompt authorizes the host operation only; it does not approve an artifact, commit, merge, manual-verification result, or state transition.
+For a delegated node, the normal lifecycle is four MCP calls:
 
-- Use already-approved commands and prefixes without asking again. Never request permission speculatively or retry equivalent command spellings to obtain a different prompt.
-- Centralize shared dependency installation, registry access, image pulls, code generation, and other network preparation in main before workers start. Workers should use locked/offline modes when the repository supports them.
-- Prefer existing repository scripts and narrowly scoped commands. Do not combine unrelated or differently privileged shell segments into one command, because the host evaluates each segment independently.
-- Run independent read-only repository inspections and checks in parallel when the host supports parallel tool calls. Keep only commands with a real data, mutation, or Git dependency sequential.
-- Avoid scaffolding modes that create nested repositories or require deleting generated `.git` directories. Inspect generator options and target directories first.
-- When a required permission is not already available, request one narrow reusable command prefix with the exact reason. If a worker encounters an unexpected prompt, it stops and reports the exact blocked command to main instead of issuing repeated variants.
+1. `worktree_create` creates or reconciles the derived worktree and records `start` with its path and branch.
+2. After main reviews the returned worker diff/checks and the worker creates its clean task commit, `execution_checkpoint` records `record_commit` with SHA, verification, and mode/human authorization.
+3. `integration` with `mode: "prepare"` validates and merges immediately in `phase`/`autonomous`, recording `record_integration` in its receipt. In `governed` it returns `approval_required`; after human approval call only `{ mode: "apply", proposalToken }`. Never make the governed calls consecutively without human input.
+4. `worktree_cleanup` verifies integration, removes the worktree/branch, and records `complete` when all invariants hold.
 
-## Schedule the DAG
+Do not add standalone `start`, `record_integration`, or `complete` calls around this composite path. Retried calls reconcile an existing worktree, merge commit, removed worktree, or missing journal transition. Keep standalone checkpoints for direct-main work, manual verification, blockers, conflict recovery, and interruption repair.
 
-The Cadre tools named in this skill are declared contracts: call them directly. Do not list the global tool catalog, rediscover schemas, or probe commands to learn legal transitions. Call compact `execution_status` when resuming or when no mutation response is available; pass `nodeId` only when focused detail is required. Use `execution_checkpoint` once with a semantic event (`start`, `record_commit`, `record_integration`, `record_verification`, `complete`, `block`, or `resume`); it validates and applies all required legal transitions atomically, then returns a compact receipt and `derivedStatus`. Do not request the complete journal after each event.
+## Verification, learning, and finish
 
-Never checkpoint evidence before it exists. `record_commit` consumes the verified commit and its authorization; `record_integration` consumes the merge commit and post-merge verification; `record_verification` records a manual barrier. Plan display order breaks scheduling ties only.
+- A phase barrier depends on all sibling tasks. Prepare evidence against the phase head. In `governed` and `phase`, present it once and record human approval; in `autonomous`, record persisted-mode authorization.
+- After the barrier, integrate the phase, record dependency-aware learning and task/merge provenance in canonical plan/learning, and make one `cadre(implement): record <track-id> <phase-id>` bookkeeping commit. Start dependents only after cleanup/completion.
+- The final `Track-level User Manual Verification` runs in main against fully integrated canonical HEAD and always requires explicit human approval.
+- When every node is complete, learning/provenance is recorded, worktrees are gone, and final verification is approved, run full relevant checks and call `execution_finish` once. It atomically writes completed execution, plan markers, `ready_for_review` track state, and `tracks.md`; do not repair them separately or ask for another approval.
 
-- A root phase reads the Pattern Seed. Any other phase reads learning from all declared dependency phases.
-- Treat the track as a hierarchical DAG: phase dependencies determine active phases, task dependencies determine ready work inside each running phase, and main schedules one global ready queue subject to `maxWorkers`. Different phases may use different execution modes concurrently.
-- Every non-trivial active phase uses a main-owned integration worktree. A phase `workerId` is a temporary execution lease, not ownership of that worktree. Use direct main execution for one ready task, a phase worker for a tightly coupled sequential chain when delegation is already justified, and task-worker fan-out when at least two independent tasks in that phase are ready.
-- A phase has only one mutating execution mode at a time, but may switch modes at a clean checkpoint. Before phase-worker-to-task-worker fan-out, finish and record the current task, verify the phase worktree is clean, record its HEAD in the phase verification, release the phase worker through a `running`-to-`running` node update with `workerId: null`, and keep that worker inactive. Main may assign a new phase worker only after every active task worker in that phase is completed and its integration/cleanup is recorded.
-- Create every task-worker wave from the same recorded clean phase HEAD. Merge ready tasks into the phase worktree one at a time; derive the next wave only after those merges, so downstream tasks start from the updated phase HEAD.
-- The main agent creates every worker. On Codex, use an available implementation worker subagent with the bounded prompt below. On Claude Code, prefer the plugin-provided `cadre-phase-worker` and `cadre-task-worker`. Do not use Claude agent teams.
-- If only one safe execution node is ready, execute it in main.
-- Phase and task worktrees are siblings. Call `worktree_create` once. The MCP derives both the task phase and correct parent HEAD, validates the proposal internally, and creates or reconciles the worktree atomically, so omit `phaseId` and `baseCommit`. Record the returned absolute path/branch with a `start` checkpoint before spawning. In `phase` and `autonomous`, these deterministic mutations run without another approval.
-
-### Worker prompt contract
-
-Provide the exact absolute worktree, track/execution/node IDs, approved outcome, dependencies and learning to read, relevant files, required checks, and expected Conventional Commit scope. State explicitly:
-
-- operate only in the assigned worktree and read files before editing;
-- edit product files only and never edit `.cadre/**`;
-- do not spawn agents, merge, rebase, reset, clean up, or force Git operations;
-- a phase worker must stop at a requested clean handoff, report the committed phase HEAD and clean status, and remain inactive while task workers for that phase run;
-- run focused verification and return changed files, tests/checks, risks, learning candidates, and the proposed commit message for the current task;
-- in `governed`, stop after each regular task with that task's changes uncommitted at `awaiting_approval` until main presents them and the human approves;
-- in `phase` or `autonomous`, return each regular task's uncommitted diff and evidence to main for scope review; after main confirms it stays within the approved task and required checks pass, commit only that task without a human prompt;
-- after commit, return the SHA and do not begin the next phase task until main confirms the checkpoint is recorded.
-
-## Approve, commit, and integrate
-
-1. Transition a worker node from `running` to `awaiting_approval` with its verification summary in `governed`; in `phase` or `autonomous`, record the same evidence at the autonomous commit checkpoint without presenting a human approval prompt.
-2. Main always reads the worker diff and evidence. In `governed`, present them to the human. In `phase` or `autonomous`, confirm that the diff stays inside the approved task and that required checks pass; stop for clarification only when intent or authority is materially ambiguous.
-3. Direct the worker to create its Conventional Commit, verify the worktree is clean, and record its SHA as `committed`. In `phase` or `autonomous`, record approval evidence as authorization by the persisted approval mode rather than claiming a new human approval.
-4. For a task worker, call `integration` for the exact task merge. The MCP derives its parent as the registered phase worktree when one exists, otherwise the canonical worktree. Use the canonical fallback only for an explicitly direct, single-task phase; create a phase integration worktree before delegated work in multi-task or phase-verified delivery. In `phase` or `autonomous`, the command validates and applies a clean in-scope merge atomically in one call. In `governed`, it returns `approval_required`; show the exact merge, obtain approval, then call the same tool with only its proposal token. Never make those two governed calls consecutively without human input. A task executed directly by main or internally by a phase worker is already on its parent branch: verify its commit is reachable and do not invent an integration step. Use the same command for phase-to-canonical integration. Never squash.
-5. If integration reports conflicts, mark `conflicted`. Resolve task conflicts in the phase worktree and phase conflicts in main, read every conflicted file and both sides, and rerun combined verification. In `governed`, present the resolution for approval. In `phase` or `autonomous`, apply and record an unambiguous in-scope resolution autonomously; stop for clarification when the resolution requires a material product or scope choice.
-6. For a worker worktree, mark the node `integrated`, then call `worktree_cleanup` once. It must refuse dirty, conflicted, or unintegrated work and must not force branch deletion. Cleanups in `phase` and `autonomous` never create a separate approval prompt.
-7. Mark a task complete after its worker integration, or after its approved direct/phase-worker commit is verified on the parent branch. The execution journal is the live provenance source; finalization writes the plan markers atomically.
-
-Every regular task in a phase has its own Conventional Commit and distinct recorded SHA, including tasks executed sequentially by one phase worker. Manual-verification nodes may record the approved phase-head or merge evidence instead of inventing an empty commit. A phase must remain `running` until every sibling task and its manual-verification barrier are `completed`; only then may it advance to approval, commit, integration, and cleanup.
-
-Git commits are durability and provenance boundaries, not journal-transition boundaries. Keep each product task's required Conventional Commit, but combine Cadre-only plan, learning, journal, and index bookkeeping once per phase checkpoint and once at the final ready-for-review checkpoint. Do not create a Git commit for each intermediate execution status or for worktree create/integrate/cleanup metadata alone.
-
-## Verification barriers and learning
-
-- Phase `User Manual Verification` is a derived barrier over all sibling tasks. After task workers are quiescent, prepare technical evidence in the phase worktree through an active phase worker when present, otherwise through main. In `governed` and `phase`, present this final phase task once and record the human approval. In `autonomous`, verify and record it under the persisted mode without a human prompt.
-- Record verification evidence with its command, working directory, result, and verified product HEAD/tree. Reuse a passing result while product files, test inputs, and required verification policy are unchanged. A commit that changes only `.cadre/**` bookkeeping does not invalidate product verification and must not trigger the same full suite again.
-- After the barrier is approved or authorized, automatically checkpoint the journal, integrate the phase branch, record every task commit, the phase completion merge SHA, and dependency-aware phase learning in canonical `plan.md`/`learning.md`, and commit `cadre(implement): record <track-id> <phase-id>`. Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed` and start dependents. Cleanup also accepts an already-`completed` node as interruption recovery, without reopening that terminal state. Do not split those deterministic consequences into additional approvals in `phase` or `autonomous`.
-- Track-level `User Manual Verification` is a derived barrier over every phase. Execute it only in main, against the fully integrated canonical worktree, and obtain explicit human approval in all modes.
-
-## Complete execution
-
-When all journal nodes and plan tasks are complete, all phase learning/provenance is recorded, all worktrees are removed, and track verification is approved:
-
-1. Run the relevant full checks and inspect the final diff/history.
-2. Record that approval with `record_verification`, then call `execution_finish` once. It derives HEAD/time and atomically validates and writes plan commit markers, the completed journal, `ready_for_review` state, and `tracks.md`. Do not repair markers or the index separately, and do not ask for another approval.
-
-Never mark a track `completed`; only an approved clean `review` may do that.
+Never mark a track `completed`; only an approved clean review may do that.

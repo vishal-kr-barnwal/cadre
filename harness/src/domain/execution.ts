@@ -751,11 +751,13 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
         ...(Object.hasOwn(input, "worktreePath") ? { worktreePath: input.worktreePath ?? null } : {}),
         ...(Object.hasOwn(input, "branch") ? { branch: input.branch ?? null } : {})
       });
-    } else if (node.status === "running" && Object.hasOwn(input, "workerId")) {
+    } else if (node.status === "running" && ["workerId", "worktreePath", "branch"].some((key) => Object.hasOwn(input, key))) {
       updates.push({
         nodeId: node.id,
         status: "running",
-        workerId: input.workerId ?? null,
+        ...(Object.hasOwn(input, "workerId") ? { workerId: input.workerId ?? null } : {}),
+        ...(Object.hasOwn(input, "worktreePath") ? { worktreePath: input.worktreePath ?? null } : {}),
+        ...(Object.hasOwn(input, "branch") ? { branch: input.branch ?? null } : {}),
         ...(evidence ? { verification: evidence } : {})
       });
     } else if (node.status !== "running") {
@@ -787,7 +789,6 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
       if (node.status !== "integrated") {
         updates.push({ nodeId: node.id, status: "integrated", mergeCommit: commit, verification: evidence });
       }
-      updates.push({ nodeId: node.id, status: "completed" });
       break;
     case "record_verification":
       if (node.kind !== "manual-verification" || !commit || !evidence || !authorization) {
