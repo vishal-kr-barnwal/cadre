@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { defaultMarketplaceRoot, marketplaceFromHome, optionValue, parseClient, type ClientSelection } from "./cli-options.js";
 import { CLIENTS, commandExists, runCommand, type ClientName } from "./native-clients.js";
+import { removeZedCadreServer } from "./permissions.js";
+import { removeZedSkillLinks, zedSettingsPath } from "./zed.js";
 
 const marketplaceName = "cadre";
 const pluginId = "cadre@cadre";
@@ -61,13 +63,23 @@ function ownedMarketplace(root: string): boolean {
   });
 }
 
-function uninstallClient(client: ClientName): void {
+function uninstallClient(client: ClientName, marketplaceRoot: string): void {
   if (client === "codex") {
     runCommand("codex", ["plugin", "remove", pluginId, "--json"]);
     runCommand("codex", ["plugin", "marketplace", "remove", marketplaceName]);
-  } else {
+  } else if (client === "claude") {
     runCommand("claude", ["plugin", "uninstall", "--scope", "user", "--yes", pluginId]);
     runCommand("claude", ["plugin", "marketplace", "remove", "--scope", "user", marketplaceName]);
+  } else {
+    const skills = removeZedSkillLinks(marketplaceRoot);
+    const mcpPath = join(marketplaceRoot, "plugins", "cadre", "dist", "cadre-mcp.mjs");
+    const settings = removeZedCadreServer(zedSettingsPath(), mcpPath);
+    if (skills.retained.length) {
+      process.stderr.write(`Retained non-Cadre Zed skill paths: ${skills.retained.join(", ")}\n`);
+    }
+    if (settings.retainedConflict) {
+      process.stderr.write("Retained Zed context_servers.cadre because it no longer matches the Cadre installation.\n");
+    }
   }
 }
 
@@ -93,19 +105,22 @@ export function runUninstall(args: string[]): number {
   const options = parseUninstallOptions(args);
   const clients = selectedClients(options.selection);
   if (options.dryRun) {
-    for (const client of clients) process.stdout.write(`Would uninstall ${pluginId} from ${client} at user scope\n`);
+    for (const client of clients) {
+      const identity = client === "zed" ? "Cadre skills and MCP server" : pluginId;
+      process.stdout.write(`Would uninstall ${identity} from ${client} at user scope\n`);
+    }
     if (options.selection === "all") process.stdout.write(`Would remove owned marketplace: ${options.marketplaceRoot}\n`);
     return 0;
   }
   let failed = false;
   for (const client of clients) {
-    if (!commandExists(client)) {
+    if (client !== "zed" && !commandExists(client)) {
       process.stderr.write(`${client} is not available; continuing local cleanup.\n`);
       continue;
     }
     try {
-      uninstallClient(client);
-      process.stdout.write(`Uninstalled ${pluginId} from ${client}.\n`);
+      uninstallClient(client, options.marketplaceRoot);
+      process.stdout.write(`Uninstalled Cadre from ${client}.\n`);
     } catch (error) {
       failed = true;
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}; continuing local cleanup.\n`);

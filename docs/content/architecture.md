@@ -7,8 +7,9 @@ order: 140
 
 # Architecture
 
-Cadre 3.0 is one publishable TypeScript package that installs native user
-plugins for Codex and Claude Code. The target repository stores delivery state,
+Cadre is one publishable TypeScript package that installs native user plugins
+for Codex and Claude Code plus a beta integration using global skills and a
+custom MCP server for Zed Agent. The target repository stores delivery state,
 not runtime code.
 
 ## Repository Layout
@@ -83,7 +84,9 @@ templates, and marketplace catalogs are package sources.
 At installation time, `packagePluginMarketplace` copies those sources plus the
 built MCP bundle into `~/.cadre/marketplaces/cadre/plugins/cadre`. It creates
 Codex and Claude marketplace roots and adds product-specific SemVer build
-metadata as a cache-buster. The package version remains unchanged.
+metadata as a cache-buster. It also derives collision-safe Zed adapters under
+`zed-skills/cadre-*` from the canonical skills. The package version remains
+unchanged.
 
 The prior owned marketplace payload is renamed to a timestamped backup before
 the replacement is activated.
@@ -94,6 +97,12 @@ Codex discovers skills from the plugin manifest and uses `.mcp.codex.json` to
 run `node ./dist/cadre-mcp.mjs` with plugin-root cwd. Claude discovers the same
 skills through its plugin namespace, loads worker agent definitions, and uses
 `${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs` from `.mcp.json`.
+
+Zed discovers global `cadre-*` skill links under `~/.agents/skills/` and starts
+the same packaged runtime from `context_servers.cadre` in its JSONC settings.
+Its adapters request text-mode template bundles because Zed does not expose
+embedded MCP resource bodies to the agent, and unsupported form elicitation
+falls back to one concise chat question.
 
 Both clients operate the same workflow and state contracts. Client-specific
 metadata does not create different lifecycle semantics.

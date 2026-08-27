@@ -106,8 +106,9 @@ function checkWorkflowCoverage(docsBySlug) {
 }
 
 function checkMcpCoverage(docsBySlug) {
-  const source = fs.readFileSync(path.join(harnessRoot, "src/mcp/server.ts"), "utf8")
-  const tools = [...source.matchAll(/registerTool\("([a-z_]+)"/g)].map((match) => match[1])
+  const source = fs.readFileSync(path.join(harnessRoot, "src/mcp/tool-names.ts"), "utf8")
+  const catalog = source.match(/CADRE_MCP_TOOLS = \{([\s\S]*?)\n\}/)?.[1] ?? ""
+  const tools = [...catalog.matchAll(/:\s*"([a-z_]+)"/g)].map((match) => match[1])
   const reference = docsBySlug.get("mcp-reference")?.content ?? ""
 
   if (tools.length !== 22) {
@@ -140,9 +141,13 @@ function checkCurrentModel(docsBySlug) {
   requireText(docsBySlug, "getting-started", "cadre-ai install")
   requireText(docsBySlug, "getting-started", "enabledMcpjsonServers")
   requireText(docsBySlug, "getting-started", "mcp__cadre__*")
+  requireText(docsBySlug, "getting-started", "mcp:cadre:<tool>")
+  requireText(docsBySlug, "getting-started", "--target zed")
+  requireText(docsBySlug, "getting-started", "Zed Agent support is beta")
   for (const workflow of ["create", "track", "implement", "review", "archive"]) {
     requireText(docsBySlug, "quickstart", `$cadre:${workflow}`)
     requireText(docsBySlug, "quickstart", `/cadre:${workflow}`)
+    requireText(docsBySlug, "quickstart", `/cadre-${workflow}`)
   }
   requireText(docsBySlug, "team-and-polyrepo", "Coming Soon")
 

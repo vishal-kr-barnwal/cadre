@@ -120,6 +120,7 @@ execution instead of rewriting the existing journal.
 ```text
 $cadre:refresh increase the implementation worker maximum to 6
 /cadre:refresh increase the implementation worker maximum to 6
+/cadre-refresh increase the implementation worker maximum to 6
 ```
 
 ## Select Sequential Mode When Useful

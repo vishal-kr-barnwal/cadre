@@ -66,22 +66,32 @@ function parseClientCommands(code: string) {
   const lines = code.split("\n")
   const codexMarker = lines.findIndex((line) => line.trim() === "# Codex")
   const claudeMarker = lines.findIndex((line) => line.trim() === "# Claude Code")
+  const zedMarker = lines.findIndex((line) => line.trim() === "# Zed Agent")
 
   if (codexMarker >= 0 && claudeMarker > codexMarker) {
     const codex = trimBlankLines(lines.slice(codexMarker + 1, claudeMarker)).join("\n")
-    const claude = trimBlankLines(lines.slice(claudeMarker + 1)).join("\n")
-    return codex && claude ? { codex, claude } : null
+    const claudeEnd = zedMarker > claudeMarker ? zedMarker : lines.length
+    const claude = trimBlankLines(lines.slice(claudeMarker + 1, claudeEnd)).join("\n")
+    const zed = zedMarker > claudeMarker
+      ? trimBlankLines(lines.slice(zedMarker + 1)).join("\n")
+      : ""
+    return codex && claude ? { codex, claude, ...(zed ? { zed } : {}) } : null
   }
 
   const commands = lines.map((line) => line.trim()).filter(Boolean)
   const codex = commands.filter((line) => line.startsWith("$cadre:"))
   const claude = commands.filter((line) => line.startsWith("/cadre:"))
+  const zed = commands.filter((line) => line.startsWith("/cadre-"))
 
-  if (codex.length === 0 || claude.length === 0 || codex.length + claude.length !== commands.length) {
+  if (
+    codex.length === 0
+    || claude.length === 0
+    || codex.length + claude.length + zed.length !== commands.length
+  ) {
     return null
   }
 
-  return { codex: codex.join("\n"), claude: claude.join("\n") }
+  return { codex: codex.join("\n"), claude: claude.join("\n"), ...(zed.length ? { zed: zed.join("\n") } : {}) }
 }
 
 function trimBlankLines(lines: string[]) {

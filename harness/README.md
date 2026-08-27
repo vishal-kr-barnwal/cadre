@@ -1,8 +1,16 @@
 # Cadre
 
-Cadre is a human-governed, Git-aware delivery harness for Codex and Claude Code. It turns project context into resumable feature and bug tracks, carries learning forward between phases, and records implementation provenance in Git.
+Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
+and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
+is beta. Cadre turns project context into resumable feature and bug tracks,
+carries learning forward between phases, and records implementation provenance
+in Git.
 
-Cadre is installed as a user plugin. Its bundled TypeScript MCP server provides deterministic state operations and immutable, versioned templates. A project keeps only approved, mutable delivery state under `.cadre/`; runtime code and template catalogs are not copied into the project.
+Cadre is installed as a user integration. Codex and Claude use native plugins;
+Zed uses global skills and a custom MCP server. The bundled TypeScript MCP
+server provides deterministic state operations and immutable, versioned
+templates. A project keeps only approved, mutable delivery state under
+`.cadre/`; runtime code and template catalogs are not copied into the project.
 
 **Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
 [Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
@@ -30,7 +38,7 @@ Default idiomatic styleguides are included for Go, Java, Kotlin, Maven, Gradle, 
 
 - Node.js 18 or newer
 - Git
-- The `codex` CLI, the `claude` CLI, or both
+- The `codex`, `claude`, or `zed` CLI for each selected client
 
 ## Install
 
@@ -55,14 +63,18 @@ cadre-ai install --target codex
 
 # Claude Code only
 cadre-ai install --target claude
+
+# Zed Agent only (beta)
+cadre-ai install --target zed
 ```
 
 The installer:
 
-1. Packages the skills, MCP configuration, self-contained runtime, and
-   templates into a local marketplace.
-2. Registers the marketplace and installs `cadre@cadre` at user scope.
-3. Verifies that the selected agent reports the plugin as installed and enabled.
+1. Packages the skills, MCP configuration, self-contained runtime, generated
+   Zed adapters, and templates into a shared local payload.
+2. Registers and installs `cadre@cadre` for Codex/Claude, or links global
+   `cadre-*` skills and configures the custom MCP server for Zed.
+3. Verifies each selected client through its available native state.
 4. Pre-approves only Cadre MCP tools so normal Cadre commands do not produce an
    extra permission prompt.
 
@@ -75,6 +87,8 @@ By default, installation applies these narrowly scoped rules:
 - Codex: `default_tools_approval_mode = "approve"` under `plugins."cadre@cadre".mcp_servers.cadre` in the user Codex configuration.
 - Claude Code: `cadre` in `enabledMcpjsonServers` and `mcp__cadre__*` in the
   user permission allowlist.
+- Zed Agent (beta): one exact `mcp:cadre:<tool>` allow entry for each Cadre MCP tool
+  under `agent.tool_permissions.tools`.
 
 Existing configuration, comments, and unrelated permission rules are preserved. A Claude deny rule is never removed or overridden. These rules suppress the host application's per-tool prompt; they do not bypass Cadre's requirement to present artifacts and lifecycle mutations to the human for approval.
 
@@ -90,7 +104,7 @@ cadre-ai install --target codex --prompt-mcp-tools
 
 | Option | Effect |
 | --- | --- |
-| `--target auto\|all\|codex\|claude` | Select the target client; defaults to `auto`. |
+| `--target auto\|all\|codex\|claude\|zed` | Select the target client; defaults to `auto`. |
 | `--scope user` | Explicitly select the only supported installation scope. |
 | `--replace-marketplace` | Replace another configured marketplace named `cadre` after the installer detects the path mismatch. |
 | `--prompt-mcp-tools` | Do not add the Cadre MCP pre-approval rule. |
@@ -126,6 +140,8 @@ After installation or update:
 
 - Start a new Codex conversation so the new skills and MCP tools are loaded.
 - In Claude Code, run `/reload-plugins` or start a new session.
+- In Zed, open a new Agent thread; global skills reload live and the Cadre MCP
+  server should appear active under AI → MCP Servers.
 
 You can inspect installation state with:
 
@@ -136,7 +152,8 @@ claude plugin list --json
 
 ## Quick start
 
-Cadre commands are agent skills, not shell commands. Invoke them in the Codex or Claude Code conversation.
+Cadre commands are agent skills, not shell commands. Invoke them in a Codex,
+Claude Code, or native Zed Agent conversation.
 
 ### 1. Initialize a project
 
@@ -145,6 +162,7 @@ From the project repository, invoke:
 ```text
 Codex:      $cadre:create
 Claude Code: /cadre:create
+Zed Agent:   /cadre-create
 ```
 
 Cadre will:
@@ -162,6 +180,7 @@ Cadre will:
 ```text
 Codex:      $cadre:track Add passwordless login as a feature
 Claude Code: /cadre:track Fix duplicate invoice creation as a bug
+Zed Agent:   /cadre-track Add passwordless login as a feature
 ```
 
 Cadre proposes and separately approves:
@@ -177,6 +196,7 @@ Every delivery phase ends with `User Manual Verification`. The final phase is al
 ```text
 Codex:      $cadre:implement passwordless-login
 Claude Code: /cadre:implement passwordless-login
+Zed Agent:   /cadre-implement passwordless-login
 ```
 
 Parallel mode is the default. Request sequential execution explicitly when needed:
@@ -184,6 +204,7 @@ Parallel mode is the default. Request sequential execution explicitly when neede
 ```text
 Codex:      $cadre:implement passwordless-login sequentially
 Claude Code: /cadre:implement passwordless-login sequentially
+Zed Agent:   /cadre-implement passwordless-login sequentially
 ```
 
 Implementation starts only after declared track dependencies are completed. Phase and task dependencies form a hierarchical DAG: phase dependencies activate phases, task dependencies expose phase-local work, and main allocates one global worker bound across every ready task. The generated workflow defaults to three delegated workers, the execution runtime accepts `maxWorkers` from 1 through 32, and effective concurrency is clamped by safe ready nodes and available host worker slots. Different phases can use direct execution, a sequential phase worker, or task-worker fan-out concurrently. Within one phase, execution can switch between sequential and fan-out modes only at a clean, journaled checkpoint. The main agent remains the only scheduler, operational owner of phase integration worktrees, state owner, merger, conflict resolver, worktree cleaner, and recorder of human approval.
@@ -195,6 +216,7 @@ Every delivery phase ends with a derived manual-verification barrier over its ta
 ```text
 Codex:      $cadre:review passwordless-login
 Claude Code: /cadre:review passwordless-login
+Zed Agent:   /cadre-review passwordless-login
 ```
 
 Findings are presented before they become Cadre state. Approved bugs create a timestamped bug artifact and add remediation phases to the plan. A human-approved clean review marks the track `completed`.
@@ -204,6 +226,7 @@ Findings are presented before they become Cadre state. Approved bugs create a ti
 ```text
 Codex:      $cadre:archive passwordless-login account-lockout
 Claude Code: /cadre:archive all completed
+Zed Agent:   /cadre-archive all completed
 ```
 
 Archive accepts one or more completed tracks in one resumable batch. It distills their durable learning into the project pattern catalog, updates relevant seeds for active tracks, preserves the full track history, and moves each selected track to its derived archive location.

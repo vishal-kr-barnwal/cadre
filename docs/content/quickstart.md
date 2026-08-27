@@ -10,9 +10,12 @@ order: 30
 This walkthrough assumes Cadre is installed and the client has been reloaded.
 Cadre commands are agent skills, not `cadre-ai` shell subcommands.
 
+Codex and Claude Code support is stable. The Zed Agent commands shown here are
+available as a beta integration in Cadre 3.5.0.
+
 ## 1. Create Project Context
 
-Open the target repository in Codex or Claude Code:
+Open the target repository in Codex, Claude Code, or Zed Agent:
 
 ```text
 # Codex
@@ -20,6 +23,9 @@ $cadre:create
 
 # Claude Code
 /cadre:create
+
+# Zed Agent
+/cadre-create
 ```
 
 Cadre inspects the repository, establishes its exact root and Git disposition,
@@ -41,6 +47,9 @@ $cadre:track Add passwordless login as a feature
 
 # Claude Code
 /cadre:track Add passwordless login as a feature
+
+# Zed Agent
+/cadre-track Add passwordless login as a feature
 ```
 
 Cadre proposes `spec.md`, `plan.md`, and `learning.md` together when the request
@@ -64,6 +73,7 @@ approved, validated, and committed.
 ```text
 $cadre:status
 /cadre:status
+/cadre-status
 ```
 
 Status is read-only. It reports project and track checkpoints, pending
@@ -75,6 +85,7 @@ errors, and managed worktrees.
 ```text
 $cadre:implement passwordless-login
 /cadre:implement passwordless-login
+/cadre-implement passwordless-login
 ```
 
 Parallel mode is the default. Request sequential execution explicitly:
@@ -82,6 +93,7 @@ Parallel mode is the default. Request sequential execution explicitly:
 ```text
 $cadre:implement passwordless-login sequentially
 /cadre:implement passwordless-login sequentially
+/cadre-implement passwordless-login sequentially
 ```
 
 Phase approval is also the default: Cadre runs regular work autonomously and
@@ -106,6 +118,7 @@ transition moves the track to `ready_for_review`.
 ```text
 $cadre:review passwordless-login
 /cadre:review passwordless-login
+/cadre-review passwordless-login
 ```
 
 Review inspects the recorded implementation range and relevant context. If it
@@ -123,6 +136,7 @@ mark the track `completed`.
 ```text
 $cadre:archive passwordless-login
 /cadre:archive passwordless-login
+/cadre-archive passwordless-login
 ```
 
 Archive can process one or more completed tracks in a single approved,

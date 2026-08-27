@@ -37,7 +37,9 @@ cadre://templates/v2/<logical-id>
 Published `templates/v1/` remains byte-stable for legacy reads. The internal
 catalog records provider paths, but public descriptors expose logical ID, URI,
 eventual artifact path, media type, and SHA-256 hash. Template content appears
-once as an embedded resource, never duplicated in structured content.
+once, normally as an embedded resource and as a text block when
+`contentMode: "text"` is requested by the Zed Agent beta. It is never
+duplicated in structured content.
 
 Skills normally request known bundles with `template_get_many`; catalog
 discovery is unnecessary when the logical IDs are already declared.
@@ -62,7 +64,8 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 ## Result Shape
 
 Successful operational tools return concise text and typed structured content.
-Template tools return embedded resource bodies plus content-free descriptors.
+Template tools return one body per template—embedded resource or text—plus
+content-free descriptors.
 Adaptive commands return `commandStatus: "applied"` when an existing
 authorization permits an atomic mutation. Only a real decision boundary
 returns `commandStatus: "approval_required"` plus a compact opaque

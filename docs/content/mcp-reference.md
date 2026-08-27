@@ -7,7 +7,10 @@ order: 210
 
 # MCP Reference
 
-Cadre 3.4 exposes immutable template resources and 22 narrow tools. Successful operational tools return concise text plus typed structured data; unchanged template bodies occur once as embedded resources, while structured content contains content-free descriptors.
+Cadre exposes immutable template resources and 22 narrow tools. Successful
+operational tools return concise text plus typed structured data; unchanged
+template bodies occur once in the requested content mode, while structured
+content contains content-free descriptors.
 
 Approval-aware commands require `mode`. `prepare` accepts only operation fields and returns `approval_required` plus a compact token. After human approval, `apply` accepts only `proposalToken`. Deterministic operations apply in one call.
 
@@ -21,7 +24,10 @@ Presents one bounded text, boolean, or single-select clarification form, or a fi
 
 ## template_get_many
 
-Returns known immutable templates as embedded resource blocks plus ordered descriptors and hashes. Use MCP resources to discover or read one template.
+Returns known immutable templates plus ordered descriptors and hashes.
+`contentMode` defaults to `embedded_resource`; pass `text` for clients such as
+Zed that do not expose embedded resource bodies to the agent. Use MCP resources
+to discover or read one template only when the client supports them.
 
 ## styleguide_resolve
 

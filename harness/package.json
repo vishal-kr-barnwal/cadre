@@ -19,7 +19,8 @@
     "agent-workflows",
     "mcp",
     "codex",
-    "claude"
+    "claude",
+    "zed"
   ],
   "type": "module",
   "packageManager": "pnpm@11.4.0",

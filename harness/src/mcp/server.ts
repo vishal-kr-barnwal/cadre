@@ -85,6 +85,7 @@ import { CadreError, serializeCadreError } from "../domain/errors.js";
 import { resolveGitCommit } from "../domain/git.js";
 import { ProposalTokenStore, proposalTokenSchema } from "./proposals.js";
 import { listCandidatePaths, prepareCandidateStage, readCandidateFiles } from "../domain/staging.js";
+import { CADRE_MCP_TOOLS } from "./tool-names.js";
 
 function result<T extends object>(value: T, summary = "Cadre operation completed.") {
   return {
@@ -93,16 +94,28 @@ function result<T extends object>(value: T, summary = "Cadre operation completed
   };
 }
 
-function templateResult(templates: ReturnType<typeof describeTemplate>[]) {
+function templateResult(
+  templates: ReturnType<typeof describeTemplate>[],
+  contentMode: "embedded_resource" | "text"
+) {
   return {
-    content: templates.map((template) => ({
-      type: "resource" as const,
-      resource: {
-        uri: template.uri,
-        mimeType: template.mimeType,
-        text: template.content
-      }
-    })),
+    content: contentMode === "text"
+      ? templates.map((template) => ({
+        type: "text" as const,
+        text: [
+          `<cadre-template id=${JSON.stringify(template.id)} uri=${JSON.stringify(template.uri)} mimeType=${JSON.stringify(template.mimeType)}>`,
+          template.content,
+          "</cadre-template>"
+        ].join("\n")
+      }))
+      : templates.map((template) => ({
+        type: "resource" as const,
+        resource: {
+          uri: template.uri,
+          mimeType: template.mimeType,
+          text: template.content
+        }
+      })),
     structuredContent: {
       templateSetVersion: TEMPLATE_SET_VERSION,
       templates: templates.map(({ content: _content, ...descriptor }) => descriptor)
@@ -315,7 +328,7 @@ export function createCadreServer(): McpServer {
     }
   );
 
-  server.registerTool("workflow_elicit", {
+  server.registerTool(CADRE_MCP_TOOLS.workflowElicit, {
     title: "Collect Cadre workflow input",
     description: "Present one read-only Cadre approval or clarification form. Skip it under non-interactive host policy, bind approvals to an immutable digest or checkpoint, never request secrets, and use its chat fallback once.",
     inputSchema: workflowElicitationInputSchema,
@@ -350,20 +363,23 @@ export function createCadreServer(): McpServer {
     );
   }
 
-  server.registerTool("template_get_many", {
+  server.registerTool(CADRE_MCP_TOOLS.templateGetMany, {
     title: "Get multiple Cadre templates",
-    description: "Read an ordered set of immutable, versioned Cadre templates in one call.",
-    inputSchema: { ids: z.array(z.enum(TEMPLATE_IDS)).min(1) },
+    description: "Read ordered immutable Cadre templates in one call.",
+    inputSchema: {
+      ids: z.array(z.enum(TEMPLATE_IDS)).min(1),
+      contentMode: z.enum(["embedded_resource", "text"]).optional().default("embedded_resource")
+    },
     annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async ({ ids }) => {
+  }, async ({ ids, contentMode }) => {
     try {
-      return templateResult(getTemplates(ids).map(describeTemplate));
+      return templateResult(getTemplates(ids).map(describeTemplate), contentMode);
     } catch (error) {
       return failure(error);
     }
   });
 
-  server.registerTool("styleguide_resolve", {
+  server.registerTool(CADRE_MCP_TOOLS.styleguideResolve, {
     title: "Resolve default styleguides",
     description: "Resolve the bundled idiomatic styleguides relevant to an approved technology list.",
     inputSchema: { technologies: z.array(z.string()).min(1) },
@@ -382,7 +398,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("project_status", {
+  server.registerTool(CADRE_MCP_TOOLS.projectStatus, {
     title: "Read Cadre project status",
     description: "Read compact project, focused track, or implementation status with embedded validation.",
     inputSchema: {
@@ -455,7 +471,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("state_validate", {
+  server.registerTool(CADRE_MCP_TOOLS.stateValidate, {
     title: "Validate Cadre project state",
     description: "Validate Cadre project invariants and return all discovered tracks and errors.",
     inputSchema: { projectRoot: z.string().min(1) },
@@ -468,7 +484,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("candidate_stage_prepare", {
+  server.registerTool(CADRE_MCP_TOOLS.candidateStagePrepare, {
     title: "Prepare a Cadre candidate stage",
     description: "Create or resume one project-local candidate directory and ensure /stage/ is ignored by Git.",
     inputSchema: {
@@ -484,7 +500,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("candidate_inspect", {
+  server.registerTool(CADRE_MCP_TOOLS.candidateInspect, {
     title: "Inspect staged artifact candidates",
     description: "Manifest an exact staged file set and optionally validate its plan graph in one read-only call.",
     inputSchema: {
@@ -531,7 +547,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("execution_graph_validate", {
+  server.registerTool(CADRE_MCP_TOOLS.executionGraphValidate, {
     title: "Validate a track execution graph",
     description: "Compile and validate phase/task dependencies and derived manual-verification barriers from an approved plan.",
     inputSchema: { projectRoot: z.string().min(1), trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) },
@@ -559,7 +575,7 @@ export function createCadreServer(): McpServer {
     acceptedRisks: z.array(z.string().min(1)).optional()
   };
 
-  server.registerTool("review_complete", {
+  server.registerTool(CADRE_MCP_TOOLS.reviewComplete, {
     title: "Complete a clean review",
     description: "Prepare the exact clean-review completion for human approval, or apply its unchanged proposal token after approval.",
     inputSchema: adaptiveInputSchema(reviewCompleteSchema),
@@ -621,7 +637,7 @@ export function createCadreServer(): McpServer {
     updates: z.array(archiveCandidateUpdateSchema)
   };
 
-  server.registerTool("archive_batch_candidate", {
+  server.registerTool(CADRE_MCP_TOOLS.archiveBatchCandidate, {
     title: "Govern a staged archive batch",
     description: "Prepare a staged archive batch for human approval, or apply its unchanged proposal token after approval.",
     inputSchema: adaptiveInputSchema(archiveBatchCandidateSchema),
@@ -680,7 +696,7 @@ export function createCadreServer(): McpServer {
     batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool("archive_batch_record", {
+  server.registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
     title: "Record archive provenance",
     description: "Atomically validate and record the already-authorized archive commit in track, project, and batch state.",
     inputSchema: archiveRecordSchema,
@@ -715,7 +731,7 @@ export function createCadreServer(): McpServer {
     maxWorkers: z.number().int().min(1).max(32).optional().default(3)
   };
 
-  server.registerTool("execution_start", {
+  server.registerTool(CADRE_MCP_TOOLS.executionStart, {
     title: "Start implementation execution",
     description: "Atomically validate and start the implementation execution already authorized by the implement invocation.",
     inputSchema: executionStartSchema,
@@ -765,7 +781,7 @@ export function createCadreServer(): McpServer {
     blocker: z.string().min(1).optional()
   };
 
-  server.registerTool("execution_checkpoint", {
+  server.registerTool(CADRE_MCP_TOOLS.executionCheckpoint, {
     title: "Apply an execution checkpoint",
     description: "Atomically validate and apply one already-authorized semantic execution event.",
     inputSchema: executionCheckpointSchema,
@@ -787,7 +803,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("execution_status", {
+  server.registerTool(CADRE_MCP_TOOLS.executionStatus, {
     title: "Read implementation execution status",
     description: "Read an execution journal and derive ready, active, and blocked DAG nodes.",
     inputSchema: {
@@ -812,7 +828,7 @@ export function createCadreServer(): McpServer {
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool("execution_finish", {
+  server.registerTool(CADRE_MCP_TOOLS.executionFinish, {
     title: "Complete implementation execution",
     description: "Atomically verify and finalize an execution after its required manual verification is already recorded.",
     inputSchema: executionFinishSchema,
@@ -845,7 +861,7 @@ export function createCadreServer(): McpServer {
     nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/)
   };
 
-  server.registerTool("worktree_create", {
+  server.registerTool(CADRE_MCP_TOOLS.worktreeCreate, {
     title: "Create a Cadre worker worktree",
     description: "Atomically validate and create or reconcile one already-authorized constrained worker worktree.",
     inputSchema: worktreeSchema,
@@ -877,7 +893,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("integration", {
+  server.registerTool(CADRE_MCP_TOOLS.integration, {
     title: "Integrate a worker branch",
     description: "Atomically merge in phase/autonomous mode; in governed mode return approval_required first, then accept the unchanged proposal token after human approval.",
     inputSchema: adaptiveInputSchema(worktreeSchema),
@@ -918,7 +934,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("worktree_cleanup", {
+  server.registerTool(CADRE_MCP_TOOLS.worktreeCleanup, {
     title: "Clean up an integrated worker",
     description: "Atomically verify and remove only a clean, fully integrated Cadre worktree and safely deletable branch.",
     inputSchema: worktreeSchema,
@@ -955,7 +971,7 @@ export function createCadreServer(): McpServer {
     styleguideIds: z.array(z.string().min(1)).min(1)
   };
 
-  server.registerTool("project_init_candidate", {
+  server.registerTool(CADRE_MCP_TOOLS.projectInitCandidate, {
     title: "Initialize from a staged Cadre candidate",
     description: "Prepare staged initialization for human approval, or atomically promote its unchanged proposal token after approval.",
     inputSchema: adaptiveInputSchema(initCandidateSchema),
@@ -998,7 +1014,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("setup_record_commit", {
+  server.registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
     title: "Record the project setup commit",
     description: "Complete a pending create operation by recording its already-created Git commit SHA.",
     inputSchema: { projectRoot: z.string().min(1) },
@@ -1013,7 +1029,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("setup_record_git_initialized", {
+  server.registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
     title: "Record Git initialization checkpoint",
     description: "Advance an approved create operation after the caller verifies Git was initialized at the exact project root.",
     inputSchema: { projectRoot: z.string().min(1) },
@@ -1027,7 +1043,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool("tracks_render", {
+  server.registerTool(CADRE_MCP_TOOLS.tracksRender, {
     title: "Render the derived tracks index",
     description: "Atomically validate and rewrite deterministic tracks.md from current track-local state.",
     inputSchema: { projectRoot: z.string().min(1) },

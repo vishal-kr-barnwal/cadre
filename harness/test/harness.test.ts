@@ -32,8 +32,12 @@ import {
   CLAUDE_APPROVAL,
   CLAUDE_SERVER_APPROVAL,
   configureClaudeMcpApproval,
-  configureCodexMcpApproval
+  configureCodexMcpApproval,
+  configureZedCadre,
+  removeZedCadreServer,
+  ZED_MCP_PERMISSION_KEYS
 } from "../scripts/permissions.js";
+import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 import { TEMPLATE_IDS } from "../src/domain/templates.js";
 import {
   buildWorkflowElicitation,
@@ -1501,7 +1505,7 @@ test("approved refresh and revert operations remain valid while interrupted", ()
   assert.match(runState(projectRoot, "validate", true).stderr, /completed refresh requires a refresh commit SHA/);
 });
 
-test("installer prepares a dual-product user plugin marketplace", async () => {
+test("installer prepares a shared three-client payload", async () => {
   const parent = mkdtempSync(join(tmpdir(), "cadre-install-"));
   const target = join(parent, "cadre");
   execFileSync(process.execPath, [
@@ -1511,6 +1515,14 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
 
   const pluginRoot = join(target, "plugins", "cadre");
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
+  for (const workflow of [
+    "create", "track", "implement", "review", "revise",
+    "archive", "refresh", "revert", "status", "wisp"
+  ]) {
+    const zedSkill = readFileSync(join(pluginRoot, "zed-skills", `cadre-${workflow}`, "SKILL.md"), "utf8");
+    assert.match(zedSkill, new RegExp(`^name: cadre-${workflow}$`, "m"));
+    assert.match(zedSkill, /contentMode: "text"/);
+  }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
   assert.equal(codexManifest.version, "3.4.0+codex.test-build");
@@ -1543,6 +1555,10 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   try {
     const tools = await client.listTools();
     assert.equal(tools.tools.length, 22);
+    assert.deepEqual(
+      tools.tools.map((tool) => tool.name).sort(),
+      [...CADRE_MCP_TOOL_NAMES].sort()
+    );
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const resources = await client.listResources();
     assert.deepEqual(
@@ -1625,6 +1641,72 @@ test("installer permission helpers narrowly pre-approve the Cadre MCP server and
   assert.throws(
     () => configureClaudeMcpApproval(deniedSettings),
     /deny rule.*blocks Cadre MCP tools/
+  );
+
+  const zedSettings = join(directory, "zed", "settings.json");
+  mkdirSync(dirname(zedSettings), { recursive: true });
+  writeFileSync(zedSettings, `{
+  // Preserve this comment
+  "theme": "One Dark",
+  "agent": { "tool_permissions": { "default": "confirm" } }
+}\n`);
+  const nodePath = "/opt/cadre/node";
+  const mcpPath = "/opt/cadre/cadre-mcp.mjs";
+  const zedFirst = configureZedCadre(zedSettings, nodePath, mcpPath, true);
+  assert.equal(zedFirst.changed, true);
+  assert.equal(zedFirst.serverChanged, true);
+  assert.equal(zedFirst.permissionsChanged, true);
+  const zedBody = readFileSync(zedSettings, "utf8");
+  assert.match(zedBody, /\/\/ Preserve this comment/);
+  assert.match(zedBody, /"theme": "One Dark"/);
+  assert.equal(ZED_MCP_PERMISSION_KEYS.length, CADRE_MCP_TOOL_NAMES.length);
+  for (const key of ZED_MCP_PERMISSION_KEYS) {
+    assert.match(zedBody, new RegExp(`"${key}"`));
+  }
+  assert.equal(configureZedCadre(zedSettings, nodePath, mcpPath, true).changed, false);
+
+  const removedZed = removeZedCadreServer(zedSettings, mcpPath);
+  assert.deepEqual(removedZed, { changed: true, retainedConflict: false });
+  const removedBody = readFileSync(zedSettings, "utf8");
+  assert.doesNotMatch(removedBody, /"command": "\/opt\/cadre\/node"/);
+  assert.match(removedBody, /"mcp:cadre:project_status"/);
+
+  const promptSettings = join(directory, "zed-prompt.json");
+  configureZedCadre(promptSettings, nodePath, mcpPath, false);
+  const promptBody = readFileSync(promptSettings, "utf8");
+  assert.match(promptBody, /"context_servers"/);
+  assert.doesNotMatch(promptBody, /"mcp:cadre:/);
+
+  const conflictSettings = join(directory, "zed-conflict.json");
+  writeFileSync(conflictSettings, `{
+  "context_servers": { "cadre": { "command": "other", "args": [] } }
+}\n`);
+  assert.throws(
+    () => configureZedCadre(conflictSettings, nodePath, mcpPath, true),
+    /context_servers\.cadre is not the Cadre-managed server/
+  );
+
+  const deniedZedSettings = join(directory, "zed-denied.json");
+  writeFileSync(deniedZedSettings, `{
+  "agent": { "tool_permissions": { "tools": {
+    "mcp:cadre:project_status": { "always_deny": [{}] }
+  } } }
+}\n`);
+  assert.throws(
+    () => configureZedCadre(deniedZedSettings, nodePath, mcpPath, true),
+    /higher-precedence deny\/confirm rule/
+  );
+
+  const invalidZedSettings = join(directory, "zed-invalid.json");
+  writeFileSync(invalidZedSettings, "{ invalid\n");
+  assert.throws(
+    () => configureZedCadre(invalidZedSettings, nodePath, mcpPath, true),
+    /Cannot update invalid Zed settings/
+  );
+
+  assert.deepEqual(
+    removeZedCadreServer(conflictSettings, mcpPath),
+    { changed: false, retainedConflict: true }
   );
 });
 
@@ -1798,6 +1880,19 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (template) => template.content === undefined
     ));
     assert.ok(Buffer.byteLength(JSON.stringify(bundle)) <= 6 * 1024);
+    const textBundle = await client.callTool({
+      name: "template_get_many",
+      arguments: { ids: ["track/spec", "track/state"], contentMode: "text" }
+    });
+    assert.equal(textBundle.isError, undefined);
+    const textContents = textBundle.content as Array<{ type: string; text?: string }>;
+    assert.equal(textContents.length, 2);
+    assert.ok(textContents.every((content) => content.type === "text"));
+    assert.match(textContents[0]?.text ?? "", /<cadre-template/);
+    assert.match(textContents[0]?.text ?? "", /# Specification:/);
+    assert.ok((textBundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
+      (template) => template.content === undefined
+    ));
     const createBundle = await client.callTool({
       name: "template_get_many",
       arguments: { ids: ["project/product", "project/guidelines", "project/tech-stack"] }

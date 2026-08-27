@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-export const CLIENTS = ["codex", "claude"] as const;
+export const CLIENTS = ["codex", "claude", "zed"] as const;
 export type ClientName = typeof CLIENTS[number];
 
 export function commandExists(command: string): boolean {

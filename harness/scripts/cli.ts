@@ -11,8 +11,8 @@ function usage(): string {
     "Cadre CLI",
     "",
     "Usage:",
-    "  cadre-ai install [--target auto|codex|claude|all] [--scope user] [--dry-run] [--replace-marketplace]",
-    "  cadre-ai uninstall [--target codex|claude|all] [--scope user] [--dry-run]",
+    "  cadre-ai install [--target auto|codex|claude|zed|all] [--scope user] [--dry-run] [--replace-marketplace]",
+    "  cadre-ai uninstall [--target codex|claude|zed|all] [--scope user] [--dry-run]",
     "  cadre-ai doctor",
     "  cadre-ai --version",
     "  cadre-ai help"

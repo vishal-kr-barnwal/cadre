@@ -30,8 +30,9 @@ claude plugin list --json
 ```
 
 Then start a new Codex conversation or run `/reload-plugins` in Claude Code.
-Use `--target codex`, `--target claude`, or `--target all` to remove
-auto-detection ambiguity.
+For Zed, open a new Agent thread and inspect AI → Skills and AI → MCP Servers.
+Use `--target codex`, `--target claude`, `--target zed`, or `--target all` to
+remove auto-detection ambiguity.
 
 If another marketplace named `cadre` points elsewhere, review the path and rerun
 with `--replace-marketplace` only when replacement is intended.
@@ -46,6 +47,15 @@ unrelated JSONC settings while ensuring both:
 
 If `permissions.deny` blocks Cadre tools, installation stops rather than
 overriding the deny rule. Remove or narrow the conflicting rule deliberately.
+
+## Zed Beta Skills Or MCP Are Missing
+
+Rerun `cadre-ai install --target zed`. Cadre refuses to replace any existing
+`~/.agents/skills/cadre-*` path that it does not own. Move or rename the
+conflicting skill deliberately, then retry. In `~/.config/zed/settings.json`,
+confirm `context_servers.cadre` points to the packaged `cadre-mcp.mjs`; the
+installer preserves unrelated JSONC settings and refuses to replace a
+different server already named `cadre`.
 
 ## Cadre MCP Is Unavailable
 

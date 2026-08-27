@@ -36,6 +36,7 @@ pattern context drifts:
 ```text
 $cadre:refresh
 /cadre:refresh
+/cadre-refresh
 ```
 
 Refresh inspects user input, repository changes since setup or the last
@@ -62,6 +63,7 @@ workflow request:
 ```text
 $cadre:implement checkout sequentially
 /cadre:implement checkout sequentially
+/cadre-implement checkout sequentially
 ```
 
 The execution journal persists requested/effective mode and its worker bound.
@@ -75,6 +77,10 @@ only at track-level verification:
 ```text
 $cadre:implement checkout governed
 $cadre:implement checkout autonomous
+/cadre:implement checkout governed
+/cadre:implement checkout autonomous
+/cadre-implement checkout governed
+/cadre-implement checkout autonomous
 ```
 
 The selected `approvalMode` is persisted in the execution journal and active

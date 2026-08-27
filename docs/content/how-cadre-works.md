@@ -19,6 +19,7 @@ The installed `cadre@cadre` plugin contains:
 ```text
 skills/                  # create, track, implement, review, revise, archive,
                          # refresh, revert, status, and wisp
+zed-skills/              # generated cadre-* adapters for native Zed Agent
 agents/                  # Claude phase and task worker definitions
 dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
 templates/v1/            # immutable published legacy templates

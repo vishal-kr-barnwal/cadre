@@ -4,7 +4,8 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { defaultMarketplaceRoot, marketplaceFromHome, optionValue, parseClient, type ClientSelection } from "./cli-options.js";
 import { CLIENTS, commandExists, runCommand, runJson, type ClientName } from "./native-clients.js";
 import { packagePluginMarketplace } from "./package-plugin.js";
-import { configureClaudeMcpApproval, configureCodexMcpApproval } from "./permissions.js";
+import { configureClaudeMcpApproval, configureCodexMcpApproval, configureZedCadre } from "./permissions.js";
+import { installZedSkillLinks, preflightZedSkillLinks, zedSettingsPath } from "./zed.js";
 
 const marketplaceName = "cadre";
 const pluginId = "cadre@cadre";
@@ -148,6 +149,15 @@ function installClaude(targetRoot: string, allowReplacement: boolean, autoApprov
   }
 }
 
+function installZed(targetRoot: string, autoApproveMcp: boolean): void {
+  const pluginRoot = join(targetRoot, "plugins", "cadre");
+  const mcpPath = join(pluginRoot, "dist", "cadre-mcp.mjs");
+  const links = installZedSkillLinks(targetRoot);
+  const update = configureZedCadre(zedSettingsPath(), resolve(process.execPath), mcpPath, autoApproveMcp);
+  process.stdout.write(`${update.changed ? "Updated" : "Retained"} Zed Cadre MCP configuration in ${update.path}\n`);
+  process.stdout.write(`Installed ${links.length} Cadre workflow skill links for Zed Agent.\n`);
+}
+
 function assertSafeTarget(targetRoot: string): void {
   if (targetRoot === parse(targetRoot).root || targetRoot === resolve(homedir())) {
     throw new Error(`refusing to use broad marketplace root ${targetRoot}`);
@@ -169,7 +179,7 @@ function prepareMarketplace(targetRoot: string, cachebuster: string | null): str
     const owned = catalogs.every((path) => (
       existsSync(path) && JSON.parse(readFileSync(path, "utf8")).name === marketplaceName
     ));
-    if (!owned) throw new Error(`${targetRoot} exists but is not a Cadre dual-product marketplace`);
+    if (!owned) throw new Error(`${targetRoot} exists but is not a Cadre marketplace payload`);
     backupRoot = `${targetRoot}.backup-${Date.now()}`;
     renameSync(targetRoot, backupRoot);
   }
@@ -182,7 +192,7 @@ export function runInstall(args: string[]): number {
   assertSafeTarget(options.marketplaceRoot);
   const clients = selectedClients(options.selection);
   if (!options.prepareOnly && clients.length === 0) {
-    throw new Error("No supported client detected. Install Codex or Claude, or pass --target codex|claude|all");
+    throw new Error("No supported client detected. Install Codex, Claude, or Zed, or pass --target codex|claude|zed|all");
   }
   for (const client of clients) {
     if (!commandExists(client) && !options.prepareOnly && !options.dryRun) {
@@ -191,9 +201,13 @@ export function runInstall(args: string[]): number {
   }
   if (options.dryRun) {
     process.stdout.write(`Would prepare Cadre marketplace at ${options.marketplaceRoot}\n`);
-    for (const client of clients) process.stdout.write(`Would install ${pluginId} for ${client} at user scope\n`);
+    for (const client of clients) {
+      const identity = client === "zed" ? "Cadre skills and MCP server" : pluginId;
+      process.stdout.write(`Would install ${identity} for ${client} at user scope\n`);
+    }
     return 0;
   }
+  if (!options.prepareOnly && clients.includes("zed")) preflightZedSkillLinks(options.marketplaceRoot);
   const backupRoot = prepareMarketplace(options.marketplaceRoot, options.cachebuster);
   process.stdout.write(`Prepared Cadre plugin marketplace at ${options.marketplaceRoot}\n`);
   if (backupRoot) process.stdout.write(`Previous marketplace retained at ${backupRoot}\n`);
@@ -201,9 +215,10 @@ export function runInstall(args: string[]): number {
   const autoApproveMcp = !options.promptMcpTools;
   for (const client of clients) {
     if (client === "codex") installCodex(options.marketplaceRoot, options.replaceMarketplace, autoApproveMcp);
-    else installClaude(options.marketplaceRoot, options.replaceMarketplace, autoApproveMcp);
+    else if (client === "claude") installClaude(options.marketplaceRoot, options.replaceMarketplace, autoApproveMcp);
+    else installZed(options.marketplaceRoot, autoApproveMcp);
   }
-  process.stdout.write(`Installed ${pluginId} for ${clients.join(" and ")}.\n`);
-  process.stdout.write("Start a new Codex conversation and run /reload-plugins in Claude Code.\n");
+  process.stdout.write(`Installed Cadre for ${clients.join(", ")}.\n`);
+  process.stdout.write("Start a new client conversation; in Claude Code, run /reload-plugins first.\n");
   return 0;
 }

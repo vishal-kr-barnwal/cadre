@@ -12,7 +12,7 @@ export interface CommonCliOptions {
 
 export function parseClient(value: string | undefined): ClientSelection {
   if (value === "all" || value === "auto" || CLIENTS.includes(value as ClientName)) return value as ClientSelection;
-  throw new Error("--target/--agent must be auto, all, codex, or claude");
+  throw new Error("--target/--agent must be auto, all, codex, claude, or zed");
 }
 
 export function defaultMarketplaceRoot(): string {

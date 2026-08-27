@@ -15,6 +15,7 @@ status, then invoke the workflow that owns any required mutation.
 ```text
 $cadre:status
 /cadre:status
+/cadre-status
 ```
 
 Status reads project state, every active and archived track, managed worktrees,

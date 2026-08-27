@@ -5,7 +5,7 @@
 <p align="center"><strong>Measure twice, code once.</strong></p>
 
 <p align="center">
-  A human-governed, Git-aware delivery harness for OpenAI Codex and Claude Code.
+  A human-governed, Git-aware delivery harness for OpenAI Codex, Claude Code, and Zed Agent (beta).
 </p>
 
 Cadre turns approved project context into resumable feature and bug tracks. It
@@ -36,7 +36,8 @@ provenance without asking an agent to invent workflow state.
 
 ## Install
 
-Cadre 3.0 supports OpenAI Codex and Claude Code at user scope:
+Cadre supports OpenAI Codex and Claude Code as stable integrations. Native Zed
+Agent support is available in beta at user scope:
 
 ```bash
 npm install -g cadre-ai
@@ -45,8 +46,9 @@ cadre-ai install
 ```
 
 `cadre-ai install` auto-detects installed clients. Use `--target codex`,
-`--target claude`, or `--target all` to choose explicitly. Restart Codex after
-installation; in Claude Code, run `/reload-plugins` or start a new session.
+`--target claude`, `--target zed`, or `--target all` to choose explicitly.
+Start a new client conversation after installation; in Claude Code, run
+`/reload-plugins` first.
 
 ## Use Cadre
 
@@ -66,14 +68,21 @@ $cadre:archive passwordless-login
 /cadre:implement passwordless-login
 /cadre:review passwordless-login
 /cadre:archive passwordless-login
+
+# Zed Agent (beta)
+/cadre-create
+/cadre-track Add passwordless login as a feature
+/cadre-implement passwordless-login
+/cadre-review passwordless-login
+/cadre-archive passwordless-login
 ```
 
 The complete workflow set is `create`, `track`, `implement`, `review`,
 `revise`, `archive`, `refresh`, `revert`, `status`, and `wisp`.
 
 An initialized target project keeps approved mutable delivery state under
-`.cadre/`. The plugin retains the runtime, skills, worker definitions, and
-immutable templates.
+`.cadre/`. The installed payload retains the runtime, skills, worker
+definitions, and immutable templates.
 
 ## Repository Layout
 

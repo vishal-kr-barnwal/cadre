@@ -7,14 +7,16 @@ order: 40
 
 # Capabilities
 
-Cadre 3.0 is a focused, single-repository delivery harness for OpenAI Codex and
-Claude Code. It governs work from project context through archived learning.
+Cadre is a focused, single-repository delivery harness for OpenAI Codex, Claude
+Code, and the native Zed Agent. Codex and Claude Code integrations are stable;
+native Zed Agent support is beta. Cadre governs work from project context
+through archived learning.
 
 ## Supported Today
 
 | Area | Capability |
 |---|---|
-| Clients | Native user plugins for Codex and Claude Code. |
+| Clients | Stable native user plugins for Codex/Claude and beta global skills plus custom MCP for Zed Agent. |
 | Project creation | Greenfield/brownfield classification, optional Git initialization, approved context, workflow, styleguides, and patterns. |
 | Tracks | Feature and bug specifications, acceptance criteria, dependencies, phased plans, and learning seeds. |
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |

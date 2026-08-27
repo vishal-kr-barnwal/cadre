@@ -10,10 +10,12 @@ fixture.
 
 ## Current Product Model
 
-- Cadre supports OpenAI Codex and Claude Code as native user plugins.
+- Cadre supports OpenAI Codex and Claude Code as native user plugins, plus the
+  native Zed Agent through global skills and a custom MCP server.
 - The published npm package and executable are both named `cadre-ai`.
-- Installation packages a local dual-client marketplace, installs
-  `cadre@cadre`, and runs the bundled `dist/cadre-mcp.mjs` stdio server.
+- Installation packages a shared local payload, installs `cadre@cadre` for
+  Codex/Claude, links collision-safe `cadre-*` skills for Zed, and runs the
+  bundled `dist/cadre-mcp.mjs` stdio server.
 - The ten user workflows are `create`, `track`, `implement`, `review`,
   `revise`, `archive`, `refresh`, `revert`, `status`, and `wisp`.
 - Initialized projects keep approved mutable state under `.cadre/`. Runtime
@@ -111,11 +113,12 @@ installer changes.
 
 - `cadre-ai` is the only published executable. Do not add a conflicting
   `cadre` binary alias.
-- The installer supports `codex`, `claude`, `all`, and auto-detection at user
+- The installer supports `codex`, `claude`, `zed`, `all`, and auto-detection at user
   scope. Do not document unsupported clients or project-scoped installation.
 - Default installation narrowly approves the Cadre MCP server/tools while
   preserving unrelated client settings. Claude requires both the `cadre`
   server in `enabledMcpjsonServers` and `mcp__cadre__*` in its allowlist.
+  Zed receives only exact `mcp:cadre:<tool>` allow entries.
 - Keep the published runtime self-contained with no production dependencies.
   Marketplace cache-buster versions are installation artifacts, not package
   release versions.
@@ -138,7 +141,7 @@ pnpm --filter cadre-ai validate
 pnpm --filter cadre-ai pack --dry-run
 ```
 
-Then validate the native installer from the local build against both clients:
+Then validate the native installer from the local build against all three clients:
 
 ```bash
 pnpm --filter cadre-ai build
@@ -146,10 +149,13 @@ node harness/dist/cadre-cli.mjs doctor
 node harness/dist/cadre-cli.mjs install --target all --scope user
 codex plugin list --json
 claude plugin list --json
+zed --version
 ```
 
-Both clients must report `cadre@cadre` installed and enabled at the candidate
-version. The generated plugin MCP configurations must launch the packaged
-`dist/cadre-mcp.mjs`, and the narrow Codex and Claude MCP approval settings
-must be present. There is no installer `--check` mode in the current CLI. If
-installation or either listing check fails, stop and fix it before release.
+Codex and Claude must report `cadre@cadre` installed and enabled at the
+candidate version. Zed must discover all ten `cadre-*` skills and show the
+Cadre context server active. All clients must launch the packaged
+`dist/cadre-mcp.mjs`, and their narrow Cadre MCP approval settings must be
+present. There is no installer `--check` mode in the current CLI. If
+installation, listing, discovery, or activation fails, stop and fix it before
+release.

@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { templateCatalog } from "../src/domain/templates.js";
+import { createZedSkillAdapters } from "./zed.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredEntries = [
@@ -58,6 +59,7 @@ export function packagePluginMarketplace(
     const source = join(sourceRoot, entry);
     if (existsSync(source)) cpSync(source, join(pluginRoot, entry), { recursive: true });
   }
+  createZedSkillAdapters(pluginRoot);
 
   const codexManifest = readJson<Manifest>(join(sourceRoot, ".codex-plugin", "plugin.json"));
   codexManifest.version = withCachebuster(codexManifest.version, "codex", cachebuster);

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
+import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skills = [
@@ -36,6 +37,7 @@ interface PackageManifest {
   bin?: Record<string, string>;
   files?: string[];
   dependencies?: Record<string, string>;
+  keywords?: string[];
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
@@ -51,6 +53,10 @@ for (const entry of ["dist/", "skills/", "templates/", ".codex-plugin/", ".claud
 }
 if (packageManifest.dependencies && Object.keys(packageManifest.dependencies).length > 0) {
   errors.push("package: self-contained runtime must not have production dependencies");
+}
+if (!packageManifest.keywords?.includes("zed")) errors.push("package: keywords must include zed");
+if (CADRE_MCP_TOOL_NAMES.length !== 22 || new Set(CADRE_MCP_TOOL_NAMES).size !== 22) {
+  errors.push("MCP tools: expected 22 unique centralized tool names");
 }
 
 interface Marketplace {
@@ -193,7 +199,8 @@ for (const name of [
 for (const file of [
   "src/mcp/server.ts", "src/domain/templates.ts", "src/domain/init.ts", "src/domain/state.ts",
   "src/domain/plan.ts", "src/domain/execution.ts", "src/domain/worktrees.ts",
-  "scripts/permissions.ts", "dist/cadre-cli.mjs", "dist/cadre-mcp.mjs"
+  "scripts/permissions.ts", "scripts/zed.ts", "src/mcp/tool-names.ts",
+  "dist/cadre-cli.mjs", "dist/cadre-mcp.mjs"
 ]) {
   if (!existsSync(join(root, file))) errors.push(`runtime: missing ${file}`);
 }
@@ -235,5 +242,5 @@ if (errors.length) {
   process.stderr.write(`${errors.join("\n")}\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`Validated ${skills.length} skills, the typed MCP runtime, templates, and both plugin manifests.\n`);
+  process.stdout.write(`Validated ${skills.length} workflows, the three client integrations, typed MCP runtime, and templates.\n`);
 }

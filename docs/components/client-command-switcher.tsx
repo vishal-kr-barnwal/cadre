@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 type ClientCommands = {
   codex: string
   claude: string
+  zed?: string
 }
 
 export function ClientCommandSwitcher({ commands }: { commands: ClientCommands }) {
@@ -14,6 +15,7 @@ export function ClientCommandSwitcher({ commands }: { commands: ClientCommands }
       <TabsList aria-label="Choose coding client">
         <TabsTrigger value="codex">Codex</TabsTrigger>
         <TabsTrigger value="claude">Claude Code</TabsTrigger>
+        {commands.zed ? <TabsTrigger value="zed">Zed Agent (Beta)</TabsTrigger> : null}
       </TabsList>
       <TabsContent value="codex">
         <CodeBlock
@@ -29,6 +31,15 @@ export function ClientCommandSwitcher({ commands }: { commands: ClientCommands }
           syntax="cadre-command"
         />
       </TabsContent>
+      {commands.zed ? (
+        <TabsContent value="zed">
+          <CodeBlock
+            code={commands.zed}
+            className="language-shell"
+            syntax="cadre-command"
+          />
+        </TabsContent>
+      ) : null}
     </Tabs>
   )
 }

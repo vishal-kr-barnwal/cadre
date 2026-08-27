@@ -2,7 +2,7 @@
 
 Before editing an existing file, read it and its directly relevant context. Before creating a file, inspect its target directory and nearby conventions. Never make changes from guessed contents.
 
-Cadre is a Node.js 18+ plugin bundle shared by Codex and Claude Code. Maintained runtime, build, installer, validator, and test sources are TypeScript. The release payload contains the compiled MCP module and immutable template set, without development dependencies. Keep skill frontmatter compatible with the Agent Skills standard. Put agent-specific UI metadata only under `agents/` or the corresponding plugin manifest.
+Cadre is a Node.js 18+ integration bundle shared by Codex, Claude Code, and the native Zed Agent. Maintained runtime, build, installer, validator, and test sources are TypeScript. The release payload contains the compiled MCP module and immutable template set, without development dependencies. Keep skill frontmatter compatible with the Agent Skills standard. Put agent-specific UI metadata only under `agents/`, generated Zed adapters, or the corresponding plugin manifest.
 
 Run these checks after changes:
 
