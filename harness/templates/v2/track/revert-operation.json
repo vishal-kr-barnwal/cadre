@@ -4,6 +4,10 @@
   "baseCommit": "{{BASE_COMMIT}}",
   "expectedCommit": "cadre(revert): reconcile {{TRACK_ID}}",
   "approvedArtifacts": ["plan.md", "learning.md", "state.json"],
+  "approvalDigest": "{{APPROVAL_DIGEST}}",
+  "approvedArtifactHashes": [
+    { "path": "{{APPROVED_ARTIFACT}}", "sha256": "{{ARTIFACT_SHA256}}" }
+  ],
   "artifactProgress": [],
   "approvedAt": "{{APPROVED_AT}}",
   "targetKind": "{{task|phase|track}}",

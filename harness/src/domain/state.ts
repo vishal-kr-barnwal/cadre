@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
+import {
+  CADRE_RUNTIME_VERSION,
+  LEGACY_RUNTIME_VERSIONS,
+  LEGACY_TEMPLATE_SET_VERSIONS,
+  TEMPLATE_SET_VERSION
+} from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
 import { buildTracks } from "./tracks-index.js";
@@ -443,8 +448,10 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
   const gitignorePath = join(root, ".gitignore");
+  let candidateStageIgnored = false;
   if (existsSync(gitignorePath)) {
     const gitignore = readFileSync(gitignorePath, "utf8");
+    candidateStageIgnored = gitignore.split(/\r?\n/).includes("/stage/");
     if (!gitignore.split(/\r?\n/).includes("/.worktrees/")) {
       errors.push(`${gitignorePath}: must ignore /.worktrees/`);
     }
@@ -454,11 +461,26 @@ export function validateProject(projectRoot: string): ValidationResult {
   }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
   if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors, warnings };
+  if (!candidateStageIgnored) {
+    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) {
+      warnings.push("PROJECT_REFRESH_REQUIRED: .cadre/.gitignore must ignore /stage/");
+    } else errors.push(`${gitignorePath}: must ignore /stage/`);
+  }
   const commitReferences: CommitReference[] = [];
   collectCommitReferences(project, "project.json", commitReferences);
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
-  if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) errors.push(`project.json: runtimeVersion must be ${CADRE_RUNTIME_VERSION}`);
-  if (project.templateSetVersion !== TEMPLATE_SET_VERSION) errors.push(`project.json: templateSetVersion must be ${TEMPLATE_SET_VERSION}`);
+  if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) {
+    if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) {
+      warnings.push(`PROJECT_REFRESH_REQUIRED: runtimeVersion ${project.runtimeVersion} must be refreshed to ${CADRE_RUNTIME_VERSION}`);
+    } else errors.push(`project.json: unsupported runtimeVersion ${String(project.runtimeVersion)}`);
+  }
+  if (project.templateSetVersion !== TEMPLATE_SET_VERSION) {
+    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) {
+      warnings.push(
+        `PROJECT_REFRESH_REQUIRED: templateSetVersion ${project.templateSetVersion} must be refreshed to ${TEMPLATE_SET_VERSION}`
+      );
+    } else errors.push(`project.json: unsupported templateSetVersion ${String(project.templateSetVersion)}`);
+  }
   if (!project.project?.context || !["greenfield", "brownfield"].includes(project.project.context)) {
     errors.push("project.json: project context must be greenfield or brownfield");
   }

@@ -18,6 +18,7 @@
       "repositoryRoot": "{{PROJECT_ROOT}}",
       "gitDisposition": "{{existing|initialize}}",
       "approvedArtifacts": [],
+      "approvedArtifactHashes": [],
       "approvedAt": "{{APPROVED_AT}}"
     }
   },

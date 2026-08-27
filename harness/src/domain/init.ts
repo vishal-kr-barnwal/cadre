@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { dirname } from "node:path";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { buildTracks } from "./state.js";
 import { candidateStageRoot, listCandidatePaths, readCandidateFiles } from "./staging.js";
-import { getTemplates } from "./templates.js";
+import { describeTemplate, getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
 import { readGitFileAtCommit } from "./git.js";
@@ -26,6 +26,7 @@ interface MaterializedProjectInit {
   gitDisposition: "existing" | "initialize";
   baseCommit: string | null;
   approvedAt: string;
+  styleguideIds: string[];
   files: MaterializedArtifact[];
 }
 
@@ -37,6 +38,7 @@ export interface ProjectInitCandidateInput {
   baseCommit: string | null;
   approvedAt: string;
   stagedFiles: string[];
+  styleguideIds: string[];
 }
 
 export interface ProposedFile extends MaterializedArtifact {
@@ -50,9 +52,8 @@ export interface ProjectInitProposal {
   digest: string;
 }
 
-const REQUIRED_APPROVED_FILES = new Set([
-  "product.md", "guidelines.md", "tech-stack.md", "workflow.md", "styleguides/general.md"
-]);
+const REQUIRED_STAGED_FILES = new Set(["product.md", "guidelines.md", "tech-stack.md"]);
+const OPTIONAL_STAGED_FILE = /^(?:workflow\.md|styleguides\/[a-z0-9-]+\.md)$/;
 
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -75,10 +76,10 @@ function normalizeCadrePath(input: string): string {
   }
   if (normalized.startsWith("init/")) {
     throw new Error(
-      `Initialization artifacts are relative to .cadre-stage/create; use ${normalized.slice("init/".length)} instead of ${normalized}`
+      `Initialization artifacts are relative to .cadre/stage/create; use ${normalized.slice("init/".length)} instead of ${normalized}`
     );
   }
-  if (!REQUIRED_APPROVED_FILES.has(normalized) && !/^styleguides\/[a-z0-9-]+\.md$/.test(normalized)) {
+  if (!REQUIRED_STAGED_FILES.has(normalized) && !OPTIONAL_STAGED_FILE.test(normalized)) {
     throw new Error(`Unsupported initialization artifact: ${input}`);
   }
   return normalized;
@@ -131,7 +132,6 @@ function projectState(
 
 function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitProposal {
   const root = safeProjectRoot(input.projectRoot);
-  if (existsSync(join(root, ".cadre"))) throw new Error(`${root}/.cadre already exists`);
   if (!input.projectName.trim()) throw new Error("Project name is required");
   if (!Number.isFinite(Date.parse(input.approvedAt))) throw new Error("approvedAt must be an ISO timestamp");
   if (input.baseCommit !== null && !/^[0-9a-f]{7,40}$/.test(input.baseCommit)) {
@@ -145,17 +145,44 @@ function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitPr
     assertRendered(file.content, path);
     approved.set(path, file.content.endsWith("\n") ? file.content : `${file.content}\n`);
   }
-  for (const path of REQUIRED_APPROVED_FILES) {
+  for (const path of REQUIRED_STAGED_FILES) {
     if (!approved.has(path)) throw new Error(`Missing approved initialization artifact: ${path}`);
   }
 
-  const approvedPaths = [...approved.keys()].sort();
-  const approvedArtifactHashes = approvedPaths.map((path) => ({ path, sha256: hash(approved.get(path)!) }));
-  const [gitignoreTemplate, projectTemplate, patternIndexTemplate] = getTemplates([
-    "project/gitignore", "project/project", "project/patterns/index"
+  if (!Array.isArray(input.styleguideIds) || !input.styleguideIds.length) {
+    throw new Error("Initialization requires at least the general styleguide ID");
+  }
+  if (new Set(input.styleguideIds).size !== input.styleguideIds.length) {
+    throw new Error("Initialization styleguide IDs must be unique");
+  }
+  if (!input.styleguideIds.includes("project/styleguides/general")) {
+    throw new Error("Initialization styleguide IDs must include project/styleguides/general");
+  }
+  if (input.styleguideIds.some((id) => id !== "project/styleguides/general" && !/^styleguide\/[a-z0-9-]+$/.test(id))) {
+    throw new Error("Initialization styleguide IDs must reference bundled styleguides");
+  }
+  const [gitignoreTemplate, projectTemplate, patternIndexTemplate, workflowTemplate, ...styleguideTemplates] = getTemplates([
+    "project/gitignore", "project/project", "project/patterns/index", "project/workflow", ...input.styleguideIds
   ]);
+  const generatedContext = new Map<string, string>([["workflow.md", workflowTemplate!.content]]);
+  for (const template of styleguideTemplates) {
+    const descriptor = describeTemplate(template);
+    if (!descriptor.artifactPath) throw new Error(`Styleguide ${template.id} has no artifact destination`);
+    const content = template.id === "project/styleguides/general"
+      ? template.content.replace("{{GENERAL_STYLE_ADDITIONS}}", "- None.")
+      : template.content;
+    generatedContext.set(descriptor.artifactPath, content);
+  }
+  for (const path of approved.keys()) {
+    if (path.startsWith("styleguides/") && !generatedContext.has(path)) {
+      throw new Error(`Initialization override ${path} is not in the selected styleguide set`);
+    }
+  }
+  for (const [path, content] of approved) generatedContext.set(path, content);
+  const approvedPaths = [...generatedContext.keys()].sort();
+  const approvedArtifactHashes = approvedPaths.map((path) => ({ path, sha256: hash(generatedContext.get(path)!) }));
   const generated = new Map<string, string>([
-    ...approved.entries(),
+    ...generatedContext.entries(),
     [".gitignore", gitignoreTemplate!.content],
     ["project.json", projectState(input, approvedPaths, approvedArtifactHashes, projectTemplate!.content)],
     ["patterns/index.md", patternIndexTemplate!.content],
@@ -190,7 +217,20 @@ function loadProjectInitCandidate(input: ProjectInitCandidateInput): Materialize
 }
 
 export function previewProjectInitCandidate(input: ProjectInitCandidateInput): ProjectInitProposal {
+  assertInitializationBootstrap(input.projectRoot);
   return buildProjectInitProposal(loadProjectInitCandidate(input));
+}
+
+function assertInitializationBootstrap(projectRootInput: string): void {
+  const root = safeProjectRoot(projectRootInput);
+  const cadreRoot = join(root, ".cadre");
+  if (!existsSync(cadreRoot) || !lstatSync(cadreRoot).isDirectory() || lstatSync(cadreRoot).isSymbolicLink()) {
+    throw new Error(`${cadreRoot} must be a prepared candidate-stage directory`);
+  }
+  const unexpected = readdirSync(cadreRoot).filter((entry) => ![".gitignore", "stage"].includes(entry));
+  if (unexpected.length) {
+    throw new Error(`${cadreRoot} already contains canonical project state: ${unexpected.sort().join(", ")}`);
+  }
 }
 
 function targetWithin(root: string, relativePath: string): string {
@@ -210,32 +250,29 @@ function assertNoSymlinkPath(root: string, target: string): void {
   }
 }
 
-function applyProjectInitAtStage(
+function applyProjectInitAtRoot(
   input: MaterializedProjectInit,
-  proposal: ProjectInitProposal,
-  stage: string,
-  replaceablePaths: Set<string> = new Set()
+  proposal: ProjectInitProposal
 ): ProjectInitProposal {
   const projectRoot = safeProjectRoot(input.projectRoot);
-  if (existsSync(stage) && (!lstatSync(stage).isDirectory() || lstatSync(stage).isSymbolicLink())) {
-    throw new Error(`Initialization stage is not a regular directory: ${stage}`);
-  }
-  mkdirSync(stage, { recursive: true });
+  const cadreRoot = join(projectRoot, ".cadre");
   for (const file of proposal.files) {
-    const target = targetWithin(stage, file.path);
-    assertNoSymlinkPath(stage, target);
+    const target = targetWithin(cadreRoot, file.path);
+    assertNoSymlinkPath(cadreRoot, target);
     mkdirSync(dirname(target), { recursive: true });
     if (existsSync(target)) {
       const current = readFileSync(target, "utf8");
-      if (current !== file.content) {
-        if (!replaceablePaths.has(file.path)) throw new Error(`Interrupted initialization disagrees at ${file.path}`);
-        writeFileSync(target, file.content);
-      }
-    } else writeFileSync(target, file.content);
+      if (current !== file.content) throw new Error(`Interrupted initialization disagrees at ${file.path}`);
+      continue;
+    }
+    const temporaryPath = join(dirname(target), `.cadre-init-${process.pid}-${randomUUID()}.tmp`);
+    try {
+      writeFileSync(temporaryPath, file.content, { flag: "wx" });
+      renameSync(temporaryPath, target);
+    } finally {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    }
   }
-  const finalRoot = join(projectRoot, ".cadre");
-  if (existsSync(finalRoot)) throw new Error(`${finalRoot} appeared after preview; refusing to overwrite it`);
-  renameSync(stage, finalRoot);
   return proposal;
 }
 
@@ -248,9 +285,7 @@ export function applyProjectInitCandidate(
   if (proposal.digest !== proposalDigest) {
     throw new Error("Initialization candidate changed after preview; preview it again");
   }
-  const stage = candidateStageRoot(input.projectRoot, "create");
-  const replaceablePaths = new Set(materialized.files.map((file) => normalizeCadrePath(file.path)));
-  return applyProjectInitAtStage(materialized, proposal, stage, replaceablePaths);
+  return applyProjectInitAtRoot(materialized, proposal);
 }
 
 export function recordSetupCommit(projectRootInput: string, commit: string): string {
