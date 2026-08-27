@@ -150,8 +150,9 @@ uncommitted Cadre state, and the next legal command without normalizing files.
 ## wisp
 
 Use `wisp` for a lightweight investigation, question, or spike that should not
-enter Cadre lifecycle state. Disposable output may live under ignored
-`.cadre/wisps/`; ordinary exploration has zero approvals. Persistent product
+enter Cadre lifecycle state. Disposable output may live under `.cadre/wisps/`
+only when the initialized project already ignores it; otherwise it uses an OS
+temporary directory and never creates `.cadre/`. Ordinary exploration has zero approvals. Persistent product
 changes should be promoted to `track`; explicitly requested untracked edits
 receive one exact scope approval and are not committed automatically.
 

@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
+import { createCadreServer } from "../src/mcp/server.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,8 +44,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.5.0") {
-  errors.push("package: expected publish identity cadre-ai@3.5.0");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.5.1") {
+  errors.push("package: expected publish identity cadre-ai@3.5.1");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
@@ -87,6 +90,59 @@ for (const skill of skills) {
       errors.push(`${skill}: references removed project-local runtime or templates`);
     }
   }
+}
+
+for (const skill of ["track", "review", "revise", "refresh", "revert"]) {
+  const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+  if (!body.includes("planValidations")) {
+    errors.push(`${skill}: staged plan guidance must use planValidations`);
+  }
+}
+for (const skill of ["create", "track", "review", "revise", "archive", "refresh", "revert"]) {
+  const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+  if (!body.includes("expectedFiles")) errors.push(`${skill}: candidate preparation must declare expectedFiles`);
+}
+for (const skill of ["track", "implement", "review", "revise", "archive", "refresh", "revert"]) {
+  const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+  if (!body.includes("project_status") || !/stop[^\n]*(?:invalid|`valid`|graph)/i.test(body)) {
+    errors.push(`${skill}: mutating workflow must stop on invalid status or graph results`);
+  }
+}
+const workflowReferencePattern = new RegExp(`\\$(?:${skills.join("|")})\\b`);
+for (const skill of skills) {
+  const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+  if (workflowReferencePattern.test(body)) errors.push(`${skill}: contains a client-specific workflow reference`);
+}
+const exactPrepareFields: Record<string, string[]> = {
+  create: ["request:", "mode:", "projectRoot", "projectName", "context", "gitDisposition", "baseCommit", "approvedAt", "stagedFiles", "styleguideIds"],
+  review: ["request:", "mode:", "projectRoot", "trackId", "approval", "acceptedRisks"],
+  archive: ["request:", "mode:", "projectRoot", "candidateId", "selectedTracks", "updates"],
+  implement: ["request:", "mode:", "projectRoot", "trackId", "executionId", "nodeId"]
+};
+for (const [skill, fields] of Object.entries(exactPrepareFields)) {
+  const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
+  const missing = fields.filter((field) => !body.includes(field));
+  if (missing.length) errors.push(`${skill}: adaptive prepare guidance is missing ${missing.join(", ")}`);
+}
+const implementSkill = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
+if (!implementSkill.includes("cadre(implement): complete <track-id>")) {
+  errors.push("implement: missing final completion bookkeeping commit guidance");
+}
+for (const file of [
+  join(root, "src", "mcp", "server.ts"),
+  join(root, "skills", "review", "SKILL.md"),
+  join(root, "README.md")
+]) {
+  if (readFileSync(file, "utf8").includes("commitRangeStart")) {
+    errors.push(`${relative(root, file)}: retired review_complete.commitRangeStart remains`);
+  }
+}
+const refreshSkill = readFileSync(join(root, "skills", "refresh", "SKILL.md"), "utf8");
+if (!refreshSkill.includes("targetRuntimeVersion") || !refreshSkill.includes("targetTemplateSetVersion")) {
+  errors.push("refresh: upgrade guidance must use project_status target versions");
+}
+if (/runtimeVersion:\s*\d|templateSetVersion:\s*v\d/.test(refreshSkill)) {
+  errors.push("refresh: upgrade guidance must not hard-code runtime or template versions");
 }
 
 const templateRoot = join(root, "templates", "v2");
@@ -219,7 +275,11 @@ for (const file of ["scripts/install.mjs", "scripts/package-plugin.mjs", "script
   if (existsSync(join(root, file))) errors.push(`runtime: legacy JavaScript source remains at ${file}`);
 }
 
-const codexManifest = readJson<{ mcpServers?: string }>(join(root, ".codex-plugin", "plugin.json"));
+const codexManifest = readJson<{ version?: string; mcpServers?: string }>(join(root, ".codex-plugin", "plugin.json"));
+const claudeManifest = readJson<{ version?: string }>(join(root, ".claude-plugin", "plugin.json"));
+if (codexManifest.version !== packageManifest.version || claudeManifest.version !== packageManifest.version) {
+  errors.push("plugin manifests: Codex and Claude versions must match the package version");
+}
 if (codexManifest.mcpServers !== "./.mcp.codex.json") {
   errors.push("Codex manifest: MCP companion path is missing");
 }
@@ -236,6 +296,21 @@ const claudeMcp = readJson<StdioMcpConfig>(join(root, ".mcp.json"));
 if (claudeMcp.mcpServers?.cadre?.command !== "node"
   || claudeMcp.mcpServers.cadre.args?.[0] !== "${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs") {
   errors.push("Claude MCP config: Cadre stdio command is invalid");
+}
+
+try {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createCadreServer();
+  const client = new Client({ name: "cadre-validation", version: "1.0.0" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const tools = await client.listTools();
+  const catalogBytes = Buffer.byteLength(JSON.stringify(tools.tools));
+  if (tools.tools.length !== 22) errors.push(`MCP catalog: expected 22 tools, found ${tools.tools.length}`);
+  if (catalogBytes > 18 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 18 KiB limit`);
+  await client.close();
+  await server.close();
+} catch (error) {
+  errors.push(`MCP catalog: ${errorMessage(error)}`);
 }
 
 if (errors.length) {

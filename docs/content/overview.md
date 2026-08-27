@@ -14,7 +14,7 @@ order: 10
 
 Cadre is a human-governed, Git-aware delivery harness for OpenAI Codex, Claude
 Code, and the native Zed Agent. Codex and Claude Code integrations are stable;
-Zed Agent support is beta in Cadre 3.5.0. Cadre turns approved project context into
+Zed Agent support is beta in Cadre 3.5.1. Cadre turns approved project context into
 resumable feature and bug tracks, carries learning forward between phases, and
 records implementation provenance in Git.
 

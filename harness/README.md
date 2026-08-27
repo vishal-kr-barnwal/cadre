@@ -170,8 +170,9 @@ Cadre will:
 1. Inspect the repository and Git state.
 2. Classify it as greenfield or brownfield, asking when the evidence is unclear.
 3. Propose product, engineering, tech-stack, workflow, and applicable styleguide artifacts.
-4. Ask for separate approval of the default or amended workflow and styleguides.
-5. Preview the exact `.cadre` file set before applying it.
+4. Present the default or amended workflow, styleguides, and exact `.cadre`
+   file set in one final initialization approval envelope.
+5. Apply only that digest-bound proposal.
 6. Initialize Git when the approved project root is not already in a worktree.
 7. Validate and commit the approved setup with resumable checkpoints.
 
@@ -183,7 +184,7 @@ Claude Code: /cadre:track Fix duplicate invoice creation as a bug
 Zed Agent:   /cadre-track Add passwordless login as a feature
 ```
 
-Cadre proposes and separately approves:
+Cadre proposes and approves together:
 
 - `spec.md`, containing functional requirements, non-functional requirements, acceptance criteria, dependencies, additional information, and dependent-track impact;
 - `plan.md`, defining an acyclic phase/task dependency graph with derived manual-verification barriers;
@@ -318,18 +319,18 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 | --- | --- | --- |
 | `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguide descriptors and hashes for an approved technology list. |
-| `project_status` | No | Return scoped project, track, or implementation status. |
+| `project_status` | No | Return complete validation plus scoped canonical, staged, shadowed, or implementation status. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
-| `candidate_stage_prepare` | Atomic | Create/resume `.cadre/stage/<id>` and enforce its Git ignore rule. |
-| `candidate_inspect` | No | Return one exact manifest and optional staged-plan graph validation. |
+| `candidate_stage_prepare` | Atomic | Create/resume a stage and optionally prune files outside its exact `expectedFiles` set. |
+| `candidate_inspect` | No | Return one exact manifest and validate every staged root or nested plan against its declared target status. |
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
-| `review_complete` | Adaptive | Return `approval_required` for a clean-review decision, then apply the unchanged token after approval. |
+| `review_complete` | Adaptive | Derive the full execution-base review range, then prepare/apply an idempotent clean completion. |
 | `archive_batch_candidate` | Adaptive | Read staged pattern/seed files, return the complete batch for approval, then apply its unchanged token. |
 | `archive_batch_record` | Atomic | Record the resulting archive commit in track, project, and batch provenance without a second decision. |
 | `execution_start` | Atomic | Create the authorized execution journal and enter `in_progress` in one call. |
-| `execution_checkpoint` | Atomic | Expand and apply one semantic event as a complete legal, evidence-gated transition sequence. |
+| `execution_checkpoint` | Atomic | Apply one strict `scope` + event-specific `action` with required evidence. |
 | `execution_status` | No | Return a compact ready/active/blocked scheduler view, with optional focused node detail. |
-| `execution_finish` | Atomic | Require completed nodes, current plan evidence, and removed worktrees before writing `ready_for_review`. |
+| `execution_finish` | Atomic | Convergently write completed execution, plan markers, `ready_for_review` state, and index. |
 | `worktree_create` | Atomic | Create/reconcile a worktree and record node start. |
 | `integration` | Adaptive | Merge and record integration; require a second call only in governed mode. |
 | `worktree_cleanup` | Atomic | Remove a verified integrated worktree and record completion. |
@@ -338,7 +339,15 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 | `setup_record_commit` | Yes | Record the already-created setup commit SHA and complete setup state. |
 | `tracks_render` | Atomic | Validate and write deterministic `tracks.md` from current track state. |
 
-The MCP server cannot approve its own proposals or run arbitrary shell commands. Its Git surface is limited to derived Cadre worktree creation, non-squash integration, status, and verified cleanup. It never force-deletes a branch, resolves a conflict, edits product files, or commits on behalf of a worker. Already-authorized deterministic writes and Git mutations validate and apply atomically; genuine decision boundaries retain digest-bound proposal tokens and stale-state rejection.
+The four adaptive tools use a strict `request` union: prepare accepts only its
+declared fields, while apply accepts only an unchanged `proposalToken`. The MCP
+server cannot approve its own proposals or run arbitrary shell commands. Its
+Git surface is limited to derived Cadre worktree creation, non-squash
+integration, status, and verified cleanup. It never force-deletes a branch,
+resolves a conflict, edits product files, or commits on behalf of a worker.
+Multi-file state operations use atomic individual writes and converge from
+matching partial state; mismatched bytes, hashes, journals, or Git HEAD remain
+hard failures.
 
 Review and archive minimize approval fragmentation without weakening governance. A finding disposition and its exact remediation artifacts may share one approval; explicit reject-and-complete records accepted risks in the clean review; and a uniquely eligible archive target is included directly in the full batch proposal. Archive prepare computes the post-move `tracks.md` before approval, including archived rows. Any changed content, selection, digest, or consequence requires a corrected proposal and renewed approval.
 

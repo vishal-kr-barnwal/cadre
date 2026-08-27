@@ -1,5 +1,5 @@
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeProjectRoot } from "./paths.js";
@@ -55,12 +55,18 @@ export function candidateStageRoot(projectRootInput: string, candidateIdInput: s
   return join(stageParent, candidateId);
 }
 
-export function prepareCandidateStage(projectRootInput: string, candidateIdInput: string): {
+export function prepareCandidateStage(projectRootInput: string, candidateIdInput: string, expectedFiles?: string[]): {
   stagePath: string;
   gitignorePath: string;
+  retainedFiles: string[];
+  removedFiles: string[];
 } {
   const projectRoot = safeProjectRoot(projectRootInput);
   const candidateId = normalizeCandidateId(candidateIdInput);
+  const normalizedExpected = expectedFiles?.map(normalizeCandidatePath);
+  if (normalizedExpected && new Set(normalizedExpected).size !== normalizedExpected.length) {
+    throw new Error("Candidate expectedFiles contains duplicate paths");
+  }
   const cadreRoot = join(projectRoot, ".cadre");
   if (existsSync(cadreRoot)) {
     const stat = lstatSync(cadreRoot);
@@ -86,7 +92,24 @@ export function prepareCandidateStage(projectRootInput: string, candidateIdInput
   const stagePath = join(cadreRoot, "stage", candidateId);
   mkdirSync(stagePath, { recursive: true });
   candidateStageRoot(projectRoot, candidateId);
-  return { stagePath, gitignorePath };
+  const retainedFiles = listCandidatePaths(projectRoot, candidateId);
+  if (normalizedExpected === undefined) return { stagePath, gitignorePath, retainedFiles, removedFiles: [] };
+  const expected = new Set(normalizedExpected);
+  const removedFiles = retainedFiles.filter((path) => !expected.has(path));
+  for (const path of removedFiles) unlinkSync(join(stagePath, path));
+  const pruneEmptyDirectories = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory()) pruneEmptyDirectories(join(directory, entry.name));
+    }
+    if (directory !== stagePath && readdirSync(directory).length === 0) rmdirSync(directory);
+  };
+  pruneEmptyDirectories(stagePath);
+  return {
+    stagePath,
+    gitignorePath,
+    retainedFiles: retainedFiles.filter((path) => expected.has(path)),
+    removedFiles
+  };
 }
 
 function assertRegularPath(root: string, target: string): void {

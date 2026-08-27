@@ -1,5 +1,57 @@
 # Changelog
 
+## [3.5.1] - 2026-08-27
+
+Cadre 3.5.1 is a workflow-recovery hotfix for candidate validation, staged
+track resumption, and interrupted multi-file operations. Codex and Claude Code
+remain stable integrations; native Zed Agent support remains beta.
+
+### Fixed
+
+- Replaced the faulty single-plan candidate contract with exact
+  `planValidations` for every staged root or nested `plan.md`. Candidate
+  digests now bind normalized plan paths and intended target statuses.
+- Made `project_status` distinguish canonical, candidate-only, shadowed,
+  malformed, and unknown track state. Focused status now returns complete
+  validation errors plus track/dependency-specific `focusedErrors`.
+- Added exact `expectedFiles` pruning for candidate stages so clarification or
+  scope contraction cannot leave stale proposal files behind.
+- Made project initialization, execution finish, clean review, archive apply,
+  and archive provenance recording converge safely after interruption without
+  duplicate cycles or history.
+- Derived clean-review ranges from the completed execution base through its
+  recorded HEAD, including the first implementation commit.
+- Corrected lifecycle routing across all ten workflows, including staged-track
+  recovery, immutable terminal tracks, final implementation bookkeeping, and
+  Wisp output outside uninitialized repositories.
+- Removed client-specific cross-workflow command references from canonical
+  guidance and kept generated Zed adapters on text template mode with
+  `/cadre-*` recommendations.
+
+### MCP Contract Corrections
+
+- `candidate_inspect` removes the retired singular `targetStatus` input and
+  `plan` result in favor of `planValidations` and sorted `plans`.
+- `project_init_candidate`, `review_complete`, `archive_batch_candidate`, and
+  `integration` now publish strict `request` prepare/apply unions that reject
+  mixed-mode calls at schema validation.
+- `execution_checkpoint` now publishes a strict `scope` plus event-specific
+  `action` contract with explicit evidence requirements.
+- `review_complete` no longer accepts `commitRangeStart`.
+- The surface remains 22 tools and the generated catalog remains below the
+  18 KiB budget.
+
+### Compatibility And Upgrade
+
+- Existing approved operation journals remain readable and resumable.
+- Unapproved 3.5.0 candidate stages must be re-inspected under the corrected
+  validation contract before approval or promotion.
+- Existing 3.5.0 projects remain readable and use the normal approved refresh
+  workflow to record runtime 3.5.1 before further mutation. Template set v2 is
+  unchanged.
+- Reinstall all selected clients and start fresh client sessions so the
+  corrected schemas and workflow guidance replace cached 3.5.0 definitions.
+
 ## [3.5.0] - 2026-08-27
 
 Cadre 3.5.0 adds beta support for the native Zed Agent while keeping the

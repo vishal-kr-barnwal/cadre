@@ -7,7 +7,7 @@ description: Validate and summarize current Cadre project, track, dependency, ph
 
 Read `.cadre/workflow.md`, `project.json`, generated `tracks.md`, and track-local state/spec/plan files discovered under both `tracks/` and `archive/`. Read dependency state from each track's `state.json`, never from `tracks.md`. This command is read-only. If the Cadre MCP is unavailable, stop and report it; do not use a copied or reconstructed runtime.
 
-Call `project_status` once with the exact root and the narrowest view: `project` for an overview, `track` plus `trackId` for one lifecycle, or `implementation` plus `trackId` and optional `executionId` for DAG, scheduler, and worktree state. Use its embedded validation; do not repeat `state_validate`, `execution_status`, or a separate worktree read at entry. If results disagree with files you read, report the inconsistency rather than repairing it.
+Call `project_status` once with the narrowest view and use its embedded structured validation; do not repeat `state_validate` at command entry. Treat `errors` as the complete explanation for `valid` and `focusedErrors` as the selected-track subset. Project view reports staged candidates; focused view distinguishes candidate-only, canonical-with-stage, malformed canonical, and unknown IDs. Never silently treat a stage as canonical or omit a shadowed candidate.
 
 Present:
 
@@ -17,5 +17,6 @@ Present:
 - blockers and stale dependent-track assessments;
 - ready-for-review, completed-not-archived, and archived counts;
 - validation errors and uncommitted Cadre state changes.
+- staged proposal manifests, malformed stages, and canonical candidates awaiting safe cleanup.
 
 Read any file before quoting or interpreting it. Do not mutate files, run commits, or silently normalize state.

@@ -217,19 +217,40 @@ function loadProjectInitCandidate(input: ProjectInitCandidateInput): Materialize
 }
 
 export function previewProjectInitCandidate(input: ProjectInitCandidateInput): ProjectInitProposal {
-  assertInitializationBootstrap(input.projectRoot);
-  return buildProjectInitProposal(loadProjectInitCandidate(input));
+  const proposal = buildProjectInitProposal(loadProjectInitCandidate(input));
+  assertInitializationBootstrap(input.projectRoot, proposal);
+  return proposal;
 }
 
-function assertInitializationBootstrap(projectRootInput: string): void {
+function assertInitializationBootstrap(projectRootInput: string, proposal: ProjectInitProposal): void {
   const root = safeProjectRoot(projectRootInput);
   const cadreRoot = join(root, ".cadre");
   if (!existsSync(cadreRoot) || !lstatSync(cadreRoot).isDirectory() || lstatSync(cadreRoot).isSymbolicLink()) {
     throw new Error(`${cadreRoot} must be a prepared candidate-stage directory`);
   }
-  const unexpected = readdirSync(cadreRoot).filter((entry) => ![".gitignore", "stage"].includes(entry));
-  if (unexpected.length) {
-    throw new Error(`${cadreRoot} already contains canonical project state: ${unexpected.sort().join(", ")}`);
+  const expected = new Map(proposal.files.map((file) => [file.path, file.content]));
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const target = join(directory, entry.name);
+      const path = relative(cadreRoot, target).replaceAll("\\", "/");
+      if (path === "stage" || path.startsWith("stage/")) continue;
+      if (entry.isSymbolicLink()) throw new Error(`Refusing symbolic link inside initialization state: ${target}`);
+      if (entry.isDirectory()) {
+        visit(target);
+        continue;
+      }
+      if (!entry.isFile()) throw new Error(`Unsupported initialization state entry: ${target}`);
+      const content = expected.get(path);
+      if (content === undefined) throw new Error(`${cadreRoot} contains unexpected canonical state: ${path}`);
+      if (readFileSync(target, "utf8") !== content) {
+        throw new Error(`Interrupted initialization disagrees at ${path}`);
+      }
+    }
+  };
+  visit(cadreRoot);
+  const canonicalEntries = readdirSync(cadreRoot).filter((entry) => ![".gitignore", "stage"].includes(entry));
+  if (canonicalEntries.length && !canonicalEntries.some((entry) => proposal.files.some((file) => file.path === entry || file.path.startsWith(`${entry}/`)))) {
+    throw new Error(`${cadreRoot} contains unrelated canonical project state`);
   }
 }
 

@@ -200,9 +200,14 @@ function hash(value: unknown): string {
 }
 
 function writeJournalAtomically(path: string, journal: ExecutionJournal): void {
+  writeTextAtomically(path, `${JSON.stringify(journal, null, 2)}\n`);
+}
+
+function writeTextAtomically(path: string, content: string): void {
+  if (existsSync(path) && readFileSync(path, "utf8") === content) return;
   const temporaryPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(temporaryPath, `${JSON.stringify(journal, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(temporaryPath, content, { flag: "wx" });
     renameSync(temporaryPath, path);
   } finally {
     if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
@@ -919,6 +924,22 @@ export interface ExecutionFinishInput {
 export type ExecutionFinishRequest = Pick<ExecutionFinishInput, "projectRoot" | "trackId" | "executionId">;
 
 export function deriveExecutionFinishInput(input: ExecutionFinishRequest): ExecutionFinishInput {
+  const journal = readExecution(input.projectRoot, input.trackId, input.executionId);
+  if (journal.status === "completed" && journal.headCommit && journal.completedAt) {
+    return { ...input, headCommit: journal.headCommit, completedAt: journal.completedAt };
+  }
+  const { statePath } = executionPaths(input.projectRoot, input.trackId, input.executionId);
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as ExecutionTrackState;
+  const priorHead = state.lastExecution?.headCommit;
+  const priorCompletedAt = state.lastExecution?.completedAt;
+  if (state.lastExecution?.executionId === input.executionId
+    && typeof priorHead === "string" && typeof priorCompletedAt === "string") {
+    return {
+      ...input,
+      headCommit: priorHead,
+      completedAt: priorCompletedAt
+    };
+  }
   return {
     ...input,
     headCommit: resolveGitCommit(input.projectRoot),
@@ -960,7 +981,11 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   const state = JSON.parse(stateBody) as ExecutionTrackState;
   const journal = JSON.parse(journalBody) as ExecutionJournal;
   const operation = state.operation as ExecutionOperation | null | undefined;
-  if (operation?.action !== "implement" || operation.executionId !== input.executionId) {
+  const stateAlreadyCompleted = state.status === "ready_for_review"
+    && state.lastExecution?.executionId === input.executionId
+    && state.lastExecution.headCommit === input.headCommit
+    && state.lastExecution.completedAt === input.completedAt;
+  if (!stateAlreadyCompleted && (operation?.action !== "implement" || operation.executionId !== input.executionId)) {
     throw new Error("track does not point to this implementation execution");
   }
   if (!(["in_progress", "completed"] as const).includes(journal.status)) throw new Error("execution cannot be completed");
@@ -1007,7 +1032,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
     completedAt: input.completedAt,
     headCommit: input.headCommit
   };
-  const completedState: ExecutionTrackState = {
+  const completedState: ExecutionTrackState = stateAlreadyCompleted ? state : {
     ...state,
     status: "ready_for_review",
     checkpoint: "ready_for_review",
@@ -1062,25 +1087,10 @@ export function applyExecutionFinish(
     || lstatSync(proposal.tracksPath).isSymbolicLink()) {
     throw new Error("refusing to complete execution through a symbolic link");
   }
-  const journalTemporaryPath = join(dirname(proposal.journalPath), `.${basename(proposal.journalPath)}.${process.pid}.${randomUUID()}.tmp`);
-  const stateTemporaryPath = join(dirname(proposal.statePath), `.${basename(proposal.statePath)}.${process.pid}.${randomUUID()}.tmp`);
-  const planTemporaryPath = join(dirname(proposal.planPath), `.${basename(proposal.planPath)}.${process.pid}.${randomUUID()}.tmp`);
-  const tracksTemporaryPath = join(dirname(proposal.tracksPath), `.${basename(proposal.tracksPath)}.${process.pid}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(journalTemporaryPath, `${JSON.stringify(proposal.journal, null, 2)}\n`, { flag: "wx" });
-    writeFileSync(stateTemporaryPath, `${JSON.stringify(proposal.state, null, 2)}\n`, { flag: "wx" });
-    writeFileSync(planTemporaryPath, proposal.planContent, { flag: "wx" });
-    writeFileSync(tracksTemporaryPath, proposal.tracksContent, { flag: "wx" });
-    renameSync(journalTemporaryPath, proposal.journalPath);
-    renameSync(stateTemporaryPath, proposal.statePath);
-    renameSync(planTemporaryPath, proposal.planPath);
-    renameSync(tracksTemporaryPath, proposal.tracksPath);
-  } finally {
-    if (existsSync(journalTemporaryPath)) unlinkSync(journalTemporaryPath);
-    if (existsSync(stateTemporaryPath)) unlinkSync(stateTemporaryPath);
-    if (existsSync(planTemporaryPath)) unlinkSync(planTemporaryPath);
-    if (existsSync(tracksTemporaryPath)) unlinkSync(tracksTemporaryPath);
-  }
+  writeTextAtomically(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
+  writeTextAtomically(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
+  writeTextAtomically(proposal.planPath, proposal.planContent);
+  writeTextAtomically(proposal.tracksPath, proposal.tracksContent);
   return proposal;
 }
 

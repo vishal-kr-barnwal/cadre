@@ -40,7 +40,7 @@ The installed plugin owns the runtime and immutable template catalog.
 ├── archive/
 ├── stage/                  # ignored unapproved candidate artifacts
 ├── .worktrees/             # ignored execution worktrees
-└── wisps/                  # ignored disposable exploration output
+└── wisps/                  # optional ignored output in initialized projects
 ```
 
 ## Sources Of Truth

@@ -7,6 +7,61 @@ order: 230
 
 # Release Notes
 
+## 3.5.1 - 2026-08-27
+
+Cadre 3.5.1 hardens all ten workflows against validation, routing, stale-stage,
+and interrupted-write failures. Codex and Claude Code support remains stable;
+native Zed Agent support remains beta.
+
+### Candidate and status recovery
+
+- Candidate inspection validates every staged root or nested `plan.md` through
+  exact `planValidations`, returns sorted `plans`, and binds validation context
+  into the approval digest.
+- Candidate preparation accepts `expectedFiles` and safely prunes obsolete
+  regular files after a complete symlink/non-file preflight.
+- Project status reports sorted staged candidates in project view and keeps
+  canonical, candidate-only, shadowed, malformed, and unknown states distinct.
+  Focused views include complete errors and a selected-track/dependency subset.
+- Track, revise, review, revert, refresh, status, and archive guidance now stop
+  or resume at the correct lifecycle boundary instead of confusing an
+  unapproved stage with canonical state.
+
+### Convergent operations
+
+- Project initialization resumes when partial canonical files exactly match
+  the approved proposal.
+- Execution finish reuses persisted completion evidence and completes any
+  remaining journal, state, plan, or index writes.
+- Clean-review retry repairs a stale index without duplicating its review
+  cycle. Its Git range is derived from execution base through reviewed HEAD.
+- Archive apply and record resume from their approved operation journal and do
+  not duplicate track or project history.
+- Implementation creates one final `cadre(implement): complete <track-id>`
+  bookkeeping commit before review.
+
+### Corrected MCP schemas
+
+The four approval-aware tools now use strict `request` prepare/apply unions,
+and `execution_checkpoint` uses strict `scope` plus event-specific `action`
+objects. The retired `candidate_inspect.targetStatus`, singular `plan` result,
+and `review_complete.commitRangeStart` are removed. The MCP surface remains 22
+tools within the 18 KiB catalog limit.
+
+Unapproved 3.5.0 candidate stages must be re-inspected. Approved operation
+journals remain readable and resumable. Existing 3.5.0 projects use the normal
+approved `refresh` workflow to record runtime 3.5.1; template set v2 is
+unchanged.
+
+```bash
+npm install -g cadre-ai@3.5.1
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, run `/reload-plugins` in Claude Code, and open a new
+Zed Agent thread so each client loads the corrected schemas and skills.
+
 ## 3.5.0 - 2026-08-27
 
 Cadre 3.5.0 adds beta support for the native Zed Agent. Codex and Claude Code

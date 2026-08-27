@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod/v4";
@@ -30,7 +30,6 @@ import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_APPROVAL_MODES,
-  EXECUTION_CHECKPOINT_EVENTS,
   applyExecutionCheckpoint,
   applyExecutionFinish,
   applyExecutionStart,
@@ -84,7 +83,13 @@ import {
 import { CadreError, serializeCadreError } from "../domain/errors.js";
 import { resolveGitCommit } from "../domain/git.js";
 import { ProposalTokenStore, proposalTokenSchema } from "./proposals.js";
-import { listCandidatePaths, prepareCandidateStage, readCandidateFiles } from "../domain/staging.js";
+import {
+  listCandidatePaths,
+  normalizeCandidatePath,
+  prepareCandidateStage,
+  readCandidateFiles,
+  type CandidateFile
+} from "../domain/staging.js";
 import { CADRE_MCP_TOOLS } from "./tool-names.js";
 
 function result<T extends object>(value: T, summary = "Cadre operation completed.") {
@@ -131,6 +136,12 @@ function artifact(path: string, content: string) {
   return { path, sha256: sha256(content) };
 }
 
+function candidateManifest(files: CandidateFile[]) {
+  return files
+    .map((file) => artifact(file.path, file.content))
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
 function jsonArtifact(path: string, value: unknown) {
   return artifact(path, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -160,18 +171,13 @@ function requireCurrentProject(projectRoot: string): string {
   return root;
 }
 
-const adaptiveModeSchema = z.enum(["prepare", "apply"]);
-
 function adaptiveInputSchema(prepare: z.ZodRawShape) {
-  const optionalPrepare = Object.fromEntries(Object.entries(prepare).map(([key, schema]) => [
-    key,
-    (schema as unknown as { optional(): z.ZodType }).optional()
-  ])) as z.ZodRawShape;
-  return z.object({
-    mode: adaptiveModeSchema,
-    proposalToken: proposalTokenSchema.optional(),
-    ...optionalPrepare
-  }).strict();
+  return {
+    request: z.discriminatedUnion("mode", [
+      z.strictObject({ mode: z.literal("prepare"), ...prepare }),
+      z.strictObject({ mode: z.literal("apply"), proposalToken: proposalTokenSchema })
+    ])
+  };
 }
 
 function normalizeAdaptiveInput(
@@ -274,6 +280,64 @@ function projectStatusView(validation: ReturnType<typeof validateProject>) {
   };
 }
 
+type ProjectValidation = ReturnType<typeof validateProject>;
+
+function focusedValidationErrors(validation: ProjectValidation, root: string, trackIds: string[]): string[] {
+  const markers = trackIds.flatMap((id) => [
+    `${id}:`,
+    join(root, ".cadre", "tracks", id),
+    join(root, ".cadre", "archive", id),
+    `/${id}/`
+  ]);
+  return validation.errors.filter((error) => markers.some((marker) => error.includes(marker)));
+}
+
+function stagedTrackCandidates(root: string, validation: ProjectValidation) {
+  const stageRoot = join(root, ".cadre", "stage");
+  if (!existsSync(stageRoot)) return [];
+  return readdirSync(stageRoot, { withFileTypes: true })
+    .filter((entry) => entry.name.startsWith("track-") && entry.name.length > "track-".length)
+    .map((entry) => {
+      const candidateId = entry.name;
+      const trackId = candidateId.slice("track-".length);
+      const canonical = validation.tracks.find((track) => track.id === trackId);
+      const canonicalState = canonical?.location.startsWith("archive/")
+        ? "archived" as const
+        : canonical
+          ? "active" as const
+          : [join(root, ".cadre", "tracks", trackId), join(root, ".cadre", "archive", trackId)]
+              .some((path) => existsSync(path))
+            ? "invalid" as const
+            : "absent" as const;
+      try {
+        const paths = listCandidatePaths(root, candidateId);
+        const files = candidateManifest(readCandidateFiles(root, candidateId, paths));
+        return {
+          trackId,
+          candidateId,
+          canonicalState,
+          valid: true,
+          files,
+          errors: [] as string[],
+          nextAction: canonicalState === "absent"
+            ? "Resume the unapproved proposal with the track workflow and candidate_inspect."
+            : "Reconcile the matching canonical operation, then remove the stage only after approved hashes and provenance are recorded."
+        };
+      } catch (error) {
+        return {
+          trackId,
+          candidateId,
+          canonicalState,
+          valid: false,
+          files: [],
+          errors: [serializeCadreError(error).message],
+          nextAction: "Repair or remove the unsafe staged candidate before resuming it."
+        };
+      }
+    })
+    .sort((left, right) => left.trackId.localeCompare(right.trackId));
+}
+
 const PLAN_VALIDATION_STATUSES = [
   "drafting-spec", "drafting-plan", "planned", "in_progress",
   "ready_for_review", "completed", "archived"
@@ -330,7 +394,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.workflowElicit, {
     title: "Collect Cadre workflow input",
-    description: "Present one read-only Cadre approval or clarification form. Skip it under non-interactive host policy, bind approvals to an immutable digest or checkpoint, never request secrets, and use its chat fallback once.",
+    description: "Request a decision.",
     inputSchema: workflowElicitationInputSchema,
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
@@ -365,7 +429,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.templateGetMany, {
     title: "Get multiple Cadre templates",
-    description: "Read ordered immutable Cadre templates in one call.",
+    description: "Read templates.",
     inputSchema: {
       ids: z.array(z.enum(TEMPLATE_IDS)).min(1),
       contentMode: z.enum(["embedded_resource", "text"]).optional().default("embedded_resource")
@@ -381,7 +445,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.styleguideResolve, {
     title: "Resolve default styleguides",
-    description: "Resolve the bundled idiomatic styleguides relevant to an approved technology list.",
+    description: "Resolve styleguides.",
     inputSchema: { technologies: z.array(z.string()).min(1) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ technologies }) => {
@@ -400,7 +464,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.projectStatus, {
     title: "Read Cadre project status",
-    description: "Read compact project, focused track, or implementation status with embedded validation.",
+    description: "Read project status.",
     inputSchema: {
       projectRoot: z.string().min(1),
       view: z.enum(["project", "track", "implementation"]).optional().default("project"),
@@ -420,18 +484,59 @@ export function createCadreServer(): McpServer {
           worktreeRuntime = null;
         }
         return result(
-          { ...projectStatusView(validation), worktreeRuntime },
+          { ...projectStatusView(validation), stagedTrackCandidates: stagedTrackCandidates(root, validation), worktreeRuntime },
           `Cadre project ${validation.errors.length ? "has validation errors" : "is valid"}; ${validation.tracks.length} track${validation.tracks.length === 1 ? "" : "s"}.`
         );
       }
       if (!trackId) throw new Error(`${view} project_status requires trackId`);
       const track = validation.tracks.find((candidate) => candidate.id === trackId);
-      if (!track) throw new Error(`unknown Cadre track ${trackId}`);
+      const stagedCandidate = stagedTrackCandidates(root, validation).find((candidate) => candidate.trackId === trackId);
+      if (!track) {
+        const canonicalPaths = [
+          join(root, ".cadre", "tracks", trackId),
+          join(root, ".cadre", "archive", trackId)
+        ];
+        if (canonicalPaths.some((path) => existsSync(path))) {
+          throw new CadreError(
+            "TRACK_STATE_INVALID",
+            `Cadre track ${trackId} has a canonical directory but its state is invalid or unreadable.`,
+            {
+              trackId,
+              errors: validation.errors.filter((error) => error.includes(trackId))
+            }
+          );
+        }
+        const candidateId = `track-${trackId}`;
+        if (!stagedCandidate) throw new Error(`unknown Cadre track ${trackId}`);
+        if (view === "implementation") {
+          throw new CadreError(
+            "TRACK_CANDIDATE_ONLY",
+            `Cadre track ${trackId} has a staged candidate but no canonical state; resume it with track status and candidate_inspect before implementation.`,
+            { trackId, candidateId }
+          );
+        }
+        return result({
+          kind: "staged_track_candidate" as const,
+          valid: validation.errors.length === 0 && stagedCandidate.valid,
+          derivedStateCurrent: validation.warnings.length === 0,
+          upgradeRequired: validation.project?.runtimeVersion !== CADRE_RUNTIME_VERSION
+            || validation.project?.templateSetVersion !== TEMPLATE_SET_VERSION,
+          targetRuntimeVersion: CADRE_RUNTIME_VERSION,
+          targetTemplateSetVersion: TEMPLATE_SET_VERSION,
+          trackId,
+          candidate: stagedCandidate,
+          errors: [...validation.errors, ...stagedCandidate.errors],
+          focusedErrors: [...focusedValidationErrors(validation, root, [trackId]), ...stagedCandidate.errors],
+          warnings: validation.warnings,
+          nextAction: "Resume the track proposal with candidate_inspect; do not create canonical state before approval."
+        }, `${trackId}: staged track candidate awaiting inspection or approval.`);
+      }
       const dependencies = (track.dependencies ?? [])
         .map((id) => validation.tracks.find((candidate) => candidate.id === id))
         .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
         .map(trackSummary);
       const focused = {
+        kind: "canonical_track" as const,
         valid: validation.errors.length === 0,
         derivedStateCurrent: validation.warnings.length === 0,
         upgradeRequired: validation.project?.runtimeVersion !== CADRE_RUNTIME_VERSION
@@ -441,7 +546,9 @@ export function createCadreServer(): McpServer {
         track: trackSummary(track),
         state: validation.states.get(trackId) ?? null,
         dependencies,
-        errors: validation.errors.filter((error) => error.startsWith(`${trackId}:`) || error.startsWith("project.json:")),
+        errors: validation.errors,
+        focusedErrors: focusedValidationErrors(validation, root, [trackId, ...dependencies.map((dependency) => dependency.id)]),
+        ...(stagedCandidate ? { stagedCandidate } : {}),
         warnings: validation.warnings
       };
       if (view === "track") {
@@ -473,7 +580,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.stateValidate, {
     title: "Validate Cadre project state",
-    description: "Validate Cadre project invariants and return all discovered tracks and errors.",
+    description: "Validate state.",
     inputSchema: { projectRoot: z.string().min(1) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
@@ -486,15 +593,19 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.candidateStagePrepare, {
     title: "Prepare a Cadre candidate stage",
-    description: "Create or resume one project-local candidate directory and ensure /stage/ is ignored by Git.",
+    description: "Prepare staging.",
     inputSchema: {
       projectRoot: z.string().min(1),
-      candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      expectedFiles: z.array(z.string().min(1)).min(1).optional()
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ projectRoot, candidateId }) => {
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ projectRoot, candidateId, expectedFiles }) => {
     try {
-      return result(prepareCandidateStage(projectRoot, candidateId), `Prepared Cadre candidate stage ${candidateId}.`);
+      return result(
+        prepareCandidateStage(projectRoot, candidateId, expectedFiles),
+        `Prepared Cadre candidate stage ${candidateId}.`
+      );
     } catch (error) {
       return failure(error);
     }
@@ -502,21 +613,22 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.candidateInspect, {
     title: "Inspect staged artifact candidates",
-    description: "Manifest an exact staged file set and optionally validate its plan graph in one read-only call.",
-    inputSchema: {
+    description: "Inspect staging.",
+    inputSchema: z.strictObject({
       projectRoot: z.string().min(1),
       candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
       files: z.array(z.string().min(1)).min(1),
-      targetStatus: z.enum(PLAN_VALIDATION_STATUSES).optional()
-    },
+      planValidations: z.array(z.object({
+        path: z.string().min(1),
+        targetStatus: z.enum(PLAN_VALIDATION_STATUSES)
+      })).optional().default([])
+    }),
     annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async ({ projectRoot, candidateId, files, targetStatus }) => {
+  }, async ({ projectRoot, candidateId, files, planValidations }) => {
     try {
       const root = safeProjectRoot(projectRoot);
       const candidates = readCandidateFiles(root, candidateId, files);
-      const manifest = candidates
-        .map((file) => ({ path: file.path, sha256: sha256(file.content) }))
-        .sort((left, right) => left.path.localeCompare(right.path));
+      const manifest = candidateManifest(candidates);
       const actualPaths = listCandidatePaths(root, candidateId);
       const expectedPaths = manifest.map((file) => file.path);
       if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
@@ -524,23 +636,53 @@ export function createCadreServer(): McpServer {
           `Candidate stage must contain exactly the declared files; expected ${expectedPaths.join(", ")}, found ${actualPaths.join(", ")}`
         );
       }
-      let plan;
-      if (targetStatus) {
-        const candidate = candidates.find((file) => file.path === "plan.md");
-        if (!candidate) throw new Error("candidate inspection with targetStatus requires plan.md in files");
+      const normalizedPlanValidations = planValidations
+        .map((validation) => ({
+          path: normalizeCandidatePath(validation.path),
+          targetStatus: validation.targetStatus
+        }))
+        .sort((left, right) => left.path.localeCompare(right.path));
+      const validationPaths = normalizedPlanValidations.map((validation) => validation.path);
+      if (new Set(validationPaths).size !== validationPaths.length) {
+        throw new Error("Candidate planValidations contains duplicate paths");
+      }
+      for (const path of validationPaths) {
+        if (path.split("/").at(-1) !== "plan.md") {
+          throw new Error(`Candidate plan validation path must name plan.md: ${path}`);
+        }
+        if (!expectedPaths.includes(path)) {
+          throw new Error(`Candidate plan validation path is not a declared staged file: ${path}`);
+        }
+      }
+      const candidatePlanPaths = candidates
+        .map((candidate) => candidate.path)
+        .filter((path) => path.split("/").at(-1) === "plan.md")
+        .sort();
+      if (JSON.stringify(candidatePlanPaths) !== JSON.stringify(validationPaths)) {
+        throw new Error(
+          `Candidate planValidations must exactly match staged plan files; expected ${candidatePlanPaths.join(", ") || "none"}, found ${validationPaths.join(", ") || "none"}`
+        );
+      }
+      const plans = normalizedPlanValidations.map((validation) => {
+        const candidate = candidates.find((file) => file.path === validation.path)!;
         if (Buffer.byteLength(candidate.content, "utf8") > MAX_DRAFT_PLAN_CHARACTERS) {
-          throw new Error(`Candidate plan exceeds ${MAX_DRAFT_PLAN_CHARACTERS} bytes`);
+          throw new Error(`Candidate plan exceeds ${MAX_DRAFT_PLAN_CHARACTERS} bytes: ${candidate.path}`);
         }
         const errors: string[] = [];
         const graph = parsePlanContent(candidate.content, candidate.path, errors);
-        validatePlanGraph(candidate.path, graph, targetStatus, errors);
-        plan = { valid: errors.length === 0, path: candidate.path, graph, errors };
-      }
+        validatePlanGraph(candidate.path, graph, validation.targetStatus, errors);
+        return { ...validation, valid: errors.length === 0, graph, errors };
+      });
       return result({
         candidateId,
         files: manifest,
-        digest: sha256(JSON.stringify({ projectRoot: root, candidateId, files: manifest })),
-        ...(plan ? { plan } : {})
+        plans,
+        digest: sha256(JSON.stringify({
+          projectRoot: root,
+          candidateId,
+          files: manifest,
+          planValidations: normalizedPlanValidations
+        }))
       }, `Inspected ${manifest.length} staged Cadre artifact${manifest.length === 1 ? "" : "s"}.`);
     } catch (error) {
       return failure(error);
@@ -549,7 +691,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.executionGraphValidate, {
     title: "Validate a track execution graph",
-    description: "Compile and validate phase/task dependencies and derived manual-verification barriers from an approved plan.",
+    description: "Validate plan DAG.",
     inputSchema: { projectRoot: z.string().min(1), trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) },
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot, trackId }) => {
@@ -570,21 +712,20 @@ export function createCadreServer(): McpServer {
   const reviewCompleteSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    commitRangeStart: z.string().min(1),
     approval: z.string().min(1),
     acceptedRisks: z.array(z.string().min(1)).optional()
   };
 
   server.registerTool(CADRE_MCP_TOOLS.reviewComplete, {
     title: "Complete a clean review",
-    description: "Prepare the exact clean-review completion for human approval, or apply its unchanged proposal token after approval.",
+    description: "Complete review.",
     inputSchema: adaptiveInputSchema(reviewCompleteSchema),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async (input) => {
+    annotations: { destructiveHint: false, openWorldHint: false }
+  }, async ({ request }) => {
     try {
       const adaptive = normalizeAdaptiveInput(
-        input as Record<string, unknown>,
-        ["projectRoot", "trackId", "commitRangeStart", "approval"],
+        request as Record<string, unknown>,
+        ["projectRoot", "trackId", "approval"],
         "review_complete"
       );
       if (adaptive.mode === "apply") {
@@ -639,13 +780,13 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.archiveBatchCandidate, {
     title: "Govern a staged archive batch",
-    description: "Prepare a staged archive batch for human approval, or apply its unchanged proposal token after approval.",
+    description: "Apply archive batch.",
     inputSchema: adaptiveInputSchema(archiveBatchCandidateSchema),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async (input) => {
+    annotations: { destructiveHint: false, openWorldHint: false }
+  }, async ({ request }) => {
     try {
       const adaptive = normalizeAdaptiveInput(
-        input as Record<string, unknown>,
+        request as Record<string, unknown>,
         ["projectRoot", "candidateId", "updates"],
         "archive_batch_candidate"
       );
@@ -698,9 +839,9 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
     title: "Record archive provenance",
-    description: "Atomically validate and record the already-authorized archive commit in track, project, and batch state.",
+    description: "Record archive.",
     inputSchema: archiveRecordSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
@@ -733,9 +874,9 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.executionStart, {
     title: "Start implementation execution",
-    description: "Atomically validate and start the implementation execution already authorized by the implement invocation.",
+    description: "Start execution.",
     inputSchema: executionStartSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
@@ -768,35 +909,67 @@ export function createCadreServer(): McpServer {
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
-  const executionCheckpointSchema = {
+  const checkpointScopeSchema = {
     ...executionScopeSchema,
-    nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/),
-    event: z.enum(EXECUTION_CHECKPOINT_EVENTS),
-    workerId: z.string().min(1).nullable().optional(),
-    worktreePath: z.string().min(1).nullable().optional(),
-    branch: z.string().min(1).nullable().optional(),
-    commit: z.string().regex(/^[0-9a-f]{7,40}$/).optional(),
-    verification: z.string().min(1).optional(),
-    authorization: z.string().min(1).optional(),
-    blocker: z.string().min(1).optional()
+    nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/)
   };
+  const commitSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
+  const evidenceSchema = z.string().min(1);
+  const executionCheckpointActionSchema = z.discriminatedUnion("event", [
+    z.strictObject({
+      event: z.literal("start"),
+      workerId: z.string().min(1).nullable().optional(),
+      worktreePath: z.string().min(1).nullable().optional(),
+      branch: z.string().min(1).nullable().optional(),
+      verification: evidenceSchema.optional()
+    }),
+    z.strictObject({
+      event: z.literal("record_commit"),
+      commit: commitSchema,
+      verification: evidenceSchema,
+      authorization: evidenceSchema
+    }),
+    z.strictObject({
+      event: z.literal("record_integration"),
+      commit: commitSchema,
+      verification: evidenceSchema
+    }),
+    z.strictObject({
+      event: z.literal("record_verification"),
+      commit: commitSchema,
+      verification: evidenceSchema,
+      authorization: evidenceSchema
+    }),
+    z.strictObject({
+      event: z.literal("complete"),
+      commit: commitSchema.optional(),
+      verification: evidenceSchema.optional(),
+      authorization: evidenceSchema.optional()
+    }),
+    z.strictObject({ event: z.literal("block"), blocker: evidenceSchema }),
+    z.strictObject({ event: z.literal("resume") })
+  ]);
 
   server.registerTool(CADRE_MCP_TOOLS.executionCheckpoint, {
     title: "Apply an execution checkpoint",
-    description: "Atomically validate and apply one already-authorized semantic execution event.",
-    inputSchema: executionCheckpointSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async (input) => {
+    description: "Checkpoint execution.",
+    inputSchema: {
+      scope: z.strictObject(checkpointScopeSchema),
+      action: executionCheckpointActionSchema
+    },
+    annotations: { destructiveHint: false, openWorldHint: false }
+  }, async ({ scope, action }) => {
     try {
-      requireCurrentProject(input.projectRoot);
-      const preview = previewExecutionCheckpoint(input as ExecutionCheckpointInput);
-      const applied = applyExecutionCheckpoint(input as ExecutionCheckpointInput, preview.digest, preview);
+      requireCurrentProject(scope.projectRoot);
+      const checkpointInput = { ...scope, ...action } as ExecutionCheckpointInput;
+      const preview = previewExecutionCheckpoint(checkpointInput);
+      const applied = applyExecutionCheckpoint(checkpointInput, preview.digest, preview);
       return result({
         commandStatus: "applied" as const,
         path: applied.path,
         transition: applied.transition,
         checkpoint: applied.journal.checkpoint,
-        derivedStatus: executionSchedulerView(applied.journal, [input.nodeId])
+        derivedStatus: executionSchedulerView(applied.journal, [checkpointInput.nodeId])
       });
     } catch (error) {
       return failure(error);
@@ -805,7 +978,7 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.executionStatus, {
     title: "Read implementation execution status",
-    description: "Read an execution journal and derive ready, active, and blocked DAG nodes.",
+    description: "Read execution.",
     inputSchema: {
       projectRoot: z.string().min(1),
       trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -830,9 +1003,9 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.executionFinish, {
     title: "Complete implementation execution",
-    description: "Atomically verify and finalize an execution after its required manual verification is already recorded.",
+    description: "Finish execution.",
     inputSchema: executionFinishSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
@@ -863,9 +1036,9 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.worktreeCreate, {
     title: "Create a Cadre worker worktree",
-    description: "Atomically validate and create or reconcile one already-authorized constrained worker worktree.",
+    description: "Create worktree.",
     inputSchema: worktreeSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
@@ -895,13 +1068,13 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.integration, {
     title: "Integrate a worker branch",
-    description: "Atomically merge in phase/autonomous mode; in governed mode return approval_required first, then accept the unchanged proposal token after human approval.",
+    description: "Integrate branch.",
     inputSchema: adaptiveInputSchema(worktreeSchema),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async (input) => {
+    annotations: { destructiveHint: false, openWorldHint: false }
+  }, async ({ request }) => {
     try {
       const adaptive = normalizeAdaptiveInput(
-        input as Record<string, unknown>,
+        request as Record<string, unknown>,
         ["projectRoot", "trackId", "executionId", "nodeId"],
         "integration"
       );
@@ -936,9 +1109,9 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.worktreeCleanup, {
     title: "Clean up an integrated worker",
-    description: "Atomically verify and remove only a clean, fully integrated Cadre worktree and safely deletable branch.",
+    description: "Clean worktree.",
     inputSchema: worktreeSchema,
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+    annotations: { destructiveHint: true, openWorldHint: false }
   }, async (input) => {
     try {
       const cleanupInput = input as WorktreeIntegrationInput;
@@ -966,20 +1139,20 @@ export function createCadreServer(): McpServer {
     context: z.enum(["greenfield", "brownfield"]),
     gitDisposition: z.enum(["existing", "initialize"]),
     baseCommit: z.string().regex(/^[0-9a-f]{7,40}$/).nullable(),
-    approvedAt: z.iso.datetime(),
+    approvedAt: z.string().min(1),
     stagedFiles: z.array(z.string().min(1)).min(3),
     styleguideIds: z.array(z.string().min(1)).min(1)
   };
 
   server.registerTool(CADRE_MCP_TOOLS.projectInitCandidate, {
     title: "Initialize from a staged Cadre candidate",
-    description: "Prepare staged initialization for human approval, or atomically promote its unchanged proposal token after approval.",
+    description: "Initialize project.",
     inputSchema: adaptiveInputSchema(initCandidateSchema),
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async (input) => {
+    annotations: { destructiveHint: false, openWorldHint: false }
+  }, async ({ request }) => {
     try {
       const adaptive = normalizeAdaptiveInput(
-        input as Record<string, unknown>,
+        request as Record<string, unknown>,
         [
           "projectRoot", "projectName", "context", "gitDisposition", "baseCommit", "approvedAt", "stagedFiles",
           "styleguideIds"
@@ -1001,9 +1174,9 @@ export function createCadreServer(): McpServer {
           digest: applied.digest
         });
       }
-      const request = adaptive.request as unknown as ProjectInitCandidateInput;
-      const preview = previewProjectInitCandidate(request);
-      return proposalResult("project_init_candidate", request, {
+      const initRequest = adaptive.request as unknown as ProjectInitCandidateInput;
+      const preview = previewProjectInitCandidate(initRequest);
+      return proposalResult("project_init_candidate", initRequest, {
         runtimeVersion: preview.runtimeVersion,
         templateSetVersion: preview.templateSetVersion,
         files: preview.files.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
@@ -1016,9 +1189,8 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
     title: "Record the project setup commit",
-    description: "Complete a pending create operation by recording its already-created Git commit SHA.",
     inputSchema: { projectRoot: z.string().min(1) },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
       requireCurrentProject(projectRoot);
@@ -1031,9 +1203,8 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
     title: "Record Git initialization checkpoint",
-    description: "Advance an approved create operation after the caller verifies Git was initialized at the exact project root.",
     inputSchema: { projectRoot: z.string().min(1) },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
       requireCurrentProject(projectRoot);
@@ -1045,9 +1216,8 @@ export function createCadreServer(): McpServer {
 
   server.registerTool(CADRE_MCP_TOOLS.tracksRender, {
     title: "Render the derived tracks index",
-    description: "Atomically validate and rewrite deterministic tracks.md from current track-local state.",
     inputSchema: { projectRoot: z.string().min(1) },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
       const input = { projectRoot: requireCurrentProject(projectRoot) };

@@ -80,8 +80,9 @@ Execution nodes use explicit legal statuses such as `pending`, `running`,
 `awaiting_approval`, `committed`, `integrating`, `conflicted`, `integrated`,
 `awaiting_manual_verification`, `completed`, and `blocked`.
 
-Semantic events use `execution_checkpoint_*`, which expands each event into its
-complete legal transition sequence. A checkpoint cannot cross a boundary
+Semantic events use `execution_checkpoint` with a strict `scope` and
+event-specific `action`, which expands each event into its complete legal
+transition sequence. A checkpoint cannot cross a boundary
 whose evidence does not yet exist: approval, commit, test, integration,
 conflict resolution, or manual verification.
 
@@ -97,6 +98,11 @@ and policy remain unchanged; `.cadre/**`-only bookkeeping does not trigger the
 same full suite again. Product-task commits remain distinct, while Cadre-only
 journal, plan, learning, and index changes are checkpointed once per phase and
 once at final readiness instead of once per node status.
+
+After `execution_finish` converges its four state artifacts, implementation
+creates one `cadre(implement): complete <track-id>` commit containing only the
+completed journal, plan markers, track state, and derived index. Review starts
+from that clean bookkeeping boundary.
 
 ## Finality
 

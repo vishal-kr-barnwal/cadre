@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync
@@ -19,7 +20,7 @@ export const CADRE_WORKFLOWS = [
 
 const ZED_COMPATIBILITY = `## Zed compatibility
 
-Zed Agent consumes Cadre templates through tools rather than MCP resource discovery. Whenever this workflow calls \`template_get_many\`, include \`contentMode: "text"\`. Use known template IDs and descriptor tools such as \`styleguide_resolve\`; do not attempt to list or read MCP resources directly.`;
+Zed Agent consumes Cadre templates through tools rather than MCP resource discovery. Whenever this workflow calls \`template_get_many\`, include \`contentMode: "text"\`. Use known template IDs and descriptor tools such as \`styleguide_resolve\`; do not attempt to list or read MCP resources directly. When recommending another Cadre workflow, use its Zed command \`/cadre-<workflow>\` and never a dollar-prefixed or colon command.`;
 
 function pathExists(path: string): boolean {
   try {
@@ -51,6 +52,8 @@ export function createZedSkillAdapters(pluginRoot: string): void {
     const source = join(pluginRoot, "skills", workflow);
     const target = join(adapterRoot, `cadre-${workflow}`);
     cpSync(source, target, { recursive: true });
+    const codexMetadata = join(target, "agents");
+    if (existsSync(codexMetadata)) rmSync(codexMetadata, { recursive: true });
     const skillPath = join(target, "SKILL.md");
     const body = readFileSync(skillPath, "utf8");
     const expectedName = `name: ${workflow}`;

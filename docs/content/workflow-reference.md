@@ -37,6 +37,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Primary MCP:** project status, template bundles,
   `candidate_stage_prepare`, `candidate_inspect`, state validation, and
   atomic tracks index rendering.
+- **Candidate recovery:** focused status distinguishes an unapproved staged
+  candidate from canonical track state; resume its exact manifest and plan
+  validation instead of restarting it.
 - **Approvals:** one combined specification-and-plan decision by default;
   staged review only when explicitly requested.
 - **Writes:** `state.json`, `spec.md`, `plan.md`, and `learning.md` with separate
@@ -53,7 +56,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Primary MCP:** execution start/node/status/finish, graph validation,
   worktree create/integrate/cleanup, project/worktree status, and derived index.
 - **Writes:** execution journal, task commits, plan/learning provenance, and
-  Cadre bookkeeping commits.
+  Cadre bookkeeping commits. After `execution_finish`, one final
+  `cadre(implement): complete <track-id>` commit contains only the completed
+  journal, plan markers, track state, and derived index.
 - **Stops at:** `ready_for_review`; never `completed`.
 
 ## review
@@ -64,7 +69,8 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Finding path:** exact approved bug/remediation artifacts return the track to
   implementation.
 - **Clean path:** adaptive `review_complete` binds approval to execution,
-  plan revision, graph digest, reviewed HEAD, and accepted risks.
+  plan revision, graph digest, reviewed HEAD, accepted risks, and the server-
+  derived range from execution base through reviewed HEAD.
 - **Stops at:** `completed` only after a clean approved cycle.
 
 ## revise
@@ -76,7 +82,10 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   partial-work disposition can be assessed safely in advance.
 - **Writes:** revision record and exact approved artifact/state changes with
   preserved commit provenance.
-- **Completed/archived behavior:** propose a successor; never reopen history.
+- **Candidate-only behavior:** resume the unapproved track proposal; do not
+  create a revision.
+- **Completed/archived behavior:** propose a linked successor; never reopen
+  or move terminal history.
 
 ## archive
 
@@ -110,6 +119,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Approvals:** one on the clean path; a corrected proposal only for material
   conflict-resolution changes.
 - **Stops when:** conflicts or mixed/missing provenance require manual recovery.
+- **Lifecycle routing:** staged and drafting tracks have no approved revert
+  provenance. Completed/archived rollback intent becomes a linked successor
+  bug track; the terminal source stays immutable.
 
 ## status
 
@@ -124,8 +136,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 
 - **Use for:** questions, exploration, investigation, and disposable spikes.
 - **MCP:** optional read-only project status; availability is not required.
-- **Writes:** no Cadre lifecycle state; optional ignored output under
-  `.cadre/wisps/`.
+- **Writes:** no Cadre lifecycle state. `.cadre/wisps/` is used only for an
+  initialized project that already ignores it; otherwise disposable output
+  uses an OS temporary directory and never creates `.cadre/`.
 - **Promotion:** recommend `track` before durable implementation work.
 
 ## Lifecycle Ownership

@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 import { readCandidateFiles } from "./staging.js";
 import { isGitAncestor, resolveGitCommit } from "./git.js";
+import { executionStatus } from "./execution.js";
 import {
   buildTracks, cadreRoot, validateProject,
   type DiscoveredTrack, type ProjectState, type TrackState
@@ -36,7 +37,14 @@ function assertWritableFile(path: string): void {
 function writeApprovedFile(path: string, content: string): void {
   assertWritableFile(path);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
+  if (existsSync(path) && readFileSync(path, "utf8") === content) return;
+  const temporaryPath = join(dirname(path), `.${randomUUID()}.cadre.tmp`);
+  try {
+    writeFileSync(temporaryPath, content, { flag: "wx" });
+    renameSync(temporaryPath, path);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
 }
 
 function requireCurrentProject(projectRoot: string) {
@@ -59,7 +67,6 @@ export interface ReviewCompleteInput {
 export interface ReviewCompleteRequest {
   projectRoot: string;
   trackId: string;
-  commitRangeStart: string;
   approval: string;
   acceptedRisks?: string[];
 }
@@ -68,19 +75,36 @@ export function deriveReviewCompleteInput(input: ReviewCompleteRequest): ReviewC
   const validation = requireCurrentProject(input.projectRoot);
   const state = validation.states.get(input.trackId);
   const reviewedHead = state?.lastExecution?.headCommit;
+  const executionId = state?.lastExecution?.executionId;
   if (!reviewedHead || !SHA.test(reviewedHead)) throw new Error(`${input.trackId} has no completed execution head`);
+  if (!executionId) throw new Error(`${input.trackId} has no completed execution journal`);
+  const execution = executionStatus(input.projectRoot, input.trackId, executionId).journal;
+  if (execution.status !== "completed" || execution.headCommit !== reviewedHead || !SHA.test(execution.baseCommit)) {
+    throw new Error(`${input.trackId} completed execution evidence is inconsistent`);
+  }
   if (!isGitAncestor(input.projectRoot, reviewedHead)) {
     throw new Error(`completed execution head ${reviewedHead} is not an ancestor of current HEAD`);
   }
-  const commitRangeStart = resolveGitCommit(input.projectRoot, input.commitRangeStart);
+  const acceptedRisks = (input.acceptedRisks ?? []).map((risk) => risk.trim()).filter(Boolean);
+  const existingCycle = state.status === "completed" ? state.reviewCycles?.at(-1) : undefined;
+  const matchingCycle = existingCycle
+    && existingCycle.outcome === "clean"
+    && existingCycle.executionId === executionId
+    && existingCycle.reviewedHead === reviewedHead
+    && existingCycle.approval === input.approval
+    && JSON.stringify(existingCycle.acceptedRisks ?? []) === JSON.stringify(acceptedRisks)
+    ? existingCycle
+    : undefined;
   return {
     projectRoot: input.projectRoot,
     trackId: input.trackId,
-    reviewedAt: new Date().toISOString(),
+    reviewedAt: typeof matchingCycle?.reviewedAt === "string"
+      ? matchingCycle.reviewedAt
+      : new Date().toISOString(),
     reviewedHead,
-    commitRange: `${commitRangeStart}..${reviewedHead}`,
+    commitRange: `${execution.baseCommit}..${reviewedHead}`,
     approval: input.approval,
-    ...(input.acceptedRisks ? { acceptedRisks: input.acceptedRisks } : {})
+    ...(acceptedRisks.length ? { acceptedRisks } : {})
   };
 }
 
@@ -90,6 +114,7 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   tracksPath: string;
   tracksContent: string;
   digest: string;
+  resuming: boolean;
 } {
   if (!TRACK_ID.test(input.trackId)) throw new Error("invalid trackId");
   if (!SHA.test(input.reviewedHead)) throw new Error("reviewedHead must be a Git commit SHA");
@@ -104,9 +129,7 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   const track = validation.tracks.find((candidate) => candidate.id === input.trackId);
   const current = validation.states.get(input.trackId);
   if (!track || !current) throw new Error(`unknown track ${input.trackId}`);
-  if (track.location !== `tracks/${input.trackId}` || current.status !== "ready_for_review") {
-    throw new Error(`${input.trackId} is not ready for review`);
-  }
+  if (track.location !== `tracks/${input.trackId}`) throw new Error(`${input.trackId} is not an active track`);
   if (current.operation != null) throw new Error(`${input.trackId} already has an active operation`);
   const execution = current.lastExecution;
   if (!execution?.executionId || !execution.planRevision || !execution.graphDigest
@@ -119,7 +142,9 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   const tracksBody = readFileSync(tracksPath, "utf8");
   const acceptedRisks = (input.acceptedRisks ?? []).map((risk) => risk.trim()).filter(Boolean);
   const cycle = {
-    cycle: (current.reviewCycles?.length ?? 0) + 1,
+    cycle: current.status === "completed"
+      ? (current.reviewCycles?.length ?? 0)
+      : (current.reviewCycles?.length ?? 0) + 1,
     reviewedAt: input.reviewedAt,
     outcome: "clean",
     executionId: execution.executionId,
@@ -130,7 +155,11 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     approval: input.approval,
     ...(acceptedRisks.length ? { acceptedRisks } : {})
   };
-  const state: TrackState = {
+  const existingCycle = current.reviewCycles?.at(-1);
+  const resuming = current.status === "completed"
+    && JSON.stringify(existingCycle) === JSON.stringify(cycle);
+  if (current.status !== "ready_for_review" && !resuming) throw new Error(`${input.trackId} is not ready for review`);
+  const state: TrackState = resuming ? current : {
     ...current,
     status: "completed",
     checkpoint: "completed",
@@ -145,13 +174,16 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     state,
     tracksPath,
     tracksContent,
-    digest: hash({ stateBody, tracksBody, input, state, tracksContent })
+    digest: hash({ stateBody, tracksBody, input, state, tracksContent }),
+    resuming
   };
 }
 
 export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: string) {
   const proposal = previewReviewComplete(input);
-  if (proposal.digest !== proposalDigest) throw new Error("review completion proposal is stale; preview it again");
+  if (proposal.digest !== proposalDigest && !proposal.resuming) {
+    throw new Error("review completion proposal is stale; preview it again");
+  }
   writeApprovedFile(proposal.statePath, json(proposal.state));
   writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
   const validation = validateProject(input.projectRoot);
@@ -415,7 +447,15 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     || JSON.stringify(existingOperation.selectedTracks) !== JSON.stringify(input.selectedTracks))) {
     throw new Error(`archive batch ${input.batchId} does not match the approved input`);
   }
-  const validation = requireCurrentProject(root);
+  const validation = validateProject(root);
+  const recoverableErrors = existingOperation
+    ? new Set(existingOperation.selectedTracks.map((trackId) => (
+        `${trackId}: status completed requires location tracks/${trackId}`
+      )))
+    : new Set<string>();
+  const blockingErrors = validation.errors.filter((error) => !recoverableErrors.has(error));
+  if (blockingErrors.length) throw new Error(blockingErrors.join("\n"));
+  if (!validation.project) throw new Error("Cadre project state is unavailable");
   const selected = new Set(input.selectedTracks);
   const updates = input.updates.map((update) => ({ ...update, path: update.path.replaceAll("\\", "/") }));
   if (new Set(updates.map((update) => update.path)).size !== updates.length) {
@@ -447,9 +487,10 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     const state = validation.states.get(trackId);
     if (!track || !state) throw new Error(`unknown selected track ${trackId}`);
     const pending = track.status === "completed" && track.location === `tracks/${trackId}`;
-    const completed = existingOperation?.completedTracks.includes(trackId)
-      && track.status === "archived" && track.location === `archive/${trackId}`;
-    if ((!pending && !completed) || state.operation != null) {
+    const partiallyPromoted = existingOperation != null
+      && ["completed", "archived"].includes(track.status)
+      && track.location === `archive/${trackId}`;
+    if ((!pending && !partiallyPromoted) || state.operation != null) {
       throw new Error(`${trackId} is not an eligible completed track`);
     }
     const sourcePath = join(cadreRoot(root), pending ? "tracks" : "archive", trackId);
@@ -516,7 +557,14 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
 
 function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposalDigest: string) {
   const proposal = previewMaterializedArchiveBatch(input);
-  if (proposal.digest !== proposalDigest) throw new Error("archive batch proposal is stale; preview it again");
+  if (proposal.digest !== proposalDigest) {
+    const existing = existsSync(proposal.operationPath)
+      ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
+      : null;
+    if (!proposal.resuming || existing?.approvalDigest !== proposal.initialOperation.approvalDigest) {
+      throw new Error("archive batch proposal is stale; preview it again");
+    }
+  }
   const currentOperation = existsSync(proposal.operationPath)
     ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
     : proposal.initialOperation;
@@ -579,8 +627,10 @@ export function previewArchiveBatchRecord(input: ArchiveBatchRecordInput): {
   const operationPath = join(cadreRoot(root), "operations", `${input.batchId}.json`);
   const operationBody = readFileSync(operationPath, "utf8");
   const currentOperation = JSON.parse(operationBody) as ArchiveOperation;
-  if (currentOperation.action !== "archive" || currentOperation.status !== "in_progress") {
-    throw new Error(`${input.batchId} is not an in-progress archive batch`);
+  if (currentOperation.action !== "archive"
+    || !["in_progress", "completed"].includes(currentOperation.status)
+    || (currentOperation.status === "completed" && currentOperation.archiveCommit !== input.archiveCommit)) {
+    throw new Error(`${input.batchId} is not a matching archive batch`);
   }
   const projectPath = join(cadreRoot(root), "project.json");
   const projectBody = readFileSync(projectPath, "utf8");
@@ -590,21 +640,41 @@ export function previewArchiveBatchRecord(input: ArchiveBatchRecordInput): {
     const body = readFileSync(path, "utf8");
     const current = JSON.parse(body) as TrackState;
     if (current.status !== "archived") throw new Error(`${trackId} is not archived`);
+    const existingCommit = (current.commits as Record<string, unknown> | undefined)?.archive;
+    if (existingCommit && existingCommit !== input.archiveCommit) {
+      throw new Error(`${trackId} archive commit differs from the current batch`);
+    }
+    const existingHistory = (Array.isArray(current.history) ? current.history : []).find((entry) => (
+      typeof entry === "object" && entry !== null
+        && (entry as Record<string, unknown>).action === "archive"
+        && (entry as Record<string, unknown>).batchId === input.batchId
+    ));
+    if (existingHistory && (existingHistory as Record<string, unknown>).commit !== input.archiveCommit) {
+      throw new Error(`${trackId} archive history differs from the current batch`);
+    }
     return {
       path,
       body,
       state: {
         ...current,
         commits: { ...(current.commits ?? {}), archive: input.archiveCommit },
-        history: [...(Array.isArray(current.history) ? current.history : []), {
+        history: existingHistory ? current.history : [...(Array.isArray(current.history) ? current.history : []), {
           action: "archive", batchId: input.batchId, commit: input.archiveCommit
         }]
       } as TrackState
     };
   });
+  const existingProjectHistory = (currentProject.history ?? []).find((entry) => (
+    typeof entry === "object" && entry !== null
+      && (entry as Record<string, unknown>).action === "archive"
+      && (entry as Record<string, unknown>).batchId === input.batchId
+  ));
+  if (existingProjectHistory && (existingProjectHistory as Record<string, unknown>).commit !== input.archiveCommit) {
+    throw new Error(`project archive history differs for ${input.batchId}`);
+  }
   const project: ProjectState = {
     ...currentProject,
-    history: [...(currentProject.history ?? []), {
+    history: existingProjectHistory ? (currentProject.history ?? []) : [...(currentProject.history ?? []), {
       action: "archive",
       batchId: input.batchId,
       tracks: [...currentOperation.selectedTracks],

@@ -26,7 +26,7 @@ import {
 } from "../src/domain/worktrees.js";
 import {
   applyArchiveBatchCandidate, applyArchiveBatchRecord, applyReviewComplete,
-  previewArchiveBatchCandidate, previewArchiveBatchRecord, previewReviewComplete
+  deriveReviewCompleteInput, previewArchiveBatchCandidate, previewArchiveBatchRecord, previewReviewComplete
 } from "../src/domain/governance.js";
 import {
   CLAUDE_APPROVAL,
@@ -83,7 +83,7 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.5.0";
+  project.runtimeVersion = "3.5.1";
   project.templateSetVersion = "v2";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -147,6 +147,34 @@ test("proposal tokens remain compact and bind server-retained input by kind", ()
   now = new Date("2026-08-16T00:00:00.000Z");
   assert.throws(() => proposals.resolve("large_proposal", token), /expired/);
   assert.equal(existsSync(join(proposalRoot, `${token}.json`)), false);
+});
+
+test("candidate preparation prunes only explicitly omitted regular files", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "cadre-stage-prune-"));
+  const candidateId = "refresh-prune";
+  const stageRoot = prepareCandidateStage(projectRoot, candidateId).stagePath;
+  writeFileSync(join(stageRoot, "keep.md"), "keep\n");
+  writeFileSync(join(stageRoot, "stale.md"), "stale\n");
+  mkdirSync(join(stageRoot, "nested"), { recursive: true });
+  writeFileSync(join(stageRoot, "nested", "stale.md"), "nested stale\n");
+
+  const pruned = prepareCandidateStage(projectRoot, candidateId, ["keep.md"]);
+  assert.deepEqual(pruned.retainedFiles, ["keep.md"]);
+  assert.deepEqual(pruned.removedFiles, ["nested/stale.md", "stale.md"]);
+  assert.equal(existsSync(join(stageRoot, "nested")), false);
+
+  writeFileSync(join(stageRoot, "must-remain.md"), "sentinel\n");
+  assert.throws(
+    () => prepareCandidateStage(projectRoot, candidateId, ["keep.md", "keep.md"]),
+    /expectedFiles contains duplicate paths/
+  );
+  assert.equal(readFileSync(join(stageRoot, "must-remain.md"), "utf8"), "sentinel\n");
+
+  const outside = join(projectRoot, "outside.md");
+  writeFileSync(outside, "outside\n");
+  symlinkSync(outside, join(stageRoot, "unsafe-link.md"));
+  assert.throws(() => prepareCandidateStage(projectRoot, candidateId, ["keep.md"]), /symbolic link/);
+  assert.equal(readFileSync(join(stageRoot, "must-remain.md"), "utf8"), "sentinel\n");
 });
 
 test("compact execution status scales with scheduling state instead of journal size", () => {
@@ -378,7 +406,7 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.5.0",
+    runtimeVersion: "3.5.1",
     templateSetVersion: "v2"
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
@@ -481,6 +509,12 @@ test("setup commit recording verifies the approved file manifest against Git", (
     /use product\.md instead of init\/product\.md/
   );
   const preview = previewProjectInitCandidate(input);
+  const promotedProduct = preview.files.find((file) => file.path === "product.md")!;
+  writeFileSync(join(projectRoot, ".cadre", "product.md"), promotedProduct.content);
+  assert.equal(previewProjectInitCandidate(input).digest, preview.digest);
+  writeFileSync(join(projectRoot, ".cadre", "guidelines.md"), "mismatched partial write\n");
+  assert.throws(() => previewProjectInitCandidate(input), /Interrupted initialization disagrees/);
+  unlinkSync(join(projectRoot, ".cadre", "guidelines.md"));
   applyProjectInitCandidate(input, preview.digest);
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
   gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
@@ -999,6 +1033,8 @@ test("execution start and finish resume while keeping the derived index current"
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.operation, null);
   assert.equal(state.lastExecution.executionId, startInput.executionId);
+  const completedRetry = previewExecutionFinish(finishInput);
+  applyExecutionFinish(finishInput, completedRetry.digest);
   assert.deepEqual(validateProject(projectRoot).warnings, []);
 });
 
@@ -1026,6 +1062,60 @@ test("clean review completion previews and applies its exact state and derived i
   applyReviewComplete(input, fresh.digest);
   assert.equal(JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8")).status, "completed");
   assert.equal(runState(projectRoot, "validate").status, 0);
+  writeFileSync(fresh.tracksPath, "# stale index\n");
+  const resumed = previewReviewComplete(input);
+  assert.equal(resumed.resuming, true);
+  applyReviewComplete(input, fresh.digest);
+  const retriedState = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
+  assert.equal(retriedState.reviewCycles.length, 1);
+  assert.match(readFileSync(fresh.tracksPath, "utf8"), /reviewed-track.*completed/);
+});
+
+test("clean review derives its range from the completed execution base", () => {
+  const projectRoot = fixture();
+  execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
+  gitText(projectRoot, ["add", ".cadre"]);
+  gitText(projectRoot, ["commit", "-m", "chore: base"]);
+  const base = gitText(projectRoot, ["rev-parse", "HEAD"]);
+  const commits: string[] = [];
+  for (const value of ["first", "second", "third"]) {
+    writeFileSync(join(projectRoot, "implementation.txt"), `${value}\n`);
+    gitText(projectRoot, ["add", "implementation.txt"]);
+    gitText(projectRoot, ["commit", "-m", `feat: ${value}`]);
+    commits.push(gitText(projectRoot, ["rev-parse", "HEAD"]));
+  }
+  const trackId = "derived-review-range";
+  const trackRoot = writeFinalizedTrack(projectRoot, trackId, "ready_for_review");
+  const replacements = new Map([
+    ["1111111", base], ["aaaaaaa", base], ["bbbbbbb", base], ["abcdef1", commits[0]!],
+    ["abcdef2", commits[1]!], ["abcdef3", commits[2]!], ["ccccccc", commits[2]!]
+  ]);
+  for (const path of [
+    join(trackRoot, "plan.md"),
+    join(trackRoot, "state.json"),
+    join(trackRoot, "executions", `execution-${trackId}-execution.json`)
+  ]) {
+    let body = readFileSync(path, "utf8");
+    for (const [from, to] of replacements) body = body.replaceAll(from, to);
+    writeFileSync(path, body);
+  }
+  const projectPath = join(projectRoot, ".cadre", "project.json");
+  const project = JSON.parse(readFileSync(projectPath, "utf8"));
+  project.setup.commit = base;
+  writeFileSync(projectPath, `${JSON.stringify(project, null, 2)}\n`);
+  runState(projectRoot, "render");
+
+  const derived = deriveReviewCompleteInput({ projectRoot, trackId, approval: "approved" });
+  assert.equal(derived.reviewedHead, commits[2]);
+  assert.equal(derived.commitRange, `${base}..${commits[2]}`);
+  const proposal = previewReviewComplete(derived);
+  applyReviewComplete(derived, proposal.digest);
+  const retried = deriveReviewCompleteInput({ projectRoot, trackId, approval: "approved" });
+  assert.equal(retried.reviewedAt, derived.reviewedAt);
+  assert.equal(retried.commitRange, derived.commitRange);
 });
 
 test("archive candidate proposals reject changed content and record provenance", () => {
@@ -1065,6 +1155,19 @@ test("archive candidate proposals reject changed content and record provenance",
   );
   writeFileSync(patternPath, pattern);
   const fresh = previewArchiveBatchCandidate(input);
+  writeFileSync(fresh.operationPath, `${JSON.stringify(fresh.initialOperation, null, 2)}\n`);
+  mkdirSync(join(projectRoot, ".cadre", "archive"), { recursive: true });
+  renameSync(
+    join(projectRoot, ".cadre", "tracks", "archive-candidate"),
+    join(projectRoot, ".cadre", "archive", "archive-candidate")
+  );
+  const interrupted = previewArchiveBatchCandidate(input);
+  assert.equal(interrupted.resuming, true);
+  writeFileSync(
+    join(projectRoot, ".cadre", "archive", "archive-candidate", "state.json"),
+    `${JSON.stringify(fresh.moves[0]!.state, null, 2)}\n`
+  );
+  assert.equal(previewArchiveBatchCandidate(input).resuming, true);
   applyArchiveBatchCandidate(input, fresh.digest);
   const canonicalPatternPath = join(projectRoot, ".cadre", "patterns", "candidate-pattern.md");
   assert.equal(readFileSync(canonicalPatternPath, "utf8"), pattern);
@@ -1522,11 +1625,16 @@ test("installer prepares a shared three-client payload", async () => {
     const zedSkill = readFileSync(join(pluginRoot, "zed-skills", `cadre-${workflow}`, "SKILL.md"), "utf8");
     assert.match(zedSkill, new RegExp(`^name: cadre-${workflow}$`, "m"));
     assert.match(zedSkill, /contentMode: "text"/);
+    assert.match(zedSkill, /\/cadre-<workflow>/);
+    assert.doesNotMatch(zedSkill, /\$(?:create|track|implement|review|revise|archive|refresh|revert|status|wisp)\b/);
+    assert.doesNotMatch(zedSkill, /use resources only/);
+    assert.match(zedSkill, /do not attempt to list or read MCP resources directly/);
+    assert.equal(existsSync(join(pluginRoot, "zed-skills", `cadre-${workflow}`, "agents")), false);
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.5.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.5.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.5.1+codex.test-build");
+  assert.equal(claudeManifest.version, "3.5.1+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v2", "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v2", "init", "gitignore.template")));
@@ -1583,9 +1691,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.5.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.5.1+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.5.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.5.1+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1816,15 +1924,44 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     }
     for (const name of ["project_init_candidate", "archive_batch_candidate", "review_complete", "integration"]) {
       const schema = tools.tools.find((tool) => tool.name === name)?.inputSchema as {
-        properties?: Record<string, unknown>;
+        properties?: Record<string, { oneOf?: Array<{ properties?: Record<string, unknown>; required?: string[]; additionalProperties?: boolean }> }>;
         required?: string[];
       };
-      assert.ok(schema.properties?.mode, `${name} must advertise its adaptive mode`);
-      assert.ok(schema.properties?.proposalToken, `${name} must advertise its proposal token`);
-      assert.ok(schema.required?.includes("mode"), `${name} must require mode`);
-      assert.ok(Object.keys(schema.properties ?? {}).length > 2, `${name} must advertise prepare fields`);
+      assert.ok(schema.properties?.request?.oneOf?.length === 2, `${name} must advertise prepare/apply variants`);
+      assert.ok(schema.required?.includes("request"), `${name} must require its strict request envelope`);
+      assert.ok(schema.properties?.request?.oneOf?.every((variant) => variant.additionalProperties === false));
+      assert.ok(schema.properties?.request?.oneOf?.some((variant) => variant.required?.includes("proposalToken")));
     }
-    for (const arguments_ of [{}, { mode: "prepare" }]) {
+    const checkpointSchema = tools.tools.find((tool) => tool.name === "execution_checkpoint")?.inputSchema as {
+      properties?: Record<string, { oneOf?: unknown[] }>;
+      required?: string[];
+    };
+    assert.ok(checkpointSchema.required?.includes("scope"));
+    assert.ok(checkpointSchema.required?.includes("action"));
+    assert.equal(checkpointSchema.properties?.action?.oneOf?.length, 7);
+    const checkpointVariants = checkpointSchema.properties?.action?.oneOf as Array<{
+      properties?: { event?: { const?: string } }; required?: string[]; additionalProperties?: boolean;
+    }>;
+    const requiredFor = (event: string) => checkpointVariants.find(
+      (variant) => variant.properties?.event?.const === event
+    )?.required;
+    assert.deepEqual(requiredFor("record_commit"), ["event", "commit", "verification", "authorization"]);
+    assert.deepEqual(requiredFor("record_integration"), ["event", "commit", "verification"]);
+    assert.deepEqual(requiredFor("record_verification"), ["event", "commit", "verification", "authorization"]);
+    assert.deepEqual(requiredFor("block"), ["event", "blocker"]);
+    assert.ok(checkpointVariants.every((variant) => variant.additionalProperties === false));
+    const candidateSchema = tools.tools.find((tool) => tool.name === "candidate_inspect")?.inputSchema as {
+      properties?: Record<string, unknown>;
+    };
+    assert.ok(candidateSchema.properties?.planValidations);
+    assert.equal(candidateSchema.properties?.targetStatus, undefined);
+    const reviewSchema = tools.tools.find((tool) => tool.name === "review_complete")?.inputSchema as {
+      properties?: { request?: { oneOf?: Array<{ properties?: Record<string, unknown> }> } };
+    };
+    assert.ok(reviewSchema.properties?.request?.oneOf?.every(
+      (variant) => variant.properties?.commitRangeStart === undefined
+    ));
+    for (const arguments_ of [{}, { request: { mode: "prepare" } }]) {
       const invalidAdaptive = await client.callTool({
         name: "project_init_candidate",
         arguments: arguments_
@@ -1930,11 +2067,19 @@ test("compiled MCP exposes versioned templates and initializes projects without 
         projectRoot: untouchedRoot,
         candidateId,
         files: ["plan.md"],
-        targetStatus: "in_progress"
+        planValidations: [{ path: "plan.md", targetStatus: "in_progress" }]
       }
     });
     assert.equal(candidateValidation.isError, undefined);
-    assert.equal((candidateValidation.structuredContent as { plan?: { valid?: boolean } }).plan?.valid, true);
+    const candidatePlans = (candidateValidation.structuredContent as {
+      plans?: Array<{ path?: string; targetStatus?: string; valid?: boolean }>;
+    }).plans ?? [];
+    assert.deepEqual(candidatePlans.map(({ path, targetStatus, valid }) => ({ path, targetStatus, valid })), [{
+      path: "plan.md",
+      targetStatus: "in_progress",
+      valid: true
+    }]);
+    assert.equal(Object.hasOwn(candidateValidation.structuredContent ?? {}, "plan"), false);
     assert.match(
       (candidateValidation.structuredContent as { files?: Array<{ sha256?: string }> }).files?.[0]?.sha256 ?? "",
       /^[0-9a-f]{64}$/
@@ -1943,11 +2088,72 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (candidateValidation.structuredContent as { digest?: string }).digest ?? "",
       /^[0-9a-f]{64}$/
     );
+    const alternateStatusValidation = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [{ path: "plan.md", targetStatus: "drafting-plan" }]
+      }
+    });
+    assert.notEqual(
+      (alternateStatusValidation.structuredContent as { digest?: string }).digest,
+      (candidateValidation.structuredContent as { digest?: string }).digest
+    );
+    const unvalidatedPlan = await client.callTool({
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"] }
+    });
+    assert.equal(unvalidatedPlan.isError, true);
+    const undeclaredPlan = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [{ path: "tracks/missing/plan.md", targetStatus: "planned" }]
+      }
+    });
+    assert.equal(undeclaredPlan.isError, true);
+    const nonPlanValidation = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [{ path: "spec.md", targetStatus: "planned" }]
+      }
+    });
+    assert.equal(nonPlanValidation.isError, true);
+    const duplicatePlanValidation = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [
+          { path: "plan.md", targetStatus: "planned" },
+          { path: "plan.md", targetStatus: "in_progress" }
+        ]
+      }
+    });
+    assert.equal(duplicatePlanValidation.isError, true);
+    const retiredCandidateInput = await client.callTool({
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"], targetStatus: "planned" }
+    });
+    assert.equal(retiredCandidateInput.isError, true);
     assert.equal(readFileSync(sentinelPath, "utf8"), "unchanged\n");
     writeFileSync(join(untouchedRoot, ".cadre/stage", candidateId, "unexpected.md"), "unexpected\n");
     const unexpectedCandidate = await client.callTool({
       name: "candidate_inspect",
-      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"], targetStatus: "planned" }
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [{ path: "plan.md", targetStatus: "planned" }]
+      }
     });
     assert.equal(unexpectedCandidate.isError, true);
     unlinkSync(join(untouchedRoot, ".cadre/stage", candidateId, "unexpected.md"));
@@ -1959,7 +2165,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     writeFileSync(candidatePlanPath, "x".repeat((256 * 1024) + 1));
     const oversizedCandidate = await client.callTool({
       name: "candidate_inspect",
-      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"], targetStatus: "planned" }
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId,
+        files: ["plan.md"],
+        planValidations: [{ path: "plan.md", targetStatus: "planned" }]
+      }
     });
     assert.equal(oversizedCandidate.isError, true);
     writeFileSync(candidatePlanPath, draftPlan);
@@ -1970,10 +2181,173 @@ test("compiled MCP exposes versioned templates and initializes projects without 
         projectRoot: untouchedRoot,
         candidateId: "linked-plan",
         files: ["plan.md"],
-        targetStatus: "planned"
+        planValidations: [{ path: "plan.md", targetStatus: "planned" }]
       }
     });
     assert.equal(linkedValidation.isError, true);
+
+    const contextCandidateId = "refresh-context-only";
+    prepareCandidateStage(untouchedRoot, contextCandidateId);
+    writeFileSync(
+      join(untouchedRoot, ".cadre/stage", contextCandidateId, "refresh.md"),
+      "# Refresh\n"
+    );
+    const contextCandidate = await client.callTool({
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId: contextCandidateId, files: ["refresh.md"] }
+    });
+    assert.equal(contextCandidate.isError, undefined);
+    assert.deepEqual((contextCandidate.structuredContent as { plans?: unknown[] }).plans, []);
+    const retiredPlanFreeInput = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId: contextCandidateId,
+        files: ["refresh.md"],
+        targetStatus: "planned"
+      }
+    });
+    assert.equal(retiredPlanFreeInput.isError, true);
+
+    const nestedCandidateId = "refresh-nested-plans";
+    prepareCandidateStage(untouchedRoot, nestedCandidateId);
+    for (const path of ["tracks/alpha/plan.md", "tracks/beta/plan.md"]) {
+      const absolutePath = join(untouchedRoot, ".cadre/stage", nestedCandidateId, path);
+      mkdirSync(dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, draftPlan);
+    }
+    const nestedCandidate = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId: nestedCandidateId,
+        files: ["tracks/beta/plan.md", "tracks/alpha/plan.md"],
+        planValidations: [
+          { path: "tracks/beta/plan.md", targetStatus: "in_progress" },
+          { path: "tracks/alpha/plan.md", targetStatus: "planned" }
+        ]
+      }
+    });
+    assert.equal(nestedCandidate.isError, undefined);
+    assert.deepEqual(
+      (nestedCandidate.structuredContent as { plans?: Array<{ path?: string }> }).plans?.map((plan) => plan.path),
+      ["tracks/alpha/plan.md", "tracks/beta/plan.md"]
+    );
+    const reorderedNestedCandidate = await client.callTool({
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId: nestedCandidateId,
+        files: ["tracks/alpha/plan.md", "tracks/beta/plan.md"],
+        planValidations: [
+          { path: "tracks/alpha/plan.md", targetStatus: "planned" },
+          { path: "tracks/beta/plan.md", targetStatus: "in_progress" }
+        ]
+      }
+    });
+    assert.equal(
+      (reorderedNestedCandidate.structuredContent as { digest?: string }).digest,
+      (nestedCandidate.structuredContent as { digest?: string }).digest
+    );
+
+    const stagedTrackRoot = fixture();
+    const stagedTrackId = "candidate-recovery";
+    const stagedTrackCandidateId = `track-${stagedTrackId}`;
+    prepareCandidateStage(stagedTrackRoot, stagedTrackCandidateId);
+    const stagedTrackFiles = [
+      ["learning.md", "<!-- Pattern Seed: start -->\n<!-- Pattern Seed: end -->\n"],
+      ["plan.md", draftPlan],
+      ["spec.md", "# Specification: Candidate recovery\n"]
+    ] as const;
+    for (const [path, content] of stagedTrackFiles) {
+      writeFileSync(join(stagedTrackRoot, ".cadre/stage", stagedTrackCandidateId, path), content);
+    }
+    const stagedTrackStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: stagedTrackRoot, view: "track", trackId: stagedTrackId }
+    });
+    assert.equal(stagedTrackStatus.isError, undefined);
+    const stagedTrackContent = stagedTrackStatus.structuredContent as {
+      kind?: string;
+      candidate?: { candidateId?: string; files?: Array<{ path?: string; sha256?: string }> };
+    };
+    assert.equal(stagedTrackContent.kind, "staged_track_candidate");
+    assert.equal(stagedTrackContent.candidate?.candidateId, stagedTrackCandidateId);
+    assert.deepEqual(
+      stagedTrackContent.candidate?.files?.map((file) => file.path),
+      ["learning.md", "plan.md", "spec.md"]
+    );
+    assert.ok(stagedTrackContent.candidate?.files?.every((file) => /^[0-9a-f]{64}$/.test(file.sha256 ?? "")));
+    const stagedProjectStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: stagedTrackRoot, view: "project" }
+    });
+    assert.equal(stagedProjectStatus.isError, undefined);
+    const stagedOverview = (stagedProjectStatus.structuredContent as {
+      stagedTrackCandidates?: Array<{ trackId?: string; canonicalState?: string; valid?: boolean }>;
+    }).stagedTrackCandidates ?? [];
+    assert.deepEqual(stagedOverview.map((candidate) => candidate.trackId), [stagedTrackId]);
+    assert.equal(stagedOverview[0]?.canonicalState, "absent");
+    assert.equal(stagedOverview[0]?.valid, true);
+    const stagedImplementationStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: stagedTrackRoot, view: "implementation", trackId: stagedTrackId }
+    });
+    assert.equal(stagedImplementationStatus.isError, true);
+    assert.equal(
+      (stagedImplementationStatus.structuredContent as { error?: { code?: string } }).error?.code,
+      "TRACK_CANDIDATE_ONLY"
+    );
+    const invalidCanonicalRoot = fixture();
+    const invalidCanonicalTrackId = "invalid-canonical";
+    prepareCandidateStage(invalidCanonicalRoot, `track-${invalidCanonicalTrackId}`);
+    mkdirSync(join(invalidCanonicalRoot, ".cadre/tracks", invalidCanonicalTrackId), { recursive: true });
+    writeFileSync(join(invalidCanonicalRoot, ".cadre/tracks", invalidCanonicalTrackId, "state.json"), "{");
+    const invalidCanonicalStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: invalidCanonicalRoot, view: "track", trackId: invalidCanonicalTrackId }
+    });
+    assert.equal(invalidCanonicalStatus.isError, true);
+    assert.equal(
+      (invalidCanonicalStatus.structuredContent as { error?: { code?: string } }).error?.code,
+      "TRACK_STATE_INVALID"
+    );
+    const unknownTrackStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: stagedTrackRoot, view: "track", trackId: "missing-track" }
+    });
+    assert.equal(unknownTrackStatus.isError, true);
+    writePlannedTrack(stagedTrackRoot, stagedTrackId);
+    const canonicalTrackStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: stagedTrackRoot, view: "track", trackId: stagedTrackId }
+    });
+    assert.equal(canonicalTrackStatus.isError, undefined);
+    assert.equal(
+      (canonicalTrackStatus.structuredContent as { kind?: string }).kind,
+      "canonical_track"
+    );
+    assert.equal(
+      (canonicalTrackStatus.structuredContent as { stagedCandidate?: { canonicalState?: string } })
+        .stagedCandidate?.canonicalState,
+      "active"
+    );
+
+    const invalidFocusedRoot = fixture();
+    const invalidFocusedTrack = "focused-errors";
+    const invalidFocusedTrackRoot = writePlannedTrack(invalidFocusedRoot, invalidFocusedTrack);
+    unlinkSync(join(invalidFocusedTrackRoot, "spec.md"));
+    const invalidFocusedStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: invalidFocusedRoot, view: "track", trackId: invalidFocusedTrack }
+    });
+    assert.equal(invalidFocusedStatus.isError, undefined);
+    const invalidFocusedContent = invalidFocusedStatus.structuredContent as {
+      valid?: boolean; errors?: string[]; focusedErrors?: string[];
+    };
+    assert.equal(invalidFocusedContent.valid, false);
+    assert.ok((invalidFocusedContent.errors?.length ?? 0) > 0);
+    assert.ok((invalidFocusedContent.focusedErrors?.length ?? 0) > 0);
 
     const transitionRoot = fixture();
     writePlannedTrack(transitionRoot, "mcp-transition");
@@ -1993,11 +2367,13 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const illegalTransition = await client.callTool({
       name: "execution_checkpoint",
       arguments: {
-        projectRoot: transitionRoot,
-        trackId: "mcp-transition",
-        executionId: "mcp-transition-1",
-        nodeId: "P1",
-        event: "complete"
+        scope: {
+          projectRoot: transitionRoot,
+          trackId: "mcp-transition",
+          executionId: "mcp-transition-1",
+          nodeId: "P1"
+        },
+        action: { event: "complete" }
       }
     });
     assert.equal(illegalTransition.isError, true);
@@ -2008,11 +2384,13 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const checkpointApply = await client.callTool({
       name: "execution_checkpoint",
       arguments: {
-        projectRoot: transitionRoot,
-        trackId: "mcp-transition",
-        executionId: "mcp-transition-1",
-        nodeId: "P1",
-        event: "start"
+        scope: {
+          projectRoot: transitionRoot,
+          trackId: "mcp-transition",
+          executionId: "mcp-transition-1",
+          nodeId: "P1"
+        },
+        action: { event: "start" }
       }
     });
     assert.equal(checkpointApply.isError, undefined);
@@ -2054,7 +2432,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.5.0"
+      "3.5.1"
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "tracks_render",
@@ -2070,7 +2448,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot: legacyRoot, candidateId: "refresh-legacy" }
     });
     assert.equal(legacyStage.isError, undefined);
-    legacyProject.runtimeVersion = "3.5.0";
+    legacyProject.runtimeVersion = "3.5.1";
     legacyProject.templateSetVersion = "v2";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(
@@ -2162,7 +2540,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     writeFileSync(archiveIndexPath, archiveIndex);
     const archiveCandidatePreview = await client.callTool({
       name: "archive_batch_candidate",
-      arguments: {
+      arguments: { request: {
         mode: "prepare",
         projectRoot: archiveRoot,
         candidateId: archiveCandidateId,
@@ -2171,7 +2549,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
           { kind: "pattern", slug: "mcp-staged-pattern" },
           { kind: "pattern_index" }
         ]
-      }
+      } }
     });
     assert.equal(
       archiveCandidatePreview.isError,
@@ -2194,7 +2572,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.doesNotMatch(archiveProposalRecord, /"content"/);
     const archiveCandidateApply = await client.callTool({
       name: "archive_batch_candidate",
-      arguments: { mode: "apply", proposalToken: archiveCandidateToken }
+      arguments: { request: { mode: "apply", proposalToken: archiveCandidateToken } }
     });
     assert.equal(archiveCandidateApply.isError, undefined);
     assert.equal(
@@ -2236,20 +2614,20 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     };
     const unknownAdaptiveField = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input, unexpected: true }
+      arguments: { request: { mode: "prepare", ...input, unexpected: true } }
     });
     assert.equal(unknownAdaptiveField.isError, true);
     const unexpectedCandidatePath = join(projectRoot, ".cadre/stage", "create", "unexpected.md");
     writeFileSync(unexpectedCandidatePath, "unexpected\n");
     const unexpectedPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input }
+      arguments: { request: { mode: "prepare", ...input } }
     });
     assert.equal(unexpectedPreview.isError, true);
     unlinkSync(unexpectedCandidatePath);
     const preview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input }
+      arguments: { request: { mode: "prepare", ...input } }
     });
     assert.equal(preview.isError, undefined);
     assert.equal((preview.structuredContent as { commandStatus?: string }).commandStatus, "approval_required");
@@ -2259,7 +2637,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const approvedAt = "2026-07-28T00:05:00.000Z";
     const refreshedPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input, approvedAt }
+      arguments: { request: { mode: "prepare", ...input, approvedAt } }
     });
     assert.equal(refreshedPreview.isError, undefined);
     assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
@@ -2267,12 +2645,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok(proposalToken);
     const mixedAdaptiveShape = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "apply", proposalToken, projectRoot }
+      arguments: { request: { mode: "apply", proposalToken, projectRoot } }
     });
     assert.equal(mixedAdaptiveShape.isError, true);
     const prepareWithToken = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input, approvedAt, proposalToken }
+      arguments: { request: { mode: "prepare", ...input, approvedAt, proposalToken } }
     });
     assert.equal(prepareWithToken.isError, true);
     assert.ok(
@@ -2288,21 +2666,21 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.match(proposalRecord, /"stagedFiles"/);
     const wrongApply = await client.callTool({
       name: "archive_batch_candidate",
-      arguments: { mode: "apply", proposalToken }
+      arguments: { request: { mode: "apply", proposalToken } }
     });
     assert.equal(wrongApply.isError, true);
     const productCandidatePath = join(projectRoot, ".cadre/stage", "create", "product.md");
     writeFileSync(productCandidatePath, "# Product\n\nChanged after preview.\n");
     const staleApply = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "apply", proposalToken }
+      arguments: { request: { mode: "apply", proposalToken } }
     });
     assert.equal(staleApply.isError, true);
     assert.equal(existsSync(join(projectRoot, ".cadre", "project.json")), false);
     writeFileSync(productCandidatePath, "# Product\n");
     const finalPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { mode: "prepare", ...input, approvedAt }
+      arguments: { request: { mode: "prepare", ...input, approvedAt } }
     });
     const finalProposalToken = (finalPreview.structuredContent as { proposalToken?: string }).proposalToken;
     assert.ok(finalProposalToken);
@@ -2316,7 +2694,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     try {
       const applied = await restartedClient.callTool({
         name: "project_init_candidate",
-        arguments: { mode: "apply", proposalToken: finalProposalToken }
+        arguments: { request: { mode: "apply", proposalToken: finalProposalToken } }
       });
       assert.equal(applied.isError, undefined);
       assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
@@ -2372,16 +2750,21 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       const committed = await client.callTool({
         name: "execution_checkpoint",
         arguments: {
-          ...scope,
-          event: "record_commit",
-          commit: workerCommit,
-          verification: "focused checks passed",
-          authorization: approvalMode === "governed" ? "human approved" : `${approvalMode} mode authorization`
+          scope,
+          action: {
+            event: "record_commit",
+            commit: workerCommit,
+            verification: "focused checks passed",
+            authorization: approvalMode === "governed" ? "human approved" : `${approvalMode} mode authorization`
+          }
         }
       });
       assert.equal(committed.isError, undefined, JSON.stringify(committed.structuredContent));
 
-      const first = await client.callTool({ name: "integration", arguments: { mode: "prepare", ...scope } });
+      const first = await client.callTool({
+        name: "integration",
+        arguments: { request: { mode: "prepare", ...scope } }
+      });
       assert.equal(first.isError, undefined, JSON.stringify(first.structuredContent));
       if (approvalMode === "phase") {
         assert.equal((first.structuredContent as { commandStatus?: string }).commandStatus, "applied");
@@ -2396,7 +2779,7 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
         assert.ok(proposalToken);
         const applied = await client.callTool({
           name: "integration",
-          arguments: { mode: "apply", proposalToken }
+          arguments: { request: { mode: "apply", proposalToken } }
         });
         assert.equal(applied.isError, undefined, JSON.stringify(applied.structuredContent));
         assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
@@ -2505,20 +2888,34 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
 });
 
 test("proposal workflows validate staged plan files without transporting their content", () => {
-  for (const skill of ["track", "review", "revise"]) {
+  for (const skill of ["track", "review", "revise", "refresh", "revert"]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /candidate_inspect/, `${skill} must inspect and validate staged artifacts once`);
-    assert.match(body, /targetStatus/, `${skill} must validate staged plan Markdown when present`);
+    assert.match(body, /planValidations/, `${skill} must validate staged plan Markdown when present`);
     assert.match(body, /\.cadre\/stage/, `${skill} must use the project-local candidate stage`);
-    assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
-    assert.match(body, /do not pass (?:the )?plan Markdown through MCP|without transporting/i);
+    if (["track", "review", "revise"].includes(skill)) {
+      assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
+      assert.match(body, /do not pass (?:the )?plan Markdown through MCP|without transporting/i);
+    }
   }
 
   const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
   const review = readFileSync(join(root, "skills", "review", "SKILL.md"), "utf8");
+  const revise = readFileSync(join(root, "skills", "revise", "SKILL.md"), "utf8");
+  const refresh = readFileSync(join(root, "skills", "refresh", "SKILL.md"), "utf8");
+  const revert = readFileSync(join(root, "skills", "revert", "SKILL.md"), "utf8");
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
-  assert.match(track, /targetStatus: "planned"/);
-  assert.match(review, /targetStatus: "in_progress"/);
+  assert.match(track, /planValidations: \[\{ path: "plan\.md", targetStatus: "planned" \}\]/);
+  assert.match(review, /planValidations: \[\{ path: "plan\.md", targetStatus: "in_progress" \}\]/);
+  for (const [name, body] of [["revise", revise], ["refresh", refresh], ["revert", revert]] as const) {
+    assert.match(body, /every staged root or nested `plan\.md`/, `${name} must cover nested plans`);
+    assert.match(body, /exact candidate-relative path/, `${name} must identify each plan exactly`);
+  }
+  assert.match(refresh, /targetRuntimeVersion/);
+  assert.match(refresh, /targetTemplateSetVersion/);
+  assert.doesNotMatch(refresh, /runtimeVersion: \d|templateSetVersion: v\d/);
+  assert.match(track, /kind: "staged_track_candidate"/);
+  assert.match(track, /kind: "canonical_track"/);
   assert.doesNotMatch(implement, /candidate_inspect/);
 });
 
@@ -2573,7 +2970,7 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(review, /review_complete/);
   assert.match(review, /Do not inspect the installed runtime/);
   assert.match(archive, /archive_batch_candidate/);
-  assert.match(archive, /use resources only when an individual ID must be discovered/i);
+  assert.match(archive, /use descriptor tools when an ID must be resolved/i);
   assert.match(archive, /(?:needs no second approval|without another approval)/);
   assert.doesNotMatch(archive, /call `tracks_render`/);
   assert.match(review, /Expected human decision count is one per review cycle/);
@@ -2696,6 +3093,13 @@ test("semantic authorization envelopes remove deterministic follow-up approvals"
   assert.match(revert, /Expected human decision count is one on the clean path/);
   assert.match(revert, /Do not turn these deterministic consequences into a second approval/);
   assert.match(wisp, /Standard Wisp has zero approval prompts/);
+});
+
+test("wisp keeps uninitialized repositories free of Cadre state", () => {
+  const wisp = readFileSync(join(root, "skills", "wisp", "SKILL.md"), "utf8");
+  assert.match(wisp, /only when an initialized project.*`.cadre\/\.gitignore` containing `\/wisps\/`/);
+  assert.match(wisp, /OS temporary directory/);
+  assert.match(wisp, /never create `.cadre`/);
 });
 
 test("default styleguide catalog covers the supported stack", () => {

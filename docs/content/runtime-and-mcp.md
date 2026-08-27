@@ -44,6 +44,11 @@ duplicated in structured content.
 Skills normally request known bundles with `template_get_many`; catalog
 discovery is unnecessary when the logical IDs are already declared.
 
+Candidate inspection binds an exact path/hash manifest and explicit validation
+context for every staged root or nested `plan.md`. A staged track proposal is
+reported separately from canonical track state until its approved files and
+operation journal are promoted.
+
 ## Tool Families
 
 | Family | Tools |
@@ -81,8 +86,10 @@ the tool boundary.
 
 ## Adaptive Command Contract
 
-Each adaptive tool advertises a required `mode: prepare | apply`. Prepare
-accepts only its operation fields; apply accepts only `proposalToken`. An
+Each adaptive tool advertises a required `request` object whose schema is a
+strict `prepare | apply` discriminated union. Prepare accepts only its exact
+operation fields; apply accepts only `proposalToken`. Mixed-mode input is
+rejected by schema validation. An
 already-authorized command computes its proposal once, validates current
 state, and applies atomically in one tool call. When human approval is required,
 the command computes without mutation, retains normalized input and digest in
@@ -101,8 +108,16 @@ stage remains outside commits and is retained through the artifact commit
 checkpoint for recovery.
 
 Execution checkpoints return compact changed-node receipts and scheduler state.
+Their wire shape separates stable `scope` from an event-specific `action`, so
+required commit, verification, authorization, or blocker evidence is visible
+in the published schema. Completion evidence remains state-dependent.
 Implementation entry uses one `project_status` implementation view for project,
 graph, scheduler, and worktree preflight.
+
+Candidate producers pass the complete `expectedFiles` set on every prepare.
+This makes clarification-driven scope contraction convergent: obsolete regular
+files are removed only inside the owned ignored candidate stage after a full
+symlink/non-file preflight.
 
 Not every workflow write has a dedicated MCP mutation. Track drafting,
 revision, refresh, remediation, and revert use skill-side candidate staging,
