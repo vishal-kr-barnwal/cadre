@@ -7,6 +7,49 @@ order: 230
 
 # Release Notes
 
+## 3.5.0 - 2026-08-27
+
+Cadre 3.5.0 adds beta support for the native Zed Agent. Codex and Claude Code
+remain stable integrations, and Cadre's lifecycle, governance, project state,
+and active v2 template semantics are unchanged.
+
+### Native Zed Agent beta
+
+- `cadre-ai install --target zed` installs all ten workflows as global
+  `/cadre-*` skills and configures the packaged Cadre MCP server.
+- Auto-detection includes Zed when its CLI is installed, and `--target all`
+  now selects Codex, Claude Code, and Zed.
+- Installation preserves Zed JSONC comments and unrelated settings, uses
+  collision-safe skill links, and adds one exact allow rule for each of the 22
+  Cadre MCP tools unless `--prompt-mcp-tools` is supplied.
+- Uninstall removes only Cadre-owned skill links and a matching context-server
+  entry. It preserves permission preferences and unrelated configuration.
+
+### Zed runtime compatibility
+
+- Generated Zed skills request `template_get_many` with
+  `contentMode: "text"`; Codex and Claude retain the embedded-resource default.
+- Zed uses the existing single-question chat fallback because it does not
+  advertise MCP form elicitation.
+- The MCP tool catalog is centralized so server registration, permissions,
+  validation, and tests cannot drift.
+
+### Compatibility and upgrade
+
+Existing 3.4 projects remain readable. After installing 3.5.0, run Cadre
+`refresh` and approve the runtime-version update before further state mutation;
+the template set remains v2 and no lifecycle migration is introduced.
+
+```bash
+npm install -g cadre-ai@3.5.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex conversation, run `/reload-plugins` in Claude Code, and open
+a new Zed Agent thread. In Zed, verify the ten beta `cadre-*` skills, the
+active Cadre MCP server, and `/cadre-status`.
+
 ## 3.4.0 - 2026-08-27
 
 Cadre 3.4 is a breaking MCP and template-efficiency release. It reduces the

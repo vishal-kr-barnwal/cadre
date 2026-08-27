@@ -8,7 +8,7 @@ order: 120
 
 # Polyrepo Mode — Coming Soon
 
-Cadre 3.0 operates on one Git repository and one `.cadre/` control plane at a
+Cadre 3.5 operates on one Git repository and one `.cadre/` control plane at a
 time. Coordinated polyrepo delivery is planned, but it is not part of the
 current runtime or workflow set.
 

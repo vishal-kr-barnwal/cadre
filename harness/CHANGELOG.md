@@ -1,5 +1,43 @@
 # Changelog
 
+## [3.5.0] - 2026-08-27
+
+Cadre 3.5.0 adds beta support for the native Zed Agent while keeping the
+Codex and Claude Code integrations stable. Cadre lifecycle, governance,
+project-state, and template-set semantics are unchanged.
+
+### Added
+
+- Added `zed` to explicit client selection and auto-detection. `--target all`
+  now installs or removes Codex, Claude Code, and Zed integrations.
+- Added generated Zed adapters for all ten workflows under
+  `zed-skills/cadre-<workflow>/`, exposed in Zed as `/cadre-*` skills through
+  collision-safe global symlinks.
+- Added JSONC-preserving Zed configuration for the packaged Cadre context
+  server and one exact allow rule for each of the 22 Cadre MCP tools.
+- Added safe Zed uninstall behavior that removes only Cadre-owned links and a
+  matching context server while preserving permissions and unrelated settings.
+- Added `contentMode: "text"` to `template_get_many` for clients that cannot
+  consume embedded resource bodies, while preserving the existing embedded
+  resource default.
+
+### Changed
+
+- Centralized all 22 MCP tool names so server registration, Zed permissions,
+  validation, and tests share one catalog.
+- Extended the documentation command switcher, installation guides,
+  architecture, configuration, troubleshooting, and release validation for
+  the Zed Agent beta.
+- Updated the runtime version to 3.5.0. Existing 3.4 projects remain readable
+  and use the standard explicit `refresh` flow before further state mutation;
+  the active template set remains v2.
+
+### Stability
+
+- Codex and Claude Code remain stable integrations.
+- Native Zed Agent support is beta in this release. It targets Zed's global
+  Skills and custom MCP surfaces, not Codex or Claude ACP agents hosted in Zed.
+
 ## [3.4.0] - 2026-08-27
 
 Cadre 3.4.0 is a breaking MCP and template-contract release. Existing v1

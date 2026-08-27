@@ -1,6 +1,6 @@
 ---
 title: Capabilities
-description: What Cadre 3.0 supports today and where its boundaries are.
+description: What Cadre 3.5 supports today and where its boundaries are.
 section: User Guide
 order: 40
 ---
@@ -61,7 +61,7 @@ before the first artifact or Git mutation.
 
 ## Not In The Current Release
 
-Cadre 3.0 does not currently provide:
+Cadre 3.5 does not currently provide:
 
 - GitHub Copilot or Google Antigravity plugins;
 - project-scoped client installation;

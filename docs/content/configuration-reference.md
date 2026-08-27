@@ -8,7 +8,7 @@ order: 190
 
 # Project Artifact Reference
 
-Cadre 3.0 configuration and state are distributed across explicit approved
+Cadre 3.5 configuration and state are distributed across explicit approved
 artifacts. There is no current `cadre/config.json`.
 
 Unapproved artifact proposals live temporarily beneath

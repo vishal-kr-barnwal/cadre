@@ -8,7 +8,7 @@ order: 90
 
 # Project Configuration
 
-Cadre 3.0 does not use the retired `cadre/config.json` policy model. Persistent
+Cadre 3.5 does not use the retired `cadre/config.json` policy model. Persistent
 behavior is defined by approved, version-controlled artifacts under `.cadre/`.
 
 ## Configuration Sources
