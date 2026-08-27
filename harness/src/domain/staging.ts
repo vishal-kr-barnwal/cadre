@@ -1,8 +1,10 @@
-import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import {
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
+} from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 
-export const CANDIDATE_STAGE_DIRECTORY = ".cadre-stage";
+export const CANDIDATE_STAGE_DIRECTORY = ".cadre/stage";
 export const MAX_CANDIDATE_FILE_BYTES = 1024 * 1024;
 export const MAX_CANDIDATE_TOTAL_BYTES = 8 * 1024 * 1024;
 
@@ -35,11 +37,56 @@ export function normalizeCandidatePath(input: string): string {
 export function candidateStageRoot(projectRootInput: string, candidateIdInput: string): string {
   const projectRoot = safeProjectRoot(projectRootInput);
   const candidateId = normalizeCandidateId(candidateIdInput);
+  const cadreRoot = join(projectRoot, ".cadre");
+  if (!existsSync(cadreRoot) || !lstatSync(cadreRoot).isDirectory() || lstatSync(cadreRoot).isSymbolicLink()) {
+    throw new Error(`Cadre candidate root is unavailable or unsafe: ${cadreRoot}`);
+  }
+  const gitignorePath = join(cadreRoot, ".gitignore");
+  if (!existsSync(gitignorePath) || !lstatSync(gitignorePath).isFile() || lstatSync(gitignorePath).isSymbolicLink()) {
+    throw new Error(`Cadre candidate stage requires a regular ${gitignorePath}`);
+  }
+  if (!readFileSync(gitignorePath, "utf8").split(/\r?\n/).includes("/stage/")) {
+    throw new Error(`${gitignorePath} must ignore /stage/ before candidate files are written`);
+  }
   const stageParent = join(projectRoot, CANDIDATE_STAGE_DIRECTORY);
   if (existsSync(stageParent) && lstatSync(stageParent).isSymbolicLink()) {
     throw new Error(`Refusing candidate stage through symbolic link: ${stageParent}`);
   }
   return join(stageParent, candidateId);
+}
+
+export function prepareCandidateStage(projectRootInput: string, candidateIdInput: string): {
+  stagePath: string;
+  gitignorePath: string;
+} {
+  const projectRoot = safeProjectRoot(projectRootInput);
+  const candidateId = normalizeCandidateId(candidateIdInput);
+  const cadreRoot = join(projectRoot, ".cadre");
+  if (existsSync(cadreRoot)) {
+    const stat = lstatSync(cadreRoot);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe Cadre directory: ${cadreRoot}`);
+  } else mkdirSync(cadreRoot);
+  const gitignorePath = join(cadreRoot, ".gitignore");
+  let content = "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n";
+  if (existsSync(gitignorePath)) {
+    const stat = lstatSync(gitignorePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe Cadre ignore file: ${gitignorePath}`);
+    content = readFileSync(gitignorePath, "utf8");
+  }
+  if (!content.split(/\r?\n/).includes("/stage/")) {
+    content = `${content.endsWith("\n") ? content : `${content}\n`}\n# Unapproved candidate artifacts\n/stage/\n`;
+    const temporaryPath = `${gitignorePath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temporaryPath, content, { flag: "wx" });
+      renameSync(temporaryPath, gitignorePath);
+    } finally {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    }
+  }
+  const stagePath = join(cadreRoot, "stage", candidateId);
+  mkdirSync(stagePath, { recursive: true });
+  candidateStageRoot(projectRoot, candidateId);
+  return { stagePath, gitignorePath };
 }
 
 function assertRegularPath(root: string, target: string): void {

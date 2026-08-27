@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync,
   unlinkSync, writeFileSync
@@ -40,13 +41,28 @@ import {
   supportsFormElicitation
 } from "../src/mcp/elicitation.js";
 import { ProposalTokenStore } from "../src/mcp/proposals.js";
+import { prepareCandidateStage } from "../src/domain/staging.js";
 import {
   applyProjectInitCandidate, previewProjectInitCandidate, recordGitInitialized, recordSetupCommit
 } from "../src/domain/init.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const templateRoot = join(root, "templates", "v1", "init");
-const providerRoot = join(root, "templates", "v1");
+const templateRoot = join(root, "templates", "v2", "init");
+const legacyTemplateRoot = join(root, "templates", "v1", "init");
+const providerRoot = join(root, "templates", "v2");
+
+test("published v1 templates remain byte-for-byte immutable", () => {
+  const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]);
+  const digest = createHash("sha256");
+  for (const path of files(join(root, "templates", "v1")).sort()) {
+    digest.update(relative(join(root, "templates", "v1"), path));
+    digest.update("\0");
+    digest.update(readFileSync(path));
+    digest.update("\0");
+  }
+  assert.equal(digest.digest("hex"), "d74ccb150d9b635b806c8de40af1eda15c37a977fc44fcd66eebf6097fe50f9d");
+});
 
 function childEnvironment(overrides: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
@@ -63,8 +79,8 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.3.0";
-  project.templateSetVersion = "v1";
+  project.runtimeVersion = "3.4.0";
+  project.templateSetVersion = "v2";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
   project.setup = {
@@ -357,6 +373,10 @@ function gitFixture(): { projectRoot: string; head: string } {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-worktree-"));
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
+  writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
+    runtimeVersion: "3.4.0",
+    templateSetVersion: "v2"
+  }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
@@ -428,15 +448,14 @@ test("empty initialized project validates", () => {
 
 test("setup commit recording verifies the approved file manifest against Git", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-candidate-commit-"));
+  prepareCandidateStage(projectRoot, "create");
   const files = [
     ["product.md", "# Product\n"],
     ["guidelines.md", "# Guidelines\n"],
-    ["tech-stack.md", "# Tech Stack\n- TypeScript\n"],
-    ["workflow.md", readFileSync(join(templateRoot, "workflow.md"), "utf8")],
-    ["styleguides/general.md", "# General Styleguide\n"]
+    ["tech-stack.md", "# Tech Stack\n- TypeScript\n"]
   ] as const;
   for (const [relativePath, content] of files) {
-    const path = join(projectRoot, ".cadre-stage", "create", relativePath);
+    const path = join(projectRoot, ".cadre/stage", "create", relativePath);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
   }
@@ -447,7 +466,8 @@ test("setup commit recording verifies the approved file manifest against Git", (
     gitDisposition: "initialize" as const,
     baseCommit: null,
     approvedAt: "2026-08-26T00:00:00.000Z",
-    stagedFiles: files.map(([path]) => path)
+    stagedFiles: files.map(([path]) => path),
+    styleguideIds: ["project/styleguides/general", "styleguide/javascript", "styleguide/typescript"]
   };
   assert.throws(
     () => previewProjectInitCandidate({
@@ -1009,7 +1029,7 @@ test("archive candidate proposals reject changed content and record provenance",
   writeFinalizedTrack(projectRoot, "archive-candidate", "completed");
   runState(projectRoot, "render");
   const candidateId = "archive-candidate-proposal";
-  const candidateRoot = join(projectRoot, ".cadre-stage", candidateId);
+  const candidateRoot = join(projectRoot, ".cadre/stage", candidateId);
   mkdirSync(join(candidateRoot, "patterns"), { recursive: true });
   const patternPath = join(candidateRoot, "patterns", "candidate-pattern.md");
   const indexPath = join(candidateRoot, "patterns", "index.md");
@@ -1170,7 +1190,7 @@ test("worker branches cannot integrate protected Cadre state", () => {
 
 test("approved create operation remains valid before its artifact commit", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-setup-resume-"));
-  cpSync(templateRoot, join(projectRoot, ".cadre"), { recursive: true });
+  cpSync(legacyTemplateRoot, join(projectRoot, ".cadre"), { recursive: true });
   renameSync(
     join(projectRoot, ".cadre", "gitignore.template"),
     join(projectRoot, ".cadre", ".gitignore")
@@ -1493,11 +1513,11 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   assert.ok(existsSync(join(pluginRoot, "skills", "track", "SKILL.md")));
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.3.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.3.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.4.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.4.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v1", "track", "spec.md")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v1", "init", "gitignore.template")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v2", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v2", "init", "gitignore.template")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -1522,11 +1542,11 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 25);
+    assert.equal(tools.tools.length, 22);
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
-    const catalog = await client.callTool({ name: "template_catalog", arguments: {} });
+    const resources = await client.listResources();
     assert.deepEqual(
-      (catalog.structuredContent as { templates?: Array<{ id?: string }> }).templates?.map((template) => template.id),
+      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v2/", "")),
       [...TEMPLATE_IDS]
     );
   } finally {
@@ -1547,9 +1567,9 @@ test("installer prepares a dual-product user plugin marketplace", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.3.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.4.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.3.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.4.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1699,16 +1719,35 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   await client.connect(transport);
   try {
     const tools = await client.listTools();
+    assert.equal(tools.tools.length, 22);
+    assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 18 * 1024);
     for (const name of [
-      "workflow_elicit", "template_catalog", "template_get", "template_get_many", "styleguide_resolve", "project_status",
-      "state_validate", "artifact_candidate_manifest", "project_init_candidate",
+      "workflow_elicit", "template_get_many", "styleguide_resolve", "project_status",
+      "state_validate", "candidate_stage_prepare", "candidate_inspect", "project_init_candidate",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render",
-      "execution_graph_validate", "execution_graph_validate_candidate",
+      "execution_graph_validate",
       "review_complete", "archive_batch_record", "archive_batch_candidate",
       "execution_start", "execution_checkpoint", "execution_status", "execution_finish", "worktree_create",
-      "integration", "worktree_cleanup", "worktree_status"
+      "integration", "worktree_cleanup"
     ]) {
       assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
+    }
+    for (const name of ["project_init_candidate", "archive_batch_candidate", "review_complete", "integration"]) {
+      const schema = tools.tools.find((tool) => tool.name === name)?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      assert.ok(schema.properties?.mode, `${name} must advertise its adaptive mode`);
+      assert.ok(schema.properties?.proposalToken, `${name} must advertise its proposal token`);
+      assert.ok(schema.required?.includes("mode"), `${name} must require mode`);
+      assert.ok(Object.keys(schema.properties ?? {}).length > 2, `${name} must advertise prepare fields`);
+    }
+    for (const arguments_ of [{}, { mode: "prepare" }]) {
+      const invalidAdaptive = await client.callTool({
+        name: "project_init_candidate",
+        arguments: arguments_
+      });
+      assert.equal(invalidAdaptive.isError, true);
     }
     const fallback = await client.callTool({
       name: "workflow_elicit",
@@ -1728,30 +1767,23 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "fallback_required"
     );
     const resources = await client.listResources();
-    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v1/track/spec"));
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v2/track/spec"));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v1/track/revise-operation"
+      (resource) => resource.uri === "cadre://templates/v2/track/revise-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v1/project/refresh-operation"
+      (resource) => resource.uri === "cadre://templates/v2/project/refresh-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v1/project/gitignore"
+      (resource) => resource.uri === "cadre://templates/v2/project/gitignore"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v1/track/revert-operation"
+      (resource) => resource.uri === "cadre://templates/v2/track/revert-operation"
     ));
 
-    const workflow = await client.callTool({ name: "template_get", arguments: { id: "project/workflow" } });
-    assert.equal(workflow.isError, undefined);
-    const workflowTemplate = workflow.structuredContent as {
-      id?: string;
-      artifactPath?: string;
-      relativePath?: string;
-    };
-    assert.equal(workflowTemplate.id, "project/workflow");
-    assert.equal(workflowTemplate.artifactPath, "workflow.md");
-    assert.equal(workflowTemplate.relativePath, undefined);
+    const workflow = await client.readResource({ uri: "cadre://templates/v2/project/workflow" });
+    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v2/project/workflow");
+    assert.match((workflow.contents[0] as { text?: string }).text ?? "", /^# Cadre Workflow/);
 
     const bundle = await client.callTool({
       name: "template_get_many",
@@ -1762,6 +1794,16 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (bundle.structuredContent as { templates?: Array<{ id?: string }> }).templates?.map((template) => template.id),
       ["track/spec", "track/state"]
     );
+    assert.ok((bundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
+      (template) => template.content === undefined
+    ));
+    assert.ok(Buffer.byteLength(JSON.stringify(bundle)) <= 6 * 1024);
+    const createBundle = await client.callTool({
+      name: "template_get_many",
+      arguments: { ids: ["project/product", "project/guidelines", "project/tech-stack"] }
+    });
+    assert.equal(createBundle.isError, undefined);
+    assert.ok(Buffer.byteLength(JSON.stringify(createBundle)) <= 4 * 1024);
 
     const untouchedRoot = mkdtempSync(join(tmpdir(), "cadre-draft-validator-"));
     const sentinelPath = join(untouchedRoot, "sentinel.txt");
@@ -1783,46 +1825,58 @@ test("compiled MCP exposes versioned templates and initializes projects without 
 - Phase completion commit: pending
 `;
     const candidateId = "review-proposal";
-    const candidatePlanPath = join(untouchedRoot, ".cadre-stage", candidateId, "plan.md");
+    prepareCandidateStage(untouchedRoot, candidateId);
+    const candidatePlanPath = join(untouchedRoot, ".cadre/stage", candidateId, "plan.md");
     mkdirSync(dirname(candidatePlanPath), { recursive: true });
     writeFileSync(candidatePlanPath, draftPlan);
     const candidateValidation = await client.callTool({
-      name: "execution_graph_validate_candidate",
+      name: "candidate_inspect",
       arguments: {
         projectRoot: untouchedRoot,
         candidateId,
-        targetStatus: "in_progress",
-        sourceLabel: "review-proposal.md"
+        files: ["plan.md"],
+        targetStatus: "in_progress"
       }
     });
     assert.equal(candidateValidation.isError, undefined);
-    assert.equal((candidateValidation.structuredContent as { valid?: boolean }).valid, true);
+    assert.equal((candidateValidation.structuredContent as { plan?: { valid?: boolean } }).plan?.valid, true);
     assert.match(
-      (candidateValidation.structuredContent as { sha256?: string }).sha256 ?? "",
+      (candidateValidation.structuredContent as { files?: Array<{ sha256?: string }> }).files?.[0]?.sha256 ?? "",
+      /^[0-9a-f]{64}$/
+    );
+    assert.match(
+      (candidateValidation.structuredContent as { digest?: string }).digest ?? "",
       /^[0-9a-f]{64}$/
     );
     assert.equal(readFileSync(sentinelPath, "utf8"), "unchanged\n");
+    writeFileSync(join(untouchedRoot, ".cadre/stage", candidateId, "unexpected.md"), "unexpected\n");
+    const unexpectedCandidate = await client.callTool({
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"], targetStatus: "planned" }
+    });
+    assert.equal(unexpectedCandidate.isError, true);
+    unlinkSync(join(untouchedRoot, ".cadre/stage", candidateId, "unexpected.md"));
+    const traversalCandidate = await client.callTool({
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["../plan.md"] }
+    });
+    assert.equal(traversalCandidate.isError, true);
     writeFileSync(candidatePlanPath, "x".repeat((256 * 1024) + 1));
     const oversizedCandidate = await client.callTool({
-      name: "execution_graph_validate_candidate",
-      arguments: { projectRoot: untouchedRoot, candidateId, targetStatus: "planned" }
+      name: "candidate_inspect",
+      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"], targetStatus: "planned" }
     });
     assert.equal(oversizedCandidate.isError, true);
     writeFileSync(candidatePlanPath, draftPlan);
-    const candidateManifest = await client.callTool({
-      name: "artifact_candidate_manifest",
-      arguments: { projectRoot: untouchedRoot, candidateId, files: ["plan.md"] }
-    });
-    assert.equal(candidateManifest.isError, undefined);
-    assert.match(
-      (candidateManifest.structuredContent as { digest?: string }).digest ?? "",
-      /^[0-9a-f]{64}$/
-    );
-    assert.equal(Object.hasOwn(candidateManifest.structuredContent ?? {}, "content"), false);
-    symlinkSync(candidatePlanPath, join(untouchedRoot, ".cadre-stage", "linked-plan"));
+    symlinkSync(candidatePlanPath, join(untouchedRoot, ".cadre/stage", "linked-plan"));
     const linkedValidation = await client.callTool({
-      name: "execution_graph_validate_candidate",
-      arguments: { projectRoot: untouchedRoot, candidateId: "linked-plan", targetStatus: "planned" }
+      name: "candidate_inspect",
+      arguments: {
+        projectRoot: untouchedRoot,
+        candidateId: "linked-plan",
+        files: ["plan.md"],
+        targetStatus: "planned"
+      }
     });
     assert.equal(linkedValidation.isError, true);
 
@@ -1887,6 +1941,71 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok(Buffer.byteLength(JSON.stringify(compactStatus)) < 8 * 1024);
     assert.equal(Object.hasOwn(compactStatus.structuredContent ?? {}, "journal"), false);
 
+    const legacyRoot = fixture();
+    const legacyProjectPath = join(legacyRoot, ".cadre", "project.json");
+    const legacyProject = JSON.parse(readFileSync(legacyProjectPath, "utf8"));
+    legacyProject.runtimeVersion = "3.3.0";
+    legacyProject.templateSetVersion = "v1";
+    writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
+    writeFileSync(
+      join(legacyRoot, ".cadre", ".gitignore"),
+      "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n"
+    );
+    const legacyStatus = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: legacyRoot, view: "project" }
+    });
+    assert.equal(legacyStatus.isError, undefined);
+    assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
+    assert.equal(
+      (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
+      "3.4.0"
+    );
+    const rejectedLegacyMutation = await client.callTool({
+      name: "tracks_render",
+      arguments: { projectRoot: legacyRoot }
+    });
+    assert.equal(rejectedLegacyMutation.isError, true);
+    assert.equal(
+      (rejectedLegacyMutation.structuredContent as { error?: { code?: string } }).error?.code,
+      "PROJECT_REFRESH_REQUIRED"
+    );
+    const legacyStage = await client.callTool({
+      name: "candidate_stage_prepare",
+      arguments: { projectRoot: legacyRoot, candidateId: "refresh-legacy" }
+    });
+    assert.equal(legacyStage.isError, undefined);
+    legacyProject.runtimeVersion = "3.4.0";
+    legacyProject.templateSetVersion = "v2";
+    writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
+    writeFileSync(
+      join(legacyRoot, ".cadre", "workflow.md"),
+      readFileSync(join(templateRoot, "workflow.md"), "utf8")
+    );
+    assert.equal(validateProject(legacyRoot).errors.length, 0);
+    assert.equal(validateProject(legacyRoot).warnings.length, 0);
+
+    const summaryRoot = fixture();
+    for (let index = 0; index < 50; index += 1) {
+      writePlannedTrack(summaryRoot, `summary-${String(index).padStart(2, "0")}`);
+    }
+    runState(summaryRoot, "render");
+    const projectSummary = await client.callTool({
+      name: "project_status",
+      arguments: { projectRoot: summaryRoot, view: "project" }
+    });
+    assert.equal(projectSummary.isError, undefined);
+    const projectSummaryBytes = Buffer.byteLength(JSON.stringify(projectSummary));
+    const projectSummaryContent = projectSummary.structuredContent as {
+      tracks?: unknown[]; errors?: unknown[]; warnings?: unknown[]; worktreeRuntime?: unknown;
+    };
+    assert.ok(projectSummaryBytes <= 8 * 1024, `project summary was ${projectSummaryBytes} bytes: ${JSON.stringify({
+      tracks: Buffer.byteLength(JSON.stringify(projectSummaryContent.tracks)),
+      errors: Buffer.byteLength(JSON.stringify(projectSummaryContent.errors)),
+      warnings: Buffer.byteLength(JSON.stringify(projectSummaryContent.warnings)),
+      worktrees: Buffer.byteLength(JSON.stringify(projectSummaryContent.worktreeRuntime))
+    })}`);
+
     const archiveRoot = fixture();
     const archivedTrackRoot = writeFinalizedTrack(archiveRoot, "mcp-archive-candidate", "completed");
     runState(archiveRoot, "render");
@@ -1940,15 +2059,16 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const archivePattern = "# Pattern: MCP staged pattern\n\n## Provenance\n- Track: `mcp-archive-candidate`\n";
     const archiveIndex = "# Pattern Catalog\n\n- [MCP staged pattern](mcp-staged-pattern.md)\n";
     const archivePatternPath = join(
-      archiveRoot, ".cadre-stage", archiveCandidateId, "patterns", "mcp-staged-pattern.md"
+      archiveRoot, ".cadre/stage", archiveCandidateId, "patterns", "mcp-staged-pattern.md"
     );
-    const archiveIndexPath = join(archiveRoot, ".cadre-stage", archiveCandidateId, "patterns", "index.md");
+    const archiveIndexPath = join(archiveRoot, ".cadre/stage", archiveCandidateId, "patterns", "index.md");
     mkdirSync(dirname(archivePatternPath), { recursive: true });
     writeFileSync(archivePatternPath, archivePattern);
     writeFileSync(archiveIndexPath, archiveIndex);
     const archiveCandidatePreview = await client.callTool({
       name: "archive_batch_candidate",
       arguments: {
+        mode: "prepare",
         projectRoot: archiveRoot,
         candidateId: archiveCandidateId,
         selectedTracks: ["mcp-archive-candidate"],
@@ -1979,29 +2099,33 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.doesNotMatch(archiveProposalRecord, /"content"/);
     const archiveCandidateApply = await client.callTool({
       name: "archive_batch_candidate",
-      arguments: { proposalToken: archiveCandidateToken }
+      arguments: { mode: "apply", proposalToken: archiveCandidateToken }
     });
     assert.equal(archiveCandidateApply.isError, undefined);
     assert.equal(
       (archiveCandidateApply.structuredContent as { commandStatus?: string }).commandStatus,
       "applied"
     );
+    assert.ok(Buffer.byteLength(JSON.stringify(archiveCandidateApply)) <= 4 * 1024);
     assert.equal(
       readFileSync(join(archiveRoot, ".cadre", "patterns", "mcp-staged-pattern.md"), "utf8"),
       archivePattern
     );
 
     const projectRoot = mkdtempSync(join(tmpdir(), "cadre-mcp-init-"));
+    const preparedStage = await client.callTool({
+      name: "candidate_stage_prepare",
+      arguments: { projectRoot, candidateId: "create" }
+    });
+    assert.equal(preparedStage.isError, undefined);
     const files = [
       ["product.md", "# Product\n"],
       ["guidelines.md", "# Guidelines\n"],
-      ["tech-stack.md", "# Tech Stack\n- TypeScript\n"],
-      ["workflow.md", readFileSync(join(templateRoot, "workflow.md"), "utf8")],
-      ["styleguides/general.md", "# General Styleguide\n"]
+      ["tech-stack.md", "# Tech Stack\n- TypeScript\n"]
     ].map(([path, content]) => ({ path: path!, content: content! }));
 
     for (const file of files) {
-      const path = join(projectRoot, ".cadre-stage", "create", file.path);
+      const path = join(projectRoot, ".cadre/stage", "create", file.path);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, file.content);
     }
@@ -2012,17 +2136,26 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       gitDisposition: "existing",
       baseCommit: null,
       approvedAt: "2026-07-28T00:00:00.000Z",
-      stagedFiles: files.map((file) => file.path)
+      stagedFiles: files.map((file) => file.path),
+      styleguideIds: ["project/styleguides/general", "styleguide/javascript", "styleguide/typescript"]
     };
-    const unexpectedCandidatePath = join(projectRoot, ".cadre-stage", "create", "unexpected.md");
+    const unknownAdaptiveField = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { mode: "prepare", ...input, unexpected: true }
+    });
+    assert.equal(unknownAdaptiveField.isError, true);
+    const unexpectedCandidatePath = join(projectRoot, ".cadre/stage", "create", "unexpected.md");
     writeFileSync(unexpectedCandidatePath, "unexpected\n");
     const unexpectedPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: input
+      arguments: { mode: "prepare", ...input }
     });
     assert.equal(unexpectedPreview.isError, true);
     unlinkSync(unexpectedCandidatePath);
-    const preview = await client.callTool({ name: "project_init_candidate", arguments: input });
+    const preview = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { mode: "prepare", ...input }
+    });
     assert.equal(preview.isError, undefined);
     assert.equal((preview.structuredContent as { commandStatus?: string }).commandStatus, "approval_required");
     const digest = (preview.structuredContent as { digest?: string }).digest;
@@ -2031,12 +2164,22 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const approvedAt = "2026-07-28T00:05:00.000Z";
     const refreshedPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { ...input, approvedAt }
+      arguments: { mode: "prepare", ...input, approvedAt }
     });
     assert.equal(refreshedPreview.isError, undefined);
     assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
     const proposalToken = (refreshedPreview.structuredContent as { proposalToken?: string }).proposalToken;
     assert.ok(proposalToken);
+    const mixedAdaptiveShape = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { mode: "apply", proposalToken, projectRoot }
+    });
+    assert.equal(mixedAdaptiveShape.isError, true);
+    const prepareWithToken = await client.callTool({
+      name: "project_init_candidate",
+      arguments: { mode: "prepare", ...input, approvedAt, proposalToken }
+    });
+    assert.equal(prepareWithToken.isError, true);
     assert.ok(
       proposalToken.length < 64,
       `expected a compact project initialization token, got ${proposalToken.length} characters`
@@ -2050,21 +2193,21 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.match(proposalRecord, /"stagedFiles"/);
     const wrongApply = await client.callTool({
       name: "archive_batch_candidate",
-      arguments: { proposalToken }
+      arguments: { mode: "apply", proposalToken }
     });
     assert.equal(wrongApply.isError, true);
-    const productCandidatePath = join(projectRoot, ".cadre-stage", "create", "product.md");
+    const productCandidatePath = join(projectRoot, ".cadre/stage", "create", "product.md");
     writeFileSync(productCandidatePath, "# Product\n\nChanged after preview.\n");
     const staleApply = await client.callTool({
       name: "project_init_candidate",
-      arguments: { proposalToken }
+      arguments: { mode: "apply", proposalToken }
     });
     assert.equal(staleApply.isError, true);
-    assert.equal(existsSync(join(projectRoot, ".cadre")), false);
+    assert.equal(existsSync(join(projectRoot, ".cadre", "project.json")), false);
     writeFileSync(productCandidatePath, "# Product\n");
     const finalPreview = await client.callTool({
       name: "project_init_candidate",
-      arguments: { ...input, approvedAt }
+      arguments: { mode: "prepare", ...input, approvedAt }
     });
     const finalProposalToken = (finalPreview.structuredContent as { proposalToken?: string }).proposalToken;
     assert.ok(finalProposalToken);
@@ -2078,22 +2221,26 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     try {
       const applied = await restartedClient.callTool({
         name: "project_init_candidate",
-        arguments: { proposalToken: finalProposalToken }
+        arguments: { mode: "apply", proposalToken: finalProposalToken }
       });
       assert.equal(applied.isError, undefined);
       assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       assert.equal(Object.hasOwn(applied.structuredContent ?? {}, "content"), false);
+      assert.ok(Buffer.byteLength(JSON.stringify(applied)) <= 4 * 1024);
     } finally {
       await restartedClient.close();
     }
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
     const initializedProject = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
     assert.equal(initializedProject.setup.operation.approvedAt, approvedAt);
-    assert.equal(initializedProject.setup.operation.approvedArtifactHashes.length, files.length);
+    assert.ok(initializedProject.setup.operation.approvedArtifactHashes.length > files.length);
     assert.equal(
-      readFileSync(join(projectRoot, ".cadre", ".gitignore"), "utf8"),
-      "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n"
+      readFileSync(join(projectRoot, ".cadre", "workflow.md"), "utf8"),
+      readFileSync(join(templateRoot, "workflow.md"), "utf8")
     );
+    assert.ok(existsSync(join(projectRoot, ".cadre", "styleguides", "javascript.md")));
+    assert.ok(existsSync(join(projectRoot, ".cadre", "styleguides", "typescript.md")));
+    assert.match(readFileSync(join(projectRoot, ".cadre", ".gitignore"), "utf8"), /^\/stage\/$/m);
     assert.equal(existsSync(join(projectRoot, ".cadre", "wisps")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "bin")), false);
     assert.equal(existsSync(join(projectRoot, ".cadre", "templates")), false);
@@ -2115,7 +2262,7 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       const { projectRoot } = gitFixture();
       const trackId = `adaptive-${approvalMode}`;
       const executionId = "run-1";
-      writeWorktreeJournal(projectRoot, trackId, executionId, "running", "committed", approvalMode);
+      writeWorktreeJournal(projectRoot, trackId, executionId, "running", "pending", approvalMode);
       const scope = { projectRoot, trackId, executionId, nodeId: "T1.1" };
       const created = await client.callTool({ name: "worktree_create", arguments: scope });
       assert.equal(created.isError, undefined, JSON.stringify(created.structuredContent));
@@ -2126,8 +2273,20 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       writeFileSync(join(workerPath, "app.txt"), `${approvalMode} integration\n`);
       gitText(workerPath, ["add", "app.txt"]);
       gitText(workerPath, ["commit", "-m", `feat: ${approvalMode} integration`]);
+      const workerCommit = gitText(workerPath, ["rev-parse", "HEAD"]);
+      const committed = await client.callTool({
+        name: "execution_checkpoint",
+        arguments: {
+          ...scope,
+          event: "record_commit",
+          commit: workerCommit,
+          verification: "focused checks passed",
+          authorization: approvalMode === "governed" ? "human approved" : `${approvalMode} mode authorization`
+        }
+      });
+      assert.equal(committed.isError, undefined, JSON.stringify(committed.structuredContent));
 
-      const first = await client.callTool({ name: "integration", arguments: scope });
+      const first = await client.callTool({ name: "integration", arguments: { mode: "prepare", ...scope } });
       assert.equal(first.isError, undefined, JSON.stringify(first.structuredContent));
       if (approvalMode === "phase") {
         assert.equal((first.structuredContent as { commandStatus?: string }).commandStatus, "applied");
@@ -2140,11 +2299,23 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
         assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "base\n");
         const proposalToken = (first.structuredContent as { proposalToken?: string }).proposalToken;
         assert.ok(proposalToken);
-        const applied = await client.callTool({ name: "integration", arguments: { proposalToken } });
+        const applied = await client.callTool({
+          name: "integration",
+          arguments: { mode: "apply", proposalToken }
+        });
         assert.equal(applied.isError, undefined, JSON.stringify(applied.structuredContent));
         assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       }
       assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), `${approvalMode} integration\n`);
+      const cleaned = await client.callTool({ name: "worktree_cleanup", arguments: scope });
+      assert.equal(cleaned.isError, undefined, JSON.stringify(cleaned.structuredContent));
+      assert.equal((cleaned.structuredContent as { commandStatus?: string }).commandStatus, "applied");
+      assert.equal(existsSync(workerPath), false);
+      const execution = JSON.parse(readFileSync(
+        join(projectRoot, ".cadre", "tracks", trackId, "executions", `execution-${executionId}.json`),
+        "utf8"
+      ));
+      assert.equal(execution.nodes["T1.1"].status, "completed");
     }
   } finally {
     await client.close();
@@ -2226,70 +2397,66 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
     assert.match(body, /approval policy `never`/, `${skill} must detect non-interactive host policy`);
     assert.match(body, /skip the form and ask the same short question once in chat/,
       `${skill} must bypass elicitation under non-interactive host policy`);
-    assert.match(body, /policy rejection, not a human decline/,
+    assert.match(body, /policy rejection.*not a human decline/,
       `${skill} must not misreport automatic policy rejection as human input`);
     assert.match(body, /never request secrets|never request secrets or retry the form/i,
       `${skill} must forbid secret collection`);
   }
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
-  assert.match(workflow, /Human interaction forms/);
-  assert.match(workflow, /bind it to the current preview digest or an immutable checkpoint/);
-  assert.match(workflow, /Do not print a complete unchanged workflow/);
-  assert.match(workflow, /ask the same short question once in chat and do not retry the form/);
-  assert.match(workflow, /approval policy `never`, including Codex Full Access/);
-  assert.match(workflow, /do not report it as a human decline/);
+  assert.match(workflow, /Human governance/);
+  assert.match(workflow, /Changed content, scope, selection, digest, or material consequences require/);
+  assert.match(workflow, /Host security permission is separate from Cadre approval/);
 });
 
 test("proposal workflows validate staged plan files without transporting their content", () => {
   for (const skill of ["track", "review", "revise"]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
-    assert.match(body, /execution_graph_validate_candidate/, `${skill} must validate staged plan Markdown`);
-    assert.match(body, /artifact_candidate_manifest/, `${skill} must bind approval to staged hashes`);
-    assert.match(body, /\.cadre-stage/, `${skill} must use the project-local candidate stage`);
+    assert.match(body, /candidate_inspect/, `${skill} must inspect and validate staged artifacts once`);
+    assert.match(body, /targetStatus/, `${skill} must validate staged plan Markdown when present`);
+    assert.match(body, /\.cadre\/stage/, `${skill} must use the project-local candidate stage`);
     assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
-    assert.match(body, /do not pass the plan Markdown through MCP|without transporting/i);
+    assert.match(body, /do not pass (?:the )?plan Markdown through MCP|without transporting/i);
   }
 
   const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
   const review = readFileSync(join(root, "skills", "review", "SKILL.md"), "utf8");
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
-  assert.match(track, /target status `planned`/);
-  assert.match(review, /target status `in_progress`/);
-  assert.match(implement, /execution_graph_validate/);
-  assert.doesNotMatch(implement, /execution_graph_validate_candidate/);
+  assert.match(track, /targetStatus: "planned"/);
+  assert.match(review, /targetStatus: "in_progress"/);
+  assert.doesNotMatch(implement, /candidate_inspect/);
 });
 
 test("implementation guidance preserves approval, permission, semantic checkpoints, and task-commit boundaries", () => {
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
+  const parallel = readFileSync(join(root, "skills", "implement", "references", "parallel-workers.md"), "utf8");
+  const governed = readFileSync(join(root, "skills", "implement", "references", "governed-mode.md"), "utf8");
+  const conflicts = readFileSync(join(root, "skills", "implement", "references", "conflict-handling.md"), "utf8");
+  const recovery = readFileSync(join(root, "skills", "implement", "references", "resume-recovery.md"), "utf8");
   const executionTemplate = JSON.parse(readFileSync(join(providerRoot, "track", "execution.json"), "utf8"));
   const phaseWorker = readFileSync(join(root, "agents", "cadre-phase-worker.md"), "utf8");
   const taskWorker = readFileSync(join(root, "agents", "cadre-task-worker.md"), "utf8");
 
-  for (const body of [implement, workflow]) {
-    assert.match(body, /host security permission/i);
-    assert.match(body, /execution_checkpoint/);
-    assert.match(body, /evidence (?:does not yet exist|exists|before it exists)/i);
-    assert.match(body, /distinct recorded SHA|distinct SHA/);
-    assert.match(body, /`governed`/);
-    assert.match(body, /`phase` \(default\)|`phase` is the default/);
-    assert.match(body, /Track-level User Manual Verification/);
-    assert.match(body, /global tool catalog/);
-    assert.match(body, /proposalToken|proposal token/);
-    assert.match(body, /state-machine probe|probe (?:previews|commands) to (?:learn legal transitions|rediscover declared contracts)/);
-    assert.match(body, /independent read-only .* parallel/i);
-    assert.match(body, /\.cadre\/\*\*.*does not invalidate product verification/);
-  }
-  assert.match(implement, /pause once for each phase's final `User Manual Verification` task/i);
-  assert.match(implement, /run all regular work inside a phase autonomously/);
-  assert.match(implement, /Pause only for the `Track-level User Manual Verification` task/);
-  assert.match(implement, /Do not add an execution-start approval prompt outside `governed`/);
-  assert.match(implement, /Keep the phase node `integrated`, clean its worktree, and only then mark the phase `completed`/);
-  assert.match(implement, /already-`completed` node as interruption recovery/);
-  assert.match(implement, /Do not repair markers or the index separately/);
-  assert.match(workflow, /deterministic worktree, clean integration, cleanup, journal, index, and bookkeeping mutations/);
-  assert.match(workflow, /does not require a separate approval prompt/);
+  assert.match(implement, /project_status.*view: "implementation"/s);
+  assert.match(implement, /complete preflight: validation, graph, scheduler, dependency, and worktree state/);
+  assert.match(implement, /normal lifecycle is four MCP calls/);
+  assert.match(implement, /worktree_create.*records `start`/s);
+  assert.match(implement, /integration.*recording `record_integration`/s);
+  assert.match(implement, /worktree_cleanup.*records `complete`/s);
+  assert.match(implement, /Never checkpoint evidence before it exists/);
+  assert.match(implement, /distinct recorded SHA/);
+  assert.match(implement, /Host security permission is distinct from Cadre approval/);
+  assert.match(implement, /independent read-only checks in parallel/);
+  assert.match(implement, /\.cadre\/\*\*.*does not invalidate product verification/);
+  assert.match(implement, /mode: "prepare"/);
+  assert.match(implement, /mode: "apply".*proposalToken/);
+  assert.match(workflow, /Deterministic MCP operations use one call/);
+  assert.match(workflow, /Approval-aware operations use `prepare`/);
+  assert.match(parallel, /same clean recorded phase HEAD/);
+  assert.match(governed, /human review of each regular task diff/);
+  assert.match(conflicts, /Never force-delete, reset, or silently choose a side/);
+  assert.match(recovery, /Existing merge commit but missing integration transition/);
   assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");
   assert.match(phaseWorker, /one regular task at a time/);
   assert.match(phaseWorker, /commit only that task/i);
@@ -2307,16 +2474,16 @@ test("review and archive guidance coalesces exact approval decisions", () => {
   assert.match(archive, /server selects every eligible completed track in dependency order/);
   assert.match(archive, /Expected human decision count is one for the complete batch/);
   assert.match(archive, /generated index/);
-  assert.match(workflow, /Combine related decisions whenever their complete artifacts and consequences are available together/);
+  assert.match(workflow, /Combine related decisions into one complete authorization envelope/);
   assert.match(review, /review_complete/);
   assert.match(review, /Do not inspect the installed runtime/);
   assert.match(archive, /archive_batch_candidate/);
-  assert.match(archive, /do not call `template_catalog`/);
+  assert.match(archive, /use resources only when an individual ID must be discovered/i);
   assert.match(archive, /(?:needs no second approval|without another approval)/);
   assert.doesNotMatch(archive, /call `tracks_render`/);
   assert.match(review, /Expected human decision count is one per review cycle/);
   assert.match(archive, /Expected human decision count is one for the complete batch/);
-  assert.match(workflow, /same approval\/content digest/);
+  assert.match(workflow, /Changed content, scope, selection, digest, or material consequences require/);
 });
 
 test("commands reuse status validation and batch related template reads", () => {
@@ -2326,8 +2493,9 @@ test("commands reuse status validation and batch related template reads", () => 
   ]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
     assert.match(body, /project_status/, `${skill} must read project status once at entry`);
-    assert.match(body, /embedded[^;\n]*validation|validation embedded/, `${skill} must reuse status validation`);
-    assert.match(body, /do not repeat `state_validate`|do not repeat `state_validate` at command entry/,
+    assert.match(body, /embedded[^;\n]*validation|validation embedded|complete preflight: validation/,
+      `${skill} must reuse status validation`);
+    assert.match(body, /do not repeat `state_validate`|do not repeat `state_validate` at command entry/i,
       `${skill} must not repeat full validation at entry`);
   }
 
@@ -2400,15 +2568,15 @@ test("create uses one final configuration and initialization approval envelope",
   assert.match(create, /do not ask the human to accept each default guide/i);
   assert.match(create, /do not add later approval prompts/i);
   assert.match(create, /project_init_candidate/);
-  assert.match(create, /Never make these two calls consecutively without the human decision/);
+  assert.match(create, /Never make those two calls consecutively without the human decision/);
   assert.match(create, /do not .*pass artifact bodies through MCP/i);
-  assert.match(create, /\.cadre-stage\/create/);
-  assert.match(create, /\.cadre-stage\/create\/product\.md/);
-  assert.match(create, /Never create .*\.cadre\/init\//);
+  assert.match(create, /\.cadre\/stage\/create/);
+  assert.match(create, /\.cadre\/stage\/create\/product\.md/);
+  assert.match(create, /Never write .*\.cadre\/init\/\*/);
 
   const workflow = readFileSync(join(templateRoot, "workflow.md"), "utf8");
-  assert.match(workflow, /Create-time configuration envelope/);
-  assert.match(workflow, /Do not create separate workflow, styleguide-selection, manifest, Git-initialization, validation, or commit approvals/);
+  assert.match(workflow, /Named deterministic consequences.*need no additional approval/);
+  assert.match(workflow, /Candidate artifacts/);
 });
 
 test("semantic authorization envelopes remove deterministic follow-up approvals", () => {
@@ -2420,8 +2588,8 @@ test("semantic authorization envelopes remove deterministic follow-up approvals"
   const wisp = readFileSync(join(root, "skills", "wisp", "SKILL.md"), "utf8");
   const trackState = JSON.parse(readFileSync(join(providerRoot, "track", "state.json"), "utf8"));
 
-  assert.match(workflow, /One approval creates an authorization envelope/);
-  assert.match(workflow, /Those mechanics do not become separate human decisions/);
+  assert.match(workflow, /one complete authorization envelope/);
+  assert.match(workflow, /need no additional approval/);
   assert.match(track, /Expected human decision count is one for a clear new track/);
   assert.match(track, /do not create a specification-only approval prompt/);
   assert.match(track, /Copy all three exact staged artifacts into the durable/);
@@ -2454,7 +2622,7 @@ test("archive supports a resumable multi-track batch", () => {
   assert.match(archive, /all completed/);
   assert.match(archive, /Reject the batch without partial mutation/);
   assert.match(archive, /archive_batch_candidate/);
-  assert.match(archive, /Commit all approved moves and derived changes together/i);
+  assert.match(archive, /commit all approved moves and derived changes together|commit all approved moves and derived changes/i);
 
   const operation = JSON.parse(readFileSync(join(providerRoot, "project", "archive-operation.json"), "utf8"));
   assert.equal(operation.action, "archive");
