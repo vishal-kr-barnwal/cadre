@@ -54,6 +54,26 @@ bookkeeping, and introduces compact v2 project workflow defaults.
 - Regression budgets cap the tool catalog at 18 KiB, workflow at 6 KiB, common
   template/status bundles at 4–8 KiB, and checkpoint/apply receipts at 4 KiB.
 
+### Compatibility and upgrade
+
+- Direct MCP clients must migrate removed template/candidate/worktree reads to
+  resources, `candidate_inspect`, and scoped `project_status`, and must send
+  the explicit adaptive `mode` shapes.
+- Existing v1 projects stay readable after installation. Run Cadre `refresh`
+  and approve the complete v2 workflow/version proposal before using other
+  state mutations.
+- Proposal tokens created by 3.3.0 are not portable to 3.4.0; prepare the
+  operation again under the new schema.
+
+```bash
+npm install -g cadre-ai@3.4.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex conversation and run `/reload-plugins` in Claude Code so both
+clients load the 3.4 schemas and skills.
+
 ## 3.3.0 - 2026-08-09
 
 Cadre 3.3.0 is an MCP reliability and context-efficiency release. Compared

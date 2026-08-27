@@ -2,6 +2,19 @@
 
 ## [3.4.0] - 2026-08-27
 
+Cadre 3.4.0 is a breaking MCP and template-contract release. Existing v1
+projects remain readable but require an explicit approved refresh before
+state mutation.
+
+### Breaking Changes
+
+- Adaptive commands now require exclusive `prepare` or `apply` input shapes.
+- Direct clients must replace retired template, candidate, and worktree reads
+  with MCP resources, `candidate_inspect`, and scoped `project_status`.
+- New projects use template set v2. Legacy mutation fails with
+  `PROJECT_REFRESH_REQUIRED` until an approved refresh updates workflow and
+  runtime/template versions.
+
 ### Added
 
 - Added bounded, Git-ignored staging under `.cadre/stage/<candidate-id>/` and
@@ -22,6 +35,13 @@
   delegated task to four calls (five for governed integration).
 - Legacy projects remain readable but fail closed for mutation until an
   explicit approved refresh upgrades runtime/template versions.
+
+### Compatibility And Upgrade
+
+- Published v1 template files remain byte-for-byte unchanged.
+- 3.3.0 proposal tokens must be prepared again after upgrading.
+- Reinstall the CLI/native plugins and restart client sessions so the 3.4 tool
+  schemas and compact skills replace cached 3.3 definitions.
 
 ## [3.3.0] - 2026-08-09
 
