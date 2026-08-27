@@ -28,17 +28,16 @@ workflow packets.
 
 ## Template Resources
 
-Every file under `templates/v1/` is registered as an immutable MCP resource:
+Every file under active `templates/v2/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v1/<relative-template-path>
+cadre://templates/v2/<logical-id>
 ```
 
-The internal catalog records the provider source path, but MCP responses expose
-only logical ID, URI, eventual `artifactPath` when fixed, media type, content,
-and SHA-256 hash. This prevents package layout such as `init/` from being
-mistaken for project layout. The server caches the immutable catalog for its
-lifetime.
+Published `templates/v1/` remains byte-stable for legacy reads. The internal
+catalog records provider paths, but public descriptors expose logical ID, URI,
+eventual artifact path, media type, and SHA-256 hash. Template content appears
+once as an embedded resource, never duplicated in structured content.
 
 Skills normally request known bundles with `template_get_many`; catalog
 discovery is unnecessary when the logical IDs are already declared.
@@ -47,14 +46,14 @@ discovery is unnecessary when the logical IDs are already declared.
 
 | Family | Tools |
 |---|---|
-| Templates | `template_catalog`, `template_get`, `template_get_many`, `styleguide_resolve` |
+| Templates | `template_get_many`, `styleguide_resolve`, MCP resources |
 | Project health | `project_status`, `state_validate` |
-| Candidate artifacts | `artifact_candidate_manifest` |
-| Plan graph | `execution_graph_validate`, `execution_graph_validate_candidate` |
+| Candidate artifacts | `candidate_stage_prepare`, `candidate_inspect` |
+| Plan graph | `execution_graph_validate` |
 | Review governance | `review_complete` |
 | Archive governance | `archive_batch_candidate`, `archive_batch_record` |
 | Execution lifecycle | `execution_start`, `execution_checkpoint`, `execution_status`, `execution_finish` |
-| Worktrees | `worktree_create`, `integration`, `worktree_cleanup`, `worktree_status` |
+| Worktrees | `worktree_create`, `integration`, `worktree_cleanup` |
 | Project initialization | `project_init_candidate`, `setup_record_git_initialized`, `setup_record_commit` |
 | Derived index | `tracks_render` |
 
@@ -62,7 +61,8 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 
 ## Result Shape
 
-Successful tools return their typed value as structured content.
+Successful operational tools return concise text and typed structured content.
+Template tools return embedded resource bodies plus content-free descriptors.
 Adaptive commands return `commandStatus: "applied"` when an existing
 authorization permits an atomic mutation. Only a real decision boundary
 returns `commandStatus: "approval_required"` plus a compact opaque
@@ -78,7 +78,9 @@ the tool boundary.
 
 ## Adaptive Command Contract
 
-An already-authorized command computes its proposal once, validates current
+Each adaptive tool advertises a required `mode: prepare | apply`. Prepare
+accepts only its operation fields; apply accepts only `proposalToken`. An
+already-authorized command computes its proposal once, validates current
 state, and applies atomically in one tool call. When human approval is required,
 the command computes without mutation, retains normalized input and digest in
 an MCP-owned runtime record, and returns an opaque capability token. After the
@@ -87,7 +89,7 @@ and refuses stale state. Callers never provide proposal paths or an
 `autoApprove` flag.
 
 Artifact bodies use a separate file-backed protocol. Skills write unapproved
-files beneath `<project-root>/.cadre-stage/<candidate-id>/`; candidate tools
+files beneath `<project-root>/.cadre/stage/<candidate-id>/`; candidate tools
 read those files through path, symlink, and size guards and return only a
 path/hash manifest. Proposal records retain the candidate identifier, relative
 paths, normalized metadata, and digest—not artifact bodies. Apply re-reads the
@@ -96,14 +98,8 @@ stage remains outside commits and is retained through the artifact commit
 checkpoint for recovery.
 
 Execution checkpoints return compact changed-node receipts and scheduler state.
-Execution status returns ready/active/blocked summaries by default and accepts
-an optional node ID for focused guidance. Skills use that contract to build
-ordered batches; previews validate those batches and are not used as
-state-machine probes.
-
-Read-only previews are not approval. Skill contracts remain responsible for
-presenting the exact proposal and obtaining explicit human acceptance before
-apply.
+Implementation entry uses one `project_status` implementation view for project,
+graph, scheduler, and worktree preflight.
 
 Not every workflow write has a dedicated MCP mutation. Track drafting,
 revision, refresh, remediation, and revert use skill-side candidate staging,
@@ -115,11 +111,10 @@ erase that explicit ownership boundary.
 
 MCP Git operations are limited to Cadre-derived worktrees:
 
-- preview/create a worker worktree at an exact base commit;
-- preview/non-squash merge a clean worker branch into its derived parent;
+- create/reconcile a worker worktree and record node start;
+- non-squash merge a clean worker branch and record integration;
 - report conflicts without resolving them;
-- preview/remove a clean worktree and safely deletable integrated branch;
-- report registered worktrees and orphaned empty runtime directories.
+- remove a clean integrated worktree/branch and record completion.
 
 The runtime never commits product changes for a worker, stages arbitrary files,
 resets history, force-deletes branches, or decides conflict resolution.

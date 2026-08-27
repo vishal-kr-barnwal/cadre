@@ -35,31 +35,9 @@ export const workflowQuestionSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     ...questionBase,
-    type: z.literal("number"),
-    minimum: z.number().optional(),
-    maximum: z.number().optional(),
-    default: z.number().optional()
-  }),
-  z.object({
-    ...questionBase,
-    type: z.literal("integer"),
-    minimum: z.number().int().optional(),
-    maximum: z.number().int().optional(),
-    default: z.number().int().optional()
-  }),
-  z.object({
-    ...questionBase,
     type: z.literal("single_select"),
     options: z.array(choiceSchema).min(2).max(10),
     default: z.string().max(120).optional()
-  }),
-  z.object({
-    ...questionBase,
-    type: z.literal("multi_select"),
-    options: z.array(choiceSchema).min(2).max(10),
-    minSelections: z.number().int().min(0).optional(),
-    maxSelections: z.number().int().min(1).optional(),
-    default: z.array(z.string().max(120)).max(10).optional()
   })
 ]);
 
@@ -119,24 +97,6 @@ function questionSchema(question: WorkflowQuestion): PrimitiveSchema {
         type: "boolean",
         ...(question.default === undefined ? {} : { default: question.default })
       };
-    case "number":
-    case "integer": {
-      if (question.minimum !== undefined && question.maximum !== undefined && question.minimum > question.maximum) {
-        throw new Error(`${question.id} minimum cannot exceed maximum`);
-      }
-      if (question.default !== undefined
-        && ((question.minimum !== undefined && question.default < question.minimum)
-          || (question.maximum !== undefined && question.default > question.maximum))) {
-        throw new Error(`${question.id} default must be within its numeric bounds`);
-      }
-      return {
-        ...common,
-        type: question.type,
-        ...(question.minimum === undefined ? {} : { minimum: question.minimum }),
-        ...(question.maximum === undefined ? {} : { maximum: question.maximum }),
-        ...(question.default === undefined ? {} : { default: question.default })
-      };
-    }
     case "single_select": {
       const values = choiceValues(question);
       if (question.default !== undefined && !values.includes(question.default)) {
@@ -146,27 +106,6 @@ function questionSchema(question: WorkflowQuestion): PrimitiveSchema {
         ...common,
         type: "string",
         oneOf: question.options.map((option) => ({ const: option.value, title: option.label })),
-        ...(question.default === undefined ? {} : { default: question.default })
-      };
-    }
-    case "multi_select": {
-      const values = choiceValues(question);
-      const minimum = question.minSelections ?? (question.required ? 1 : 0);
-      const maximum = question.maxSelections ?? values.length;
-      if (minimum > maximum || maximum > values.length) {
-        throw new Error(`${question.id} selection bounds are invalid`);
-      }
-      if (question.default?.some((value) => !values.includes(value))) {
-        throw new Error(`${question.id} defaults must match option values`);
-      }
-      return {
-        ...common,
-        type: "array",
-        items: {
-          anyOf: question.options.map((option) => ({ const: option.value, title: option.label }))
-        },
-        minItems: minimum,
-        maxItems: maximum,
         ...(question.default === undefined ? {} : { default: question.default })
       };
     }
