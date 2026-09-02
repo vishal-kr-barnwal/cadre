@@ -7,7 +7,7 @@ order: 230
 
 # Release Notes
 
-## Unreleased
+## 3.6.0 - 2026-09-02
 
 ### Agent-visible MCP results
 
@@ -23,9 +23,22 @@ order: 230
 - The serialized tool-catalog limit is now 64 KiB to accommodate output
   schemas while preserving Node 18 support and the existing 22 tool names and
   wire shapes.
+- Zed installation now refreshes Node executable-path changes for an existing
+  server that still targets the exact Cadre-managed MCP file; foreign server
+  targets remain protected from replacement.
 
-No project refresh or canonical-state migration is required for this transport
-contract change.
+Canonical artifact formats and template set v2 are unchanged. Existing 3.5.1
+projects remain readable and use the normal approved `refresh` workflow to
+record runtime 3.6.0 before further mutation.
+
+```bash
+npm install -g cadre-ai@3.6.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, run `/reload-plugins` in Claude Code, and open a new
+Zed Agent thread so each client loads the 3.6.0 schemas and runtime guidance.
 
 ## 3.5.1 - 2026-08-27
 

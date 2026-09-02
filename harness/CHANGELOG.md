@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [3.6.0] - 2026-09-02
 
 ### MCP Result Contract
 
@@ -20,10 +20,14 @@
 - Raised the validated serialized MCP tool-catalog ceiling from 18 KiB to
   64 KiB to accommodate the complete output schemas while retaining Node 18
   compatibility.
+- Made Zed installation safely refresh a changed Node executable path when the
+  existing `context_servers.cadre` entry still targets the exact managed Cadre
+  MCP file. Entries targeting any other MCP file remain protected conflicts.
 
-This is an additive transport contract change. It does not change Cadre
-project state, runtime/template versions, canonical artifacts, tool names, or
-the prepare/apply token lifecycle.
+This is an additive transport contract change. It does not change canonical
+artifact formats, template set v2, tool names, or the prepare/apply token
+lifecycle. Existing 3.5.1 projects remain readable and use the normal approved
+refresh workflow to record runtime 3.6.0 before further mutation.
 
 ## [3.5.1] - 2026-08-27
 

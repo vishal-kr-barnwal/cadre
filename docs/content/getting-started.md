@@ -8,7 +8,7 @@ order: 20
 # Installation
 
 Cadre installs at user scope. The OpenAI Codex and Claude Code integrations are
-stable. Native Zed Agent support is beta in Cadre 3.5.1. The published package
+stable. Native Zed Agent support is beta in Cadre 3.6.0. The published package
 and executable are named `cadre-ai`.
 
 ## Requirements

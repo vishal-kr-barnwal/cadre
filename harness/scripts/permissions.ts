@@ -259,7 +259,7 @@ export function configureZedCadre(
   const { existing, root } = parseJsoncSettings(settingsPath);
   const contextServers = assertRecordField(root, "context_servers", settingsPath);
   const currentServer = contextServers.cadre;
-  if (currentServer !== undefined && !zedServerMatches(currentServer, nodePath, mcpPath)) {
+  if (currentServer !== undefined && !zedServerTargetsMcp(currentServer, mcpPath)) {
     throw new Error(
       `${settingsPath}: context_servers.cadre is not the Cadre-managed server; remove or rename it before installation`
     );
@@ -285,7 +285,7 @@ export function configureZedCadre(
   }
 
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
-  const serverChanged = currentServer === undefined;
+  const serverChanged = currentServer === undefined || !zedServerMatches(currentServer, nodePath, mcpPath);
   let proposed = existing;
   if (serverChanged) {
     proposed = applyEdits(proposed, modify(

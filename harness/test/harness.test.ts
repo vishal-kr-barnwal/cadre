@@ -94,7 +94,7 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.5.1";
+  project.runtimeVersion = "3.6.0";
   project.templateSetVersion = "v2";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -417,7 +417,7 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.5.1",
+    runtimeVersion: "3.6.0",
     templateSetVersion: "v2"
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
@@ -1644,8 +1644,8 @@ test("installer prepares a shared three-client payload", async () => {
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.5.1+codex.test-build");
-  assert.equal(claudeManifest.version, "3.5.1+claude.test-build");
+  assert.equal(codexManifest.version, "3.6.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.6.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v2", "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v2", "init", "gitignore.template")));
@@ -1703,9 +1703,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.5.1+codex.test-build");
+  assert.equal(previousManifest.version, "3.6.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.5.1+codex.second-build");
+  assert.equal(updatedManifest.version, "3.6.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1784,6 +1784,13 @@ test("installer permission helpers narrowly pre-approve the Cadre MCP server and
     assert.match(zedBody, new RegExp(`"${key}"`));
   }
   assert.equal(configureZedCadre(zedSettings, nodePath, mcpPath, true).changed, false);
+
+  const rotatedNodePath = "/opt/cadre/node-updated";
+  const zedRotated = configureZedCadre(zedSettings, rotatedNodePath, mcpPath, true);
+  assert.equal(zedRotated.changed, true);
+  assert.equal(zedRotated.serverChanged, true);
+  assert.equal(zedRotated.permissionsChanged, false);
+  assert.match(readFileSync(zedSettings, "utf8"), /"command": "\/opt\/cadre\/node-updated"/);
 
   const removedZed = removeZedCadreServer(zedSettings, mcpPath);
   assert.deepEqual(removedZed, { changed: true, retainedConflict: false });
@@ -2463,7 +2470,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.5.1"
+      "3.6.0"
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "tracks_render",
@@ -2473,7 +2480,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.5.1");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.6.0");
     assert.equal(
       (rejectedLegacyMutation.structuredContent as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
@@ -2484,7 +2491,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(legacyStage.isError, undefined);
     agentVisibleResult(legacyStage);
-    legacyProject.runtimeVersion = "3.5.1";
+    legacyProject.runtimeVersion = "3.6.0";
     legacyProject.templateSetVersion = "v2";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(
