@@ -91,42 +91,8 @@ import {
   type CandidateFile
 } from "../domain/staging.js";
 import { CADRE_MCP_TOOLS } from "./tool-names.js";
-
-function result<T extends object>(value: T, summary = "Cadre operation completed.") {
-  return {
-    content: [{ type: "text" as const, text: summary }],
-    structuredContent: value as Record<string, unknown>
-  };
-}
-
-function templateResult(
-  templates: ReturnType<typeof describeTemplate>[],
-  contentMode: "embedded_resource" | "text"
-) {
-  return {
-    content: contentMode === "text"
-      ? templates.map((template) => ({
-        type: "text" as const,
-        text: [
-          `<cadre-template id=${JSON.stringify(template.id)} uri=${JSON.stringify(template.uri)} mimeType=${JSON.stringify(template.mimeType)}>`,
-          template.content,
-          "</cadre-template>"
-        ].join("\n")
-      }))
-      : templates.map((template) => ({
-        type: "resource" as const,
-        resource: {
-          uri: template.uri,
-          mimeType: template.mimeType,
-          text: template.content
-        }
-      })),
-    structuredContent: {
-      templateSetVersion: TEMPLATE_SET_VERSION,
-      templates: templates.map(({ content: _content, ...descriptor }) => descriptor)
-    }
-  };
-}
+import { CADRE_MCP_OUTPUT_SCHEMAS } from "./output-schemas.js";
+import { failure, result, templateResult } from "./results.js";
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -197,18 +163,6 @@ function normalizeAdaptiveInput(
   if (missing.length) throw new Error(`${command} prepare mode requires ${missing.join(", ")}`);
   const { mode: _mode, proposalToken: _proposalToken, ...request } = input;
   return { mode: "prepare", request };
-}
-
-function failure(error: unknown) {
-  const serialized = serializeCadreError(error);
-  return {
-    isError: true,
-    content: [{
-      type: "text" as const,
-      text: serialized.message
-    }],
-    structuredContent: { error: serialized }
-  };
 }
 
 function serializableValidation(validation: ReturnType<typeof validateProject>) {
@@ -387,6 +341,7 @@ export function createCadreServer(): McpServer {
         "Use workflow_elicit for concise approval or clarification forms when supported. When active task context reports a non-interactive approval policy such as Codex Full Access, skip the form and ask one short chat question.",
         "Use one adaptive command call when authorization already exists. A command returns approval_required with a proposal token only when a human decision is required; call that same command with the token only after approval.",
         "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
+        "Every tool result ends with a compact JSON text block exactly mirroring structuredContent; use that block for all next-step fields when structured results are unavailable.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
       ].join(" ")
     }
@@ -396,6 +351,7 @@ export function createCadreServer(): McpServer {
     title: "Collect Cadre workflow input",
     description: "Request a decision.",
     inputSchema: workflowElicitationInputSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.workflowElicit],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     let request;
@@ -434,6 +390,7 @@ export function createCadreServer(): McpServer {
       ids: z.array(z.enum(TEMPLATE_IDS)).min(1),
       contentMode: z.enum(["embedded_resource", "text"]).optional().default("embedded_resource")
     },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.templateGetMany],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ ids, contentMode }) => {
     try {
@@ -447,6 +404,7 @@ export function createCadreServer(): McpServer {
     title: "Resolve default styleguides",
     description: "Resolve styleguides.",
     inputSchema: { technologies: z.array(z.string()).min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.styleguideResolve],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ technologies }) => {
     try {
@@ -471,6 +429,7 @@ export function createCadreServer(): McpServer {
       trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
       executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).optional()
     },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.projectStatus],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot, view, trackId, executionId }) => {
     try {
@@ -582,6 +541,7 @@ export function createCadreServer(): McpServer {
     title: "Validate Cadre project state",
     description: "Validate state.",
     inputSchema: { projectRoot: z.string().min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.stateValidate],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
@@ -599,6 +559,7 @@ export function createCadreServer(): McpServer {
       candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
       expectedFiles: z.array(z.string().min(1)).min(1).optional()
     },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.candidateStagePrepare],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot, candidateId, expectedFiles }) => {
     try {
@@ -623,6 +584,7 @@ export function createCadreServer(): McpServer {
         targetStatus: z.enum(PLAN_VALIDATION_STATUSES)
       })).optional().default([])
     }),
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.candidateInspect],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot, candidateId, files, planValidations }) => {
     try {
@@ -693,6 +655,7 @@ export function createCadreServer(): McpServer {
     title: "Validate a track execution graph",
     description: "Validate plan DAG.",
     inputSchema: { projectRoot: z.string().min(1), trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionGraphValidate],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ projectRoot, trackId }) => {
     try {
@@ -720,6 +683,7 @@ export function createCadreServer(): McpServer {
     title: "Complete a clean review",
     description: "Complete review.",
     inputSchema: adaptiveInputSchema(reviewCompleteSchema),
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.reviewComplete],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ request }) => {
     try {
@@ -782,6 +746,7 @@ export function createCadreServer(): McpServer {
     title: "Govern a staged archive batch",
     description: "Apply archive batch.",
     inputSchema: adaptiveInputSchema(archiveBatchCandidateSchema),
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.archiveBatchCandidate],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ request }) => {
     try {
@@ -841,6 +806,7 @@ export function createCadreServer(): McpServer {
     title: "Record archive provenance",
     description: "Record archive.",
     inputSchema: archiveRecordSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.archiveBatchRecord],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
@@ -876,6 +842,7 @@ export function createCadreServer(): McpServer {
     title: "Start implementation execution",
     description: "Start execution.",
     inputSchema: executionStartSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionStart],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
@@ -957,6 +924,7 @@ export function createCadreServer(): McpServer {
       scope: z.strictObject(checkpointScopeSchema),
       action: executionCheckpointActionSchema
     },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionCheckpoint],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ scope, action }) => {
     try {
@@ -985,6 +953,7 @@ export function createCadreServer(): McpServer {
       executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/),
       nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/).optional()
     },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionStatus],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => {
     try {
@@ -1005,6 +974,7 @@ export function createCadreServer(): McpServer {
     title: "Complete implementation execution",
     description: "Finish execution.",
     inputSchema: executionFinishSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionFinish],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
@@ -1038,6 +1008,7 @@ export function createCadreServer(): McpServer {
     title: "Create a Cadre worker worktree",
     description: "Create worktree.",
     inputSchema: worktreeSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.worktreeCreate],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async (input) => {
     try {
@@ -1070,6 +1041,7 @@ export function createCadreServer(): McpServer {
     title: "Integrate a worker branch",
     description: "Integrate branch.",
     inputSchema: adaptiveInputSchema(worktreeSchema),
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.integration],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ request }) => {
     try {
@@ -1111,6 +1083,7 @@ export function createCadreServer(): McpServer {
     title: "Clean up an integrated worker",
     description: "Clean worktree.",
     inputSchema: worktreeSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.worktreeCleanup],
     annotations: { destructiveHint: true, openWorldHint: false }
   }, async (input) => {
     try {
@@ -1148,6 +1121,7 @@ export function createCadreServer(): McpServer {
     title: "Initialize from a staged Cadre candidate",
     description: "Initialize project.",
     inputSchema: adaptiveInputSchema(initCandidateSchema),
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.projectInitCandidate],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ request }) => {
     try {
@@ -1190,6 +1164,7 @@ export function createCadreServer(): McpServer {
   server.registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
     title: "Record the project setup commit",
     inputSchema: { projectRoot: z.string().min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordCommit],
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
@@ -1204,6 +1179,7 @@ export function createCadreServer(): McpServer {
   server.registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
     title: "Record Git initialization checkpoint",
     inputSchema: { projectRoot: z.string().min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordGitInitialized],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
@@ -1217,6 +1193,7 @@ export function createCadreServer(): McpServer {
   server.registerTool(CADRE_MCP_TOOLS.tracksRender, {
     title: "Render the derived tracks index",
     inputSchema: { projectRoot: z.string().min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.tracksRender],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {

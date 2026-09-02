@@ -21,7 +21,9 @@ The server tells clients to:
 - call token mode only after an `approval_required` result and a human decision;
 - inspect `project_status` once at command entry and reserve
   `state_validate` for final mutation gates;
-- treat the plan as the implementation source of truth.
+- treat the plan as the implementation source of truth;
+- parse the final text block as the exact JSON mirror of `structuredContent`
+  when the client does not expose structured results directly.
 
 Skills contain the full workflow procedure. The MCP does not route generic
 workflow packets.
@@ -68,21 +70,30 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 
 ## Result Shape
 
-Successful operational tools return concise text and typed structured content.
-Template tools return one body per template—embedded resource or text—plus
-content-free descriptors.
+Every one of the 22 tools publishes an output schema. Successful operational
+tools return concise text and typed structured content, then append compact
+JSON as the final text block. Parsing that block produces a value deeply equal
+to `structuredContent`; agents may therefore obtain every decision, recovery,
+and follow-up field from either representation.
+
+Template tools preserve one body per template—embedded resource or text—and
+append the same final JSON mirror containing content-free descriptors. Template
+and candidate bodies are never duplicated in the mirrored descriptor data.
 Adaptive commands return `commandStatus: "applied"` when an existing
 authorization permits an atomic mutation. Only a real decision boundary
 returns `commandStatus: "approval_required"` plus a compact opaque
 `proposalToken`; after approval, the same command accepts that token. Tokens
 survive MCP restarts until expiry or bounded oldest-first eviction.
 Failures mark the MCP result as an
-error and return structured `{ error: { code, message, details? } }` content.
+error and end with mirrored `{ error: { code, message, details? } }` JSON.
 `project_status` also returns its human-readable summary as text.
 
 Inputs are validated with Zod before reaching domain behavior. Track, phase,
 task, execution, batch, commit, digest, and timestamp formats are constrained at
-the tool boundary.
+the tool boundary. Output schemas use Node-18-compatible object roots that
+advertise the complete stable field superset; server-side refinements still
+require each emitted value to match one exact success or structured-error
+variant. The serialized catalog is capped at 64 KiB.
 
 ## Adaptive Command Contract
 

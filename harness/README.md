@@ -341,6 +341,11 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 
 The four adaptive tools use a strict `request` union: prepare accepts only its
 declared fields, while apply accepts only an unchanged `proposalToken`. The MCP
+publishes an output schema for every tool and appends compact JSON as the final
+text block of every response; parsing it yields the exact `structuredContent`,
+including proposal tokens and structured errors. Template and candidate bodies
+remain outside mirrored descriptor data. The Node-18-compatible serialized
+tool catalog is kept below 64 KiB. The MCP
 server cannot approve its own proposals or run arbitrary shell commands. Its
 Git surface is limited to derived Cadre worktree creation, non-squash
 integration, status, and verified cleanup. It never force-deletes a branch,

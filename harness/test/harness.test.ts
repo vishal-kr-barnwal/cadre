@@ -38,6 +38,7 @@ import {
   ZED_MCP_PERMISSION_KEYS
 } from "../scripts/permissions.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
+import { CADRE_MCP_OUTPUT_SCHEMAS } from "../src/mcp/output-schemas.js";
 import { TEMPLATE_IDS } from "../src/domain/templates.js";
 import {
   buildWorkflowElicitation,
@@ -72,6 +73,16 @@ function childEnvironment(overrides: Record<string, string>): Record<string, str
   return Object.fromEntries(
     Object.entries({ ...process.env, ...overrides }).filter((entry): entry is [string, string] => entry[1] != null)
   );
+}
+
+function agentVisibleResult(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {
+  assert.ok("content" in result, "expected an immediate MCP tool result");
+  const immediate = result as { content: Array<{ type: string; text?: string }>; structuredContent?: unknown };
+  const last = immediate.content.at(-1);
+  assert.equal(last?.type, "text", "the final MCP content block must be the structured JSON mirror");
+  const parsed = JSON.parse(last?.text ?? "") as Record<string, unknown>;
+  assert.deepEqual(parsed, immediate.structuredContent);
+  return parsed;
 }
 
 function fixture() {
@@ -1663,6 +1674,7 @@ test("installer prepares a shared three-client payload", async () => {
   try {
     const tools = await client.listTools();
     assert.equal(tools.tools.length, 22);
+    assert.deepEqual(Object.keys(CADRE_MCP_OUTPUT_SCHEMAS).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
       [...CADRE_MCP_TOOL_NAMES].sort()
@@ -1910,7 +1922,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   try {
     const tools = await client.listTools();
     assert.equal(tools.tools.length, 22);
-    assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 18 * 1024);
+    assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 64 * 1024);
     for (const name of [
       "workflow_elicit", "template_get_many", "styleguide_resolve", "project_status",
       "state_validate", "candidate_stage_prepare", "candidate_inspect", "project_init_candidate",
@@ -1920,7 +1932,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       "execution_start", "execution_checkpoint", "execution_status", "execution_finish", "worktree_create",
       "integration", "worktree_cleanup"
     ]) {
-      assert.ok(tools.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`);
+      const tool = tools.tools.find((candidate) => candidate.name === name);
+      assert.ok(tool, `missing MCP tool ${name}`);
+      assert.ok(tool.outputSchema, `${name} must advertise an output schema`);
     }
     for (const name of ["project_init_candidate", "archive_batch_candidate", "review_complete", "integration"]) {
       const schema = tools.tools.find((tool) => tool.name === name)?.inputSchema as {
@@ -1985,6 +1999,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (fallback.structuredContent as { status?: string }).status,
       "fallback_required"
     );
+    agentVisibleResult(fallback);
     const resources = await client.listResources();
     assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v2/track/spec"));
     assert.ok(resources.resources.some(
@@ -2016,26 +2031,29 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.ok((bundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
       (template) => template.content === undefined
     ));
-    assert.ok(Buffer.byteLength(JSON.stringify(bundle)) <= 6 * 1024);
+    agentVisibleResult(bundle);
+    assert.ok(Buffer.byteLength(JSON.stringify(bundle)) <= 12 * 1024);
     const textBundle = await client.callTool({
       name: "template_get_many",
       arguments: { ids: ["track/spec", "track/state"], contentMode: "text" }
     });
     assert.equal(textBundle.isError, undefined);
     const textContents = textBundle.content as Array<{ type: string; text?: string }>;
-    assert.equal(textContents.length, 2);
+    assert.equal(textContents.length, 3);
     assert.ok(textContents.every((content) => content.type === "text"));
     assert.match(textContents[0]?.text ?? "", /<cadre-template/);
     assert.match(textContents[0]?.text ?? "", /# Specification:/);
     assert.ok((textBundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
       (template) => template.content === undefined
     ));
+    agentVisibleResult(textBundle);
     const createBundle = await client.callTool({
       name: "template_get_many",
       arguments: { ids: ["project/product", "project/guidelines", "project/tech-stack"] }
     });
     assert.equal(createBundle.isError, undefined);
-    assert.ok(Buffer.byteLength(JSON.stringify(createBundle)) <= 4 * 1024);
+    agentVisibleResult(createBundle);
+    assert.ok(Buffer.byteLength(JSON.stringify(createBundle)) <= 8 * 1024);
 
     const untouchedRoot = mkdtempSync(join(tmpdir(), "cadre-draft-validator-"));
     const sentinelPath = join(untouchedRoot, "sentinel.txt");
@@ -2071,6 +2089,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       }
     });
     assert.equal(candidateValidation.isError, undefined);
+    agentVisibleResult(candidateValidation);
     const candidatePlans = (candidateValidation.structuredContent as {
       plans?: Array<{ path?: string; targetStatus?: string; valid?: boolean }>;
     }).plans ?? [];
@@ -2266,6 +2285,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       name: "project_status",
       arguments: { projectRoot: stagedTrackRoot, view: "track", trackId: stagedTrackId }
     });
+    agentVisibleResult(stagedTrackStatus);
     assert.equal(stagedTrackStatus.isError, undefined);
     const stagedTrackContent = stagedTrackStatus.structuredContent as {
       kind?: string;
@@ -2282,6 +2302,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       name: "project_status",
       arguments: { projectRoot: stagedTrackRoot, view: "project" }
     });
+    agentVisibleResult(stagedProjectStatus);
     assert.equal(stagedProjectStatus.isError, undefined);
     const stagedOverview = (stagedProjectStatus.structuredContent as {
       stagedTrackCandidates?: Array<{ trackId?: string; canonicalState?: string; valid?: boolean }>;
@@ -2293,6 +2314,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       name: "project_status",
       arguments: { projectRoot: stagedTrackRoot, view: "implementation", trackId: stagedTrackId }
     });
+    agentVisibleResult(stagedImplementationStatus);
     assert.equal(stagedImplementationStatus.isError, true);
     assert.equal(
       (stagedImplementationStatus.structuredContent as { error?: { code?: string } }).error?.code,
@@ -2307,6 +2329,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       name: "project_status",
       arguments: { projectRoot: invalidCanonicalRoot, view: "track", trackId: invalidCanonicalTrackId }
     });
+    agentVisibleResult(invalidCanonicalStatus);
     assert.equal(invalidCanonicalStatus.isError, true);
     assert.equal(
       (invalidCanonicalStatus.structuredContent as { error?: { code?: string } }).error?.code,
@@ -2322,6 +2345,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       name: "project_status",
       arguments: { projectRoot: stagedTrackRoot, view: "track", trackId: stagedTrackId }
     });
+    agentVisibleResult(canonicalTrackStatus);
     assert.equal(canonicalTrackStatus.isError, undefined);
     assert.equal(
       (canonicalTrackStatus.structuredContent as { kind?: string }).kind,
@@ -2377,6 +2401,10 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       }
     });
     assert.equal(illegalTransition.isError, true);
+    const visibleError = agentVisibleResult(illegalTransition) as {
+      error?: { code?: string; message?: string; details?: Record<string, unknown> };
+    };
+    assert.equal(visibleError.error?.code, "CADRE_ERROR");
     assert.match(
       (illegalTransition.structuredContent as { error?: { message?: string } }).error?.message ?? "",
       /cannot complete from pending/
@@ -2394,7 +2422,8 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       }
     });
     assert.equal(checkpointApply.isError, undefined);
-    assert.ok(Buffer.byteLength(JSON.stringify(checkpointApply)) < 4 * 1024);
+    agentVisibleResult(checkpointApply);
+    assert.ok(Buffer.byteLength(JSON.stringify(checkpointApply)) < 8 * 1024);
     assert.equal(Object.hasOwn(checkpointApply.structuredContent ?? {}, "journal"), false);
     assert.equal(Object.hasOwn(checkpointApply.structuredContent ?? {}, "proposalToken"), false);
     assert.equal((checkpointApply.structuredContent as { commandStatus?: string }).commandStatus, "applied");
@@ -2410,8 +2439,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
         executionId: "mcp-transition-1"
       }
     });
-    assert.equal(compactStatus.isError, undefined);
-    assert.ok(Buffer.byteLength(JSON.stringify(compactStatus)) < 8 * 1024);
+    assert.equal(compactStatus.isError, undefined, JSON.stringify(compactStatus));
+    agentVisibleResult(compactStatus);
+    assert.ok(Buffer.byteLength(JSON.stringify(compactStatus)) < 16 * 1024);
     assert.equal(Object.hasOwn(compactStatus.structuredContent ?? {}, "journal"), false);
 
     const legacyRoot = fixture();
@@ -2429,6 +2459,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot: legacyRoot, view: "project" }
     });
     assert.equal(legacyStatus.isError, undefined);
+    agentVisibleResult(legacyStatus);
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
@@ -2439,6 +2470,10 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot: legacyRoot }
     });
     assert.equal(rejectedLegacyMutation.isError, true);
+    const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
+      error?: { details?: Record<string, unknown> };
+    };
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.5.1");
     assert.equal(
       (rejectedLegacyMutation.structuredContent as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
@@ -2448,6 +2483,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot: legacyRoot, candidateId: "refresh-legacy" }
     });
     assert.equal(legacyStage.isError, undefined);
+    agentVisibleResult(legacyStage);
     legacyProject.runtimeVersion = "3.5.1";
     legacyProject.templateSetVersion = "v2";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
@@ -2468,16 +2504,76 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot: summaryRoot, view: "project" }
     });
     assert.equal(projectSummary.isError, undefined);
+    agentVisibleResult(projectSummary);
     const projectSummaryBytes = Buffer.byteLength(JSON.stringify(projectSummary));
     const projectSummaryContent = projectSummary.structuredContent as {
       tracks?: unknown[]; errors?: unknown[]; warnings?: unknown[]; worktreeRuntime?: unknown;
     };
-    assert.ok(projectSummaryBytes <= 8 * 1024, `project summary was ${projectSummaryBytes} bytes: ${JSON.stringify({
+    assert.ok(projectSummaryBytes <= 16 * 1024, `project summary was ${projectSummaryBytes} bytes: ${JSON.stringify({
       tracks: Buffer.byteLength(JSON.stringify(projectSummaryContent.tracks)),
       errors: Buffer.byteLength(JSON.stringify(projectSummaryContent.errors)),
       warnings: Buffer.byteLength(JSON.stringify(projectSummaryContent.warnings)),
       worktrees: Buffer.byteLength(JSON.stringify(projectSummaryContent.worktreeRuntime))
     })}`);
+
+    const reviewRoot = fixture();
+    execFileSync("git", ["init", "-b", "main"], { cwd: reviewRoot });
+    gitText(reviewRoot, ["config", "user.name", "Cadre Test"]);
+    gitText(reviewRoot, ["config", "user.email", "cadre@example.test"]);
+    gitText(reviewRoot, ["config", "commit.gpgsign", "false"]);
+    gitText(reviewRoot, ["add", ".cadre"]);
+    gitText(reviewRoot, ["commit", "-m", "chore: initialize review fixture"]);
+    const reviewBase = gitText(reviewRoot, ["rev-parse", "HEAD"]);
+    const reviewCommits: string[] = [];
+    for (const value of ["first", "second", "third"]) {
+      writeFileSync(join(reviewRoot, "implementation.txt"), `${value}\n`);
+      gitText(reviewRoot, ["add", "implementation.txt"]);
+      gitText(reviewRoot, ["commit", "-m", `feat: ${value}`]);
+      reviewCommits.push(gitText(reviewRoot, ["rev-parse", "HEAD"]));
+    }
+    const reviewTrackId = "mcp-review-complete";
+    const reviewTrackRoot = writeFinalizedTrack(reviewRoot, reviewTrackId, "ready_for_review");
+    const reviewReplacements = new Map([
+      ["1111111", reviewBase], ["aaaaaaa", reviewBase], ["bbbbbbb", reviewBase],
+      ["abcdef1", reviewCommits[0]!], ["abcdef2", reviewCommits[1]!],
+      ["abcdef3", reviewCommits[2]!], ["ccccccc", reviewCommits[2]!]
+    ]);
+    for (const path of [
+      join(reviewTrackRoot, "plan.md"),
+      join(reviewTrackRoot, "state.json"),
+      join(reviewTrackRoot, "executions", `execution-${reviewTrackId}-execution.json`)
+    ]) {
+      let body = readFileSync(path, "utf8");
+      for (const [from, to] of reviewReplacements) body = body.replaceAll(from, to);
+      writeFileSync(path, body);
+    }
+    const reviewProjectPath = join(reviewRoot, ".cadre", "project.json");
+    const reviewProject = JSON.parse(readFileSync(reviewProjectPath, "utf8"));
+    reviewProject.setup.commit = reviewBase;
+    writeFileSync(reviewProjectPath, `${JSON.stringify(reviewProject, null, 2)}\n`);
+    runState(reviewRoot, "render");
+    const reviewPreview = await client.callTool({
+      name: "review_complete",
+      arguments: { request: {
+        mode: "prepare",
+        projectRoot: reviewRoot,
+        trackId: reviewTrackId,
+        approval: "Human approved clean completion.",
+        acceptedRisks: ["Accepted bounded compatibility risk"]
+      } }
+    });
+    assert.equal(reviewPreview.isError, undefined, JSON.stringify(reviewPreview));
+    const reviewToken = agentVisibleResult(reviewPreview).proposalToken as string | undefined;
+    assert.ok(reviewToken);
+    const reviewApply = await client.callTool({
+      name: "review_complete",
+      arguments: { request: { mode: "apply", proposalToken: reviewToken } }
+    });
+    assert.equal(reviewApply.isError, undefined, JSON.stringify(reviewApply));
+    const visibleReviewApply = agentVisibleResult(reviewApply);
+    assert.equal(visibleReviewApply.commandStatus, "applied");
+    assert.equal(Object.hasOwn(visibleReviewApply, "proposalToken"), false);
+    assert.equal(JSON.parse(readFileSync(join(reviewTrackRoot, "state.json"), "utf8")).status, "completed");
 
     const archiveRoot = fixture();
     const archivedTrackRoot = writeFinalizedTrack(archiveRoot, "mcp-archive-candidate", "completed");
@@ -2560,9 +2656,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       (archiveCandidatePreview.structuredContent as { commandStatus?: string }).commandStatus,
       "approval_required"
     );
-    const archiveCandidateToken = (
-      archiveCandidatePreview.structuredContent as { proposalToken?: string }
-    ).proposalToken;
+    const archiveCandidateToken = agentVisibleResult(archiveCandidatePreview).proposalToken as string | undefined;
     assert.ok(archiveCandidateToken);
     const archiveProposalRecord = readFileSync(
       join(proposalHome, "runtime", "proposals", `${archiveCandidateToken}.json`),
@@ -2575,11 +2669,13 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { request: { mode: "apply", proposalToken: archiveCandidateToken } }
     });
     assert.equal(archiveCandidateApply.isError, undefined);
+    agentVisibleResult(archiveCandidateApply);
     assert.equal(
       (archiveCandidateApply.structuredContent as { commandStatus?: string }).commandStatus,
       "applied"
     );
-    assert.ok(Buffer.byteLength(JSON.stringify(archiveCandidateApply)) <= 4 * 1024);
+    assert.equal(Object.hasOwn(archiveCandidateApply.structuredContent ?? {}, "proposalToken"), false);
+    assert.ok(Buffer.byteLength(JSON.stringify(archiveCandidateApply)) <= 8 * 1024);
     assert.equal(
       readFileSync(join(archiveRoot, ".cadre", "patterns", "mcp-staged-pattern.md"), "utf8"),
       archivePattern
@@ -2591,6 +2687,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { projectRoot, candidateId: "create" }
     });
     assert.equal(preparedStage.isError, undefined);
+    agentVisibleResult(preparedStage);
     const files = [
       ["product.md", "# Product\n"],
       ["guidelines.md", "# Guidelines\n"],
@@ -2630,6 +2727,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { request: { mode: "prepare", ...input } }
     });
     assert.equal(preview.isError, undefined);
+    agentVisibleResult(preview);
     assert.equal((preview.structuredContent as { commandStatus?: string }).commandStatus, "approval_required");
     const digest = (preview.structuredContent as { digest?: string }).digest;
     assert.match(digest ?? "", /^[0-9a-f]{64}$/);
@@ -2641,7 +2739,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(refreshedPreview.isError, undefined);
     assert.equal((refreshedPreview.structuredContent as { digest?: string }).digest, digest);
-    const proposalToken = (refreshedPreview.structuredContent as { proposalToken?: string }).proposalToken;
+    const proposalToken = agentVisibleResult(refreshedPreview).proposalToken as string | undefined;
     assert.ok(proposalToken);
     const mixedAdaptiveShape = await client.callTool({
       name: "project_init_candidate",
@@ -2669,6 +2767,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { request: { mode: "apply", proposalToken } }
     });
     assert.equal(wrongApply.isError, true);
+    agentVisibleResult(wrongApply);
     const productCandidatePath = join(projectRoot, ".cadre/stage", "create", "product.md");
     writeFileSync(productCandidatePath, "# Product\n\nChanged after preview.\n");
     const staleApply = await client.callTool({
@@ -2676,13 +2775,14 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       arguments: { request: { mode: "apply", proposalToken } }
     });
     assert.equal(staleApply.isError, true);
+    agentVisibleResult(staleApply);
     assert.equal(existsSync(join(projectRoot, ".cadre", "project.json")), false);
     writeFileSync(productCandidatePath, "# Product\n");
     const finalPreview = await client.callTool({
       name: "project_init_candidate",
       arguments: { request: { mode: "prepare", ...input, approvedAt } }
     });
-    const finalProposalToken = (finalPreview.structuredContent as { proposalToken?: string }).proposalToken;
+    const finalProposalToken = agentVisibleResult(finalPreview).proposalToken as string | undefined;
     assert.ok(finalProposalToken);
     const restartedClient = new Client({ name: "cadre-restart-test", version: "1.0.0" });
     const restartedTransport = new StdioClientTransport({
@@ -2697,9 +2797,11 @@ test("compiled MCP exposes versioned templates and initializes projects without 
         arguments: { request: { mode: "apply", proposalToken: finalProposalToken } }
       });
       assert.equal(applied.isError, undefined);
+      agentVisibleResult(applied);
       assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       assert.equal(Object.hasOwn(applied.structuredContent ?? {}, "content"), false);
-      assert.ok(Buffer.byteLength(JSON.stringify(applied)) <= 4 * 1024);
+      assert.equal(Object.hasOwn(applied.structuredContent ?? {}, "proposalToken"), false);
+      assert.ok(Buffer.byteLength(JSON.stringify(applied)) <= 8 * 1024);
     } finally {
       await restartedClient.close();
     }
@@ -2739,6 +2841,7 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       const scope = { projectRoot, trackId, executionId, nodeId: "T1.1" };
       const created = await client.callTool({ name: "worktree_create", arguments: scope });
       assert.equal(created.isError, undefined, JSON.stringify(created.structuredContent));
+      agentVisibleResult(created);
       assert.equal((created.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       assert.equal(Object.hasOwn(created.structuredContent ?? {}, "proposalToken"), false);
       const workerPath = (created.structuredContent as { path?: string }).path;
@@ -2760,12 +2863,14 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
         }
       });
       assert.equal(committed.isError, undefined, JSON.stringify(committed.structuredContent));
+      agentVisibleResult(committed);
 
       const first = await client.callTool({
         name: "integration",
         arguments: { request: { mode: "prepare", ...scope } }
       });
       assert.equal(first.isError, undefined, JSON.stringify(first.structuredContent));
+      const visibleIntegration = agentVisibleResult(first);
       if (approvalMode === "phase") {
         assert.equal((first.structuredContent as { commandStatus?: string }).commandStatus, "applied");
         assert.equal(Object.hasOwn(first.structuredContent ?? {}, "proposalToken"), false);
@@ -2775,18 +2880,20 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
           "approval_required"
         );
         assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), "base\n");
-        const proposalToken = (first.structuredContent as { proposalToken?: string }).proposalToken;
+        const proposalToken = visibleIntegration.proposalToken as string | undefined;
         assert.ok(proposalToken);
         const applied = await client.callTool({
           name: "integration",
           arguments: { request: { mode: "apply", proposalToken } }
         });
         assert.equal(applied.isError, undefined, JSON.stringify(applied.structuredContent));
+        agentVisibleResult(applied);
         assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       }
       assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), `${approvalMode} integration\n`);
       const cleaned = await client.callTool({ name: "worktree_cleanup", arguments: scope });
       assert.equal(cleaned.isError, undefined, JSON.stringify(cleaned.structuredContent));
+      agentVisibleResult(cleaned);
       assert.equal((cleaned.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       assert.equal(existsSync(workerPath), false);
       const execution = JSON.parse(readFileSync(
@@ -2838,6 +2945,7 @@ test("compiled MCP presents and normalizes a client-native workflow form", async
       binding: "execution:run-1/node:T1.2/head:abcdef1",
       answers: { decision: "approve", notes: "Verified in the native form" }
     });
+    agentVisibleResult(response);
   } finally {
     await client.close();
   }

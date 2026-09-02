@@ -7,6 +7,26 @@ order: 230
 
 # Release Notes
 
+## Unreleased
+
+### Agent-visible MCP results
+
+- All 22 MCP tools now publish output schemas covering their stable
+  agent-facing fields and exact success/error variants.
+- Every response ends with compact JSON that is deeply equal to
+  `structuredContent`, including elicitation, templates, status, execution,
+  mutations, and structured failures. Agents can safely recover
+  `proposalToken` and every other follow-up field from model-visible text.
+- Approval-required results include the complete proposal and
+  `proposalToken`; applied results omit the token. Template and candidate
+  bodies remain outside mirrored descriptors.
+- The serialized tool-catalog limit is now 64 KiB to accommodate output
+  schemas while preserving Node 18 support and the existing 22 tool names and
+  wire shapes.
+
+No project refresh or canonical-state migration is required for this transport
+contract change.
+
 ## 3.5.1 - 2026-08-27
 
 Cadre 3.5.1 hardens all ten workflows against validation, routing, stale-stage,

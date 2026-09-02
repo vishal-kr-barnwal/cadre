@@ -25,3 +25,4 @@ export const CADRE_MCP_TOOLS = {
 
 export const CADRE_MCP_TOOL_NAMES = Object.freeze(Object.values(CADRE_MCP_TOOLS));
 
+export type CadreMcpToolName = typeof CADRE_MCP_TOOL_NAMES[number];

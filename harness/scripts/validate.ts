@@ -306,7 +306,10 @@ try {
   const tools = await client.listTools();
   const catalogBytes = Buffer.byteLength(JSON.stringify(tools.tools));
   if (tools.tools.length !== 22) errors.push(`MCP catalog: expected 22 tools, found ${tools.tools.length}`);
-  if (catalogBytes > 18 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 18 KiB limit`);
+  if (catalogBytes > 64 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 64 KiB limit`);
+  for (const tool of tools.tools) {
+    if (!tool.outputSchema) errors.push(`MCP catalog: ${tool.name} has no output schema`);
+  }
   await client.close();
   await server.close();
 } catch (error) {

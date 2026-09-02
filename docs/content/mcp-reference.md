@@ -8,11 +8,16 @@ order: 210
 # MCP Reference
 
 Cadre exposes immutable template resources and 22 narrow tools. Successful
-operational tools return concise text plus typed structured data; unchanged
-template bodies occur once in the requested content mode, while structured
-content contains content-free descriptors.
+operational tools return concise text plus typed structured data. Every tool
+publishes an output schema and ends its response with compact JSON that is
+exactly equal to `structuredContent`, giving agents a model-visible fallback
+for every decision, recovery, and follow-up field. Unchanged template bodies
+occur once in the requested content mode, while structured content and its JSON
+mirror contain content-free descriptors.
 
 Approval-aware commands use a strict `request` envelope. `request: { mode: "prepare", ... }` accepts only that operation's prepare fields and returns `approval_required` plus a compact token. After human approval, `request: { mode: "apply", proposalToken }` accepts no prepare fields. Deterministic operations apply in one call.
+The prepare token is available both in structured content and in the final JSON
+text block; applied results omit it.
 
 ## Template Resources
 
@@ -113,6 +118,9 @@ Validates and atomically regenerates deterministic `tracks.md`.
 
 ## Common Guarantees
 
+- Every emitted result matches the tool's output schema. Its final text block
+  parses to the exact structured result, including `{ error: { code, message,
+  details? } }` failures and elicitation outcomes.
 - Project roots, IDs, paths, timestamps, commits, strict adaptive shapes, and event-specific evidence are validated at the boundary.
 - Multi-file initialization, execution finish, clean review, and archive operations converge after interruption without duplicate cycles or history; byte, HEAD, hash, or journal drift remains a hard failure.
 - `.cadre/stage/` is Git-ignored and never canonical or committed.

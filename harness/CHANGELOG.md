@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### MCP Result Contract
+
+- Added output schemas for all 22 MCP tools. The schemas advertise every
+  stable agent-facing top-level field while the server enforces the exact
+  success and structured-error variants.
+- Made the final text block of every tool response a compact JSON mirror of
+  `structuredContent`. This applies to successes, elicitation outcomes,
+  template descriptors, and structured errors, so agents can recover every
+  decision and follow-up field even when a client does not expose structured
+  results directly.
+- Kept template and candidate bodies out of mirrored descriptor data. Their
+  existing text or embedded-resource blocks remain unchanged and appear before
+  the final JSON mirror.
+- Tightened adaptive response variants: `proposalToken` is required only when
+  `commandStatus` is `approval_required` and is absent after application.
+- Raised the validated serialized MCP tool-catalog ceiling from 18 KiB to
+  64 KiB to accommodate the complete output schemas while retaining Node 18
+  compatibility.
+
+This is an additive transport contract change. It does not change Cadre
+project state, runtime/template versions, canonical artifacts, tool names, or
+the prepare/apply token lifecycle.
+
 ## [3.5.1] - 2026-08-27
 
 Cadre 3.5.1 is a workflow-recovery hotfix for candidate validation, staged
