@@ -1,6 +1,6 @@
 # Cadre
 
-The **3.7.0 candidate** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
+**Cadre 3.7.0** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
@@ -407,6 +407,6 @@ pnpm --filter cadre-ai validate
 
 ### Memory format upgrade
 
-The 3.7.0 candidate uses template set v3 and requires an approved refresh of older projects before delivery. It preserves v1/v2 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+Cadre 3.7.0 uses template set v3 and requires an approved refresh of older projects before delivery. It preserves v1/v2 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
 
 Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.

@@ -17,7 +17,7 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-The **3.7.0 candidate** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
+**Cadre 3.7.0** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
 
 ## What Cadre Provides
 

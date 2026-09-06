@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-### 3.7.0 candidate: memory, context, and recovery
+## [3.7.0] - 2026-09-06
+
+### Memory, context, and recovery
 
 - Introduce immutable template v3, preserving v1/v2 and requiring approved refresh before legacy delivery.
 - Persist bounded task handoffs with existing execution checkpoints, without additional approval or mutation calls.
@@ -29,7 +31,7 @@
 - Require an exact original execution snapshot before staged reverts reset evidence; retain a durable digest-bound revert receipt, history entry, and reconciliation commit provenance.
 - Make receipt persistence and readback an explicit prerequisite to restoring implement ownership; record a null reconciliation SHA first so interruption cannot erase the revert approval while bookkeeping is unfinished.
 
-This remains unreleased until the local checks and native installation/activation gates pass. No publication or personal-client installation is part of release preparation.
+Validated with 79 automated tests, package and documentation checks, native Claude/Codex audits, and native Zed installation, discovery, MCP, staged-revert, and fresh-session recovery tests. Native Zed support remains beta.
 
 ## [3.6.0] - 2026-09-02
 
