@@ -17,6 +17,8 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
+The **3.7.0 candidate** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
+
 ## What Cadre Provides
 
 - **Human-governed delivery:** rendered artifacts and lifecycle mutations are
@@ -118,3 +120,5 @@ pnpm --filter cadre-ai validate
 ```
 
 Cadre is licensed under the terms in [`LICENSE`](LICENSE).
+
+Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.

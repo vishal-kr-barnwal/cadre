@@ -1,3 +1,4 @@
+import { inspectStagedMemory } from "./staged-memory.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
@@ -91,7 +92,7 @@ export function deriveReviewCompleteInput(input: ReviewCompleteRequest): ReviewC
     && existingCycle.outcome === "clean"
     && existingCycle.executionId === executionId
     && existingCycle.reviewedHead === reviewedHead
-    && existingCycle.approval === input.approval
+    && (existingCycle.reviewEvidence ?? existingCycle.approval) === input.approval
     && JSON.stringify(existingCycle.acceptedRisks ?? []) === JSON.stringify(acceptedRisks)
     ? existingCycle
     : undefined;
@@ -119,7 +120,7 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   if (!TRACK_ID.test(input.trackId)) throw new Error("invalid trackId");
   if (!SHA.test(input.reviewedHead)) throw new Error("reviewedHead must be a Git commit SHA");
   if (!Number.isFinite(Date.parse(input.reviewedAt))) throw new Error("reviewedAt must be an ISO timestamp");
-  if (!input.approval.trim()) throw new Error("approval must record the explicit human decision");
+  if (!input.approval.trim()) throw new Error("approval must contain review evidence for the proposed decision; apply records confirmation");
   const range = input.commitRange.match(/^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/);
   if (!range || range[2] !== input.reviewedHead) {
     throw new Error("commitRange must end at reviewedHead");
@@ -152,12 +153,12 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     graphDigest: execution.graphDigest,
     reviewedHead: input.reviewedHead,
     commitRange: input.commitRange,
-    approval: input.approval,
+    reviewEvidence: input.approval,
     ...(acceptedRisks.length ? { acceptedRisks } : {})
   };
   const existingCycle = current.reviewCycles?.at(-1);
   const resuming = current.status === "completed"
-    && JSON.stringify(existingCycle) === JSON.stringify(cycle);
+    && JSON.stringify(Object.fromEntries(Object.entries(existingCycle ?? {}).filter(([key]) => key !== "approvalConfirmation"))) === JSON.stringify(cycle);
   if (current.status !== "ready_for_review" && !resuming) throw new Error(`${input.trackId} is not ready for review`);
   const state: TrackState = resuming ? current : {
     ...current,
@@ -183,6 +184,11 @@ export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: 
   const proposal = previewReviewComplete(input);
   if (proposal.digest !== proposalDigest && !proposal.resuming) {
     throw new Error("review completion proposal is stale; preview it again");
+  }
+  if (!proposal.resuming) {
+    proposal.state.reviewCycles!.at(-1)!.approvalConfirmation = {
+      status: "approved", proposalDigest, confirmedAt: new Date().toISOString(), method: "explicit-apply"
+    };
   }
   writeApprovedFile(proposal.statePath, json(proposal.state));
   writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
@@ -462,11 +468,15 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     throw new Error("archive updates contain duplicate paths");
   }
   for (const update of updates) assertArchiveUpdate(update.path, selected);
+  const memory = inspectStagedMemory(root, "archive-validation", updates.map((update) => ({ ...update, absolutePath: join(root, ".cadre", update.path) })));
+  const invalidMemory = memory.learning.filter((entry) => !entry.valid);
+  if (invalidMemory.length) throw new Error(`Archive seed reassessment required: ${JSON.stringify(invalidMemory)}`);
   const approvalDigest = hash({
     batchId: input.batchId,
     selectedTracks: input.selectedTracks,
     baseCommit: input.baseCommit,
     approvedAt: input.approvedAt,
+    memoryInputs: memory.inputs.filter((input) => input.path.startsWith("patterns/")),
     updates
   });
   if (existingOperation && existingOperation.approvalDigest !== approvalDigest) {

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "baseline": "3.6.0 working tree including single-representation MCP results",
+  "measurement": "UTF-8 serialized JSON bytes; not billed tokens",
+  "recordedCatalog": {
+    "tools": 22,
+    "totalBytes": 64536,
+    "inputSchemaBytes": 13559,
+    "outputSchemaBytes": 45779
+  },
+  "comparison": "Replay full implementation status plus complete required artifact reads on the same fixture corpus; compare with summary status and every scoped context page, including requests.",
+  "fixtures": [
+    {
+      "name": "small",
+      "phases": 1,
+      "tasksPerPhase": 1,
+      "minimumReduction": null
+    },
+    {
+      "name": "large",
+      "phases": 10,
+      "tasksPerPhase": 10,
+      "minimumReduction": 0.3
+    },
+    {
+      "name": "archive-history",
+      "unrelatedArchivedTracks": 100,
+      "requiredDependencyTracks": 1
+    }
+  ],
+  "actualClientTokens": null,
+  "limits": "Synthetic harness-context measurements do not establish live-agent success rates, context caching behavior, or billed token savings. Report small-fixture and schema overhead separately.",
+  "recordedAggregate": {
+    "baseline": "3.7.0 candidate before audit corrections, captured 2026-09-06",
+    "fixture": "10 phases x 10 implementation tasks, 16 KiB pages, all 100 node reads, no retained-source inventory",
+    "responseBytes": 1869620,
+    "pages": 200,
+    "requestBytes": null,
+    "comparison": "Compare current requests plus responses, including a cold session restart at node 51, against captured responses alone; conservative because baseline requests were not recorded."
+  }
+}

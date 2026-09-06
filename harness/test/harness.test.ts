@@ -52,9 +52,9 @@ import {
 } from "../src/domain/init.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const templateRoot = join(root, "templates", "v2", "init");
+const templateRoot = join(root, "templates", "v3", "init");
 const legacyTemplateRoot = join(root, "templates", "v1", "init");
-const providerRoot = join(root, "templates", "v2");
+const providerRoot = join(root, "templates", "v3");
 
 test("published v1 templates remain byte-for-byte immutable", () => {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
@@ -78,11 +78,14 @@ function childEnvironment(overrides: Record<string, string>): Record<string, str
 function agentVisibleResult(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, unknown> {
   assert.ok("content" in result, "expected an immediate MCP tool result");
   const immediate = result as { content: Array<{ type: string; text?: string }>; structuredContent?: unknown };
-  const last = immediate.content.at(-1);
-  assert.equal(last?.type, "text", "the final MCP content block must be the structured JSON mirror");
-  const parsed = JSON.parse(last?.text ?? "") as Record<string, unknown>;
-  assert.deepEqual(parsed, immediate.structuredContent);
-  return parsed;
+  if (result.isError) {
+    assert.equal(immediate.structuredContent, undefined);
+    assert.equal(immediate.content.length, 1, "errors use one client-visible text representation");
+    return JSON.parse(immediate.content[0]!.text!);
+  }
+  assert.deepEqual(immediate.content, [], "structured clients must not receive duplicate text");
+  assert.ok(immediate.structuredContent);
+  return immediate.structuredContent as Record<string, unknown>;
 }
 
 function fixture() {
@@ -94,8 +97,8 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.6.0";
-  project.templateSetVersion = "v2";
+  project.runtimeVersion = "3.7.0";
+  project.templateSetVersion = "v3";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
   project.setup = {
@@ -272,6 +275,9 @@ None.
 
 <!-- cadre:pattern-seed:start -->
 ## Pattern Seed
+<!-- cadre:memory:start -->
+{"schemaVersion":1,"specRevision":1,"planRevision":1,"patterns":[]}
+<!-- cadre:memory:end -->
 No existing pattern is relevant.
 <!-- cadre:pattern-seed:end -->
 `);
@@ -338,6 +344,9 @@ None.
 
 <!-- cadre:pattern-seed:start -->
 ## Pattern Seed
+<!-- cadre:memory:start -->
+{"schemaVersion":1,"specRevision":1,"planRevision":1,"patterns":[]}
+<!-- cadre:memory:end -->
 No existing pattern is relevant.
 <!-- cadre:pattern-seed:end -->
 `);
@@ -417,8 +426,8 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.6.0",
-    templateSetVersion: "v2"
+    runtimeVersion: "3.7.0",
+    templateSetVersion: "v3"
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
@@ -1066,6 +1075,8 @@ test("clean review completion previews and applies its exact state and derived i
   assert.equal(preview.state.status, "completed");
   assert.match(preview.tracksContent, /reviewed-track.*completed/);
   assert.deepEqual(preview.state.reviewCycles?.at(-1)?.acceptedRisks, input.acceptedRisks);
+  assert.equal(preview.state.reviewCycles?.at(-1)?.reviewEvidence, input.approval);
+  assert.equal(preview.state.reviewCycles?.at(-1)?.approvalConfirmation, undefined);
   writeFileSync(preview.tracksPath, `${readFileSync(preview.tracksPath, "utf8")}\n`);
   assert.throws(() => applyReviewComplete(input, preview.digest), /proposal is stale/);
   runState(projectRoot, "render");
@@ -1079,6 +1090,9 @@ test("clean review completion previews and applies its exact state and derived i
   applyReviewComplete(input, fresh.digest);
   const retriedState = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
   assert.equal(retriedState.reviewCycles.length, 1);
+  assert.equal(retriedState.reviewCycles[0].approvalConfirmation.status, "approved");
+  assert.equal(retriedState.reviewCycles[0].approvalConfirmation.proposalDigest, fresh.digest);
+  assert.equal(retriedState.reviewCycles[0].approval, undefined);
   assert.match(readFileSync(fresh.tracksPath, "utf8"), /reviewed-track.*completed/);
 });
 
@@ -1375,6 +1389,9 @@ None.
 
 <!-- cadre:pattern-seed:start -->
 ## Pattern Seed
+<!-- cadre:memory:start -->
+{"schemaVersion":1,"specRevision":1,"planRevision":1,"patterns":[]}
+<!-- cadre:memory:end -->
 No existing pattern is relevant.
 <!-- cadre:pattern-seed:end -->
 `);
@@ -1644,11 +1661,11 @@ test("installer prepares a shared three-client payload", async () => {
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.6.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.6.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.7.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.7.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v2", "track", "spec.md")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v2", "init", "gitignore.template")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v3", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v3", "init", "gitignore.template")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -1673,7 +1690,7 @@ test("installer prepares a shared three-client payload", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 22);
+    assert.equal(tools.tools.length, 23);
     assert.deepEqual(Object.keys(CADRE_MCP_OUTPUT_SCHEMAS).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
@@ -1682,7 +1699,7 @@ test("installer prepares a shared three-client payload", async () => {
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const resources = await client.listResources();
     assert.deepEqual(
-      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v2/", "")),
+      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v3/", "")),
       [...TEMPLATE_IDS]
     );
   } finally {
@@ -1703,9 +1720,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.6.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.7.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.6.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.7.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1919,7 +1936,7 @@ test("workflow elicitation builds bounded approval and clarification forms", () 
 
 test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {
   const proposalHome = mkdtempSync(join(tmpdir(), "cadre-mcp-home-"));
-  const client = new Client({ name: "cadre-test", version: "1.0.0" });
+  const client = new Client({ name: "codex_cli_rs", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [join(root, "dist", "cadre-mcp.mjs")],
@@ -1928,10 +1945,10 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 22);
-    assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 64 * 1024);
+    assert.equal(tools.tools.length, 23);
+    assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 80 * 1024);
     for (const name of [
-      "workflow_elicit", "template_get_many", "styleguide_resolve", "project_status",
+      "workflow_elicit", "template_get_many", "styleguide_resolve", "context_read", "project_status",
       "state_validate", "candidate_stage_prepare", "candidate_inspect", "project_init_candidate",
       "setup_record_git_initialized", "setup_record_commit", "tracks_render",
       "execution_graph_validate",
@@ -2008,22 +2025,22 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     );
     agentVisibleResult(fallback);
     const resources = await client.listResources();
-    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v2/track/spec"));
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v3/track/spec"));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v2/track/revise-operation"
+      (resource) => resource.uri === "cadre://templates/v3/track/revise-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v2/project/refresh-operation"
+      (resource) => resource.uri === "cadre://templates/v3/project/refresh-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v2/project/gitignore"
+      (resource) => resource.uri === "cadre://templates/v3/project/gitignore"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v2/track/revert-operation"
+      (resource) => resource.uri === "cadre://templates/v3/track/revert-operation"
     ));
 
-    const workflow = await client.readResource({ uri: "cadre://templates/v2/project/workflow" });
-    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v2/project/workflow");
+    const workflow = await client.readResource({ uri: "cadre://templates/v3/project/workflow" });
+    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v3/project/workflow");
     assert.match((workflow.contents[0] as { text?: string }).text ?? "", /^# Cadre Workflow/);
 
     const bundle = await client.callTool({
@@ -2036,7 +2053,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       ["track/spec", "track/state"]
     );
     assert.ok((bundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
-      (template) => template.content === undefined
+      (template) => typeof template.content === "string"
     ));
     agentVisibleResult(bundle);
     assert.ok(Buffer.byteLength(JSON.stringify(bundle)) <= 12 * 1024);
@@ -2046,12 +2063,9 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(textBundle.isError, undefined);
     const textContents = textBundle.content as Array<{ type: string; text?: string }>;
-    assert.equal(textContents.length, 3);
-    assert.ok(textContents.every((content) => content.type === "text"));
-    assert.match(textContents[0]?.text ?? "", /<cadre-template/);
-    assert.match(textContents[0]?.text ?? "", /# Specification:/);
+    assert.equal(textContents.length, 0);
     assert.ok((textBundle.structuredContent as { templates?: Array<{ content?: string }> }).templates?.every(
-      (template) => template.content === undefined
+      (template) => typeof template.content === "string"
     ));
     agentVisibleResult(textBundle);
     const createBundle = await client.callTool({
@@ -2324,7 +2338,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     agentVisibleResult(stagedImplementationStatus);
     assert.equal(stagedImplementationStatus.isError, true);
     assert.equal(
-      (stagedImplementationStatus.structuredContent as { error?: { code?: string } }).error?.code,
+      (agentVisibleResult(stagedImplementationStatus) as { error?: { code?: string } }).error?.code,
       "TRACK_CANDIDATE_ONLY"
     );
     const invalidCanonicalRoot = fixture();
@@ -2339,7 +2353,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     agentVisibleResult(invalidCanonicalStatus);
     assert.equal(invalidCanonicalStatus.isError, true);
     assert.equal(
-      (invalidCanonicalStatus.structuredContent as { error?: { code?: string } }).error?.code,
+      (agentVisibleResult(invalidCanonicalStatus) as { error?: { code?: string } }).error?.code,
       "TRACK_STATE_INVALID"
     );
     const unknownTrackStatus = await client.callTool({
@@ -2413,7 +2427,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     };
     assert.equal(visibleError.error?.code, "CADRE_ERROR");
     assert.match(
-      (illegalTransition.structuredContent as { error?: { message?: string } }).error?.message ?? "",
+      (agentVisibleResult(illegalTransition) as { error?: { message?: string } }).error?.message ?? "",
       /cannot complete from pending/
     );
     const checkpointApply = await client.callTool({
@@ -2470,19 +2484,19 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.6.0"
+      "3.7.0"
     );
     const rejectedLegacyMutation = await client.callTool({
-      name: "tracks_render",
-      arguments: { projectRoot: legacyRoot }
+      name: "execution_start",
+      arguments: { projectRoot: legacyRoot, trackId: "legacy-track" }
     });
     assert.equal(rejectedLegacyMutation.isError, true);
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.6.0");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.7.0");
     assert.equal(
-      (rejectedLegacyMutation.structuredContent as { error?: { code?: string } }).error?.code,
+      (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
     );
     const legacyStage = await client.callTool({
@@ -2491,8 +2505,8 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(legacyStage.isError, undefined);
     agentVisibleResult(legacyStage);
-    legacyProject.runtimeVersion = "3.6.0";
-    legacyProject.templateSetVersion = "v2";
+    legacyProject.runtimeVersion = "3.7.0";
+    legacyProject.templateSetVersion = "v3";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(
       join(legacyRoot, ".cadre", "workflow.md"),
@@ -2791,7 +2805,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     const finalProposalToken = agentVisibleResult(finalPreview).proposalToken as string | undefined;
     assert.ok(finalProposalToken);
-    const restartedClient = new Client({ name: "cadre-restart-test", version: "1.0.0" });
+    const restartedClient = new Client({ name: "codex_cli_rs", version: "1.0.0" });
     const restartedTransport = new StdioClientTransport({
       command: process.execPath,
       args: [join(root, "dist", "cadre-mcp.mjs")],
@@ -2832,7 +2846,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
 });
 
 test("compiled MCP integration pauses only when the execution is governed", async () => {
-  const client = new Client({ name: "cadre-adaptive-test", version: "1.0.0" });
+  const client = new Client({ name: "codex_cli_rs", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [join(root, "dist", "cadre-mcp.mjs")],
@@ -2844,6 +2858,9 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       const { projectRoot } = gitFixture();
       const trackId = `adaptive-${approvalMode}`;
       const executionId = "run-1";
+      writePlannedTrack(projectRoot, trackId);
+      gitText(projectRoot, ["add", ".cadre"]);
+      gitText(projectRoot, ["commit", "-m", "cadre(test): record approved memory"]);
       writeWorktreeJournal(projectRoot, trackId, executionId, "running", "pending", approvalMode);
       const scope = { projectRoot, trackId, executionId, nodeId: "T1.1" };
       const created = await client.callTool({ name: "worktree_create", arguments: scope });
@@ -2898,6 +2915,28 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
         assert.equal((applied.structuredContent as { commandStatus?: string }).commandStatus, "applied");
       }
       assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), `${approvalMode} integration\n`);
+      if (approvalMode === "phase") {
+        // Simulate a crash after Git merged but before its journal receipt, then a runtime upgrade.
+        const journalPath = join(projectRoot, ".cadre", "tracks", trackId, "executions", `execution-${executionId}.json`);
+        const interrupted = JSON.parse(readFileSync(journalPath, "utf8"));
+        interrupted.nodes["T1.1"].status = "committed";
+        interrupted.nodes["T1.1"].mergeCommit = null;
+        interrupted.nodes["T1.1"].handoff = { decisions: ["Preserve merged behavior"], failedApproaches: [], openQuestions: [], nextAction: "Record existing integration", sources: [] };
+        writeFileSync(journalPath, JSON.stringify(interrupted));
+        const projectPath = join(projectRoot, ".cadre/project.json");
+        const project = JSON.parse(readFileSync(projectPath, "utf8"));
+        project.runtimeVersion = "3.6.0"; project.templateSetVersion = "v2";
+        writeFileSync(projectPath, JSON.stringify(project));
+        gitText(projectRoot, ["add", ".cadre/project.json"]);
+        gitText(projectRoot, ["commit", "-m", "cadre(test): preserve legacy project version"]);
+        const beforeRecovery = gitText(projectRoot, ["rev-parse", "HEAD"]);
+        const recovered = await client.callTool({ name: "integration", arguments: { request: { mode: "prepare", ...scope } } });
+        assert.equal(recovered.isError, undefined, JSON.stringify(recovered));
+        assert.equal(agentVisibleResult(recovered).commandStatus, "applied");
+        assert.equal(gitText(projectRoot, ["rev-parse", "HEAD"]), beforeRecovery, "recovery cannot merge again");
+        const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+        assert.equal(journal.nodes["T1.1"].handoff.nextAction, "Record existing integration");
+      }
       const cleaned = await client.callTool({ name: "worktree_cleanup", arguments: scope });
       assert.equal(cleaned.isError, undefined, JSON.stringify(cleaned.structuredContent));
       agentVisibleResult(cleaned);
@@ -2916,7 +2955,7 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
 
 test("compiled MCP presents and normalizes a client-native workflow form", async () => {
   const client = new Client(
-    { name: "cadre-elicitation-test", version: "1.0.0" },
+    { name: "codex_cli_rs", version: "1.0.0" },
     { capabilities: { elicitation: { form: {} } } }
   );
   let requestedMessage = "";

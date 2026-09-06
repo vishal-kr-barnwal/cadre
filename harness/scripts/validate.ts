@@ -44,8 +44,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.6.0") {
-  errors.push("package: expected publish identity cadre-ai@3.6.0");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.7.0") {
+  errors.push("package: expected publish identity cadre-ai@3.7.0");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
@@ -58,8 +58,8 @@ if (packageManifest.dependencies && Object.keys(packageManifest.dependencies).le
   errors.push("package: self-contained runtime must not have production dependencies");
 }
 if (!packageManifest.keywords?.includes("zed")) errors.push("package: keywords must include zed");
-if (CADRE_MCP_TOOL_NAMES.length !== 22 || new Set(CADRE_MCP_TOOL_NAMES).size !== 22) {
-  errors.push("MCP tools: expected 22 unique centralized tool names");
+if (CADRE_MCP_TOOL_NAMES.length !== 23 || new Set(CADRE_MCP_TOOL_NAMES).size !== 23) {
+  errors.push("MCP tools: expected 23 unique centralized tool names");
 }
 
 interface Marketplace {
@@ -145,7 +145,7 @@ if (/runtimeVersion:\s*\d|templateSetVersion:\s*v\d/.test(refreshSkill)) {
   errors.push("refresh: upgrade guidance must not hard-code runtime or template versions");
 }
 
-const templateRoot = join(root, "templates", "v2");
+const templateRoot = join(root, "templates", "v3");
 const projectTemplate = join(templateRoot, "init");
 for (const file of [
   "gitignore.template", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
@@ -301,12 +301,12 @@ if (claudeMcp.mcpServers?.cadre?.command !== "node"
 try {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createCadreServer();
-  const client = new Client({ name: "cadre-validation", version: "1.0.0" });
+  const client = new Client({ name: "codex_cli_rs", version: "1.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const tools = await client.listTools();
   const catalogBytes = Buffer.byteLength(JSON.stringify(tools.tools));
-  if (tools.tools.length !== 22) errors.push(`MCP catalog: expected 22 tools, found ${tools.tools.length}`);
-  if (catalogBytes > 64 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 64 KiB limit`);
+  if (tools.tools.length !== 23) errors.push(`MCP catalog: expected 23 tools, found ${tools.tools.length}`);
+  if (catalogBytes > 80 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 80 KiB limit`);
   for (const tool of tools.tools) {
     if (!tool.outputSchema) errors.push(`MCP catalog: ${tool.name} has no output schema`);
   }

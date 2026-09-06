@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "runtimeVersion": "{{RUNTIME_VERSION}}",
+  "templateSetVersion": "{{TEMPLATE_SET_VERSION}}",
+  "project": {
+    "name": "{{PROJECT_NAME}}",
+    "context": "{{greenfield|brownfield}}"
+  },
+  "setup": {
+    "status": "in_progress",
+    "checkpoint": "approved",
+    "commit": null,
+    "artifactProgress": [],
+    "operation": {
+      "action": "create",
+      "baseCommit": "{{BASE_COMMIT_OR_NULL}}",
+      "expectedCommit": "cadre(create): initialize project harness",
+      "repositoryRoot": "{{PROJECT_ROOT}}",
+      "gitDisposition": "{{existing|initialize}}",
+      "approvedArtifacts": [],
+      "approvedArtifactHashes": [],
+      "approvedAt": "{{APPROVED_AT}}"
+    }
+  },
+  "lastRefresh": null,
+  "history": []
+}

@@ -1,3 +1,5 @@
+import { handoffSchema } from "../domain/memory.js";
+import { listingSchema } from "../domain/status-views.js";
 import { z } from "zod/v4";
 import {
   EXECUTION_APPROVAL_MODES,
@@ -10,6 +12,14 @@ import { CADRE_MCP_TOOLS, type CadreMcpToolName } from "./tool-names.js";
 type ObjectSchema = z.ZodObject<z.ZodRawShape>;
 
 const stringArray = z.array(z.string());
+const freshnessSchema = z.strictObject({ trackId: z.string(), path: z.string(), reason: z.string() });
+const learningInspectionSchema = z.strictObject({ path: z.string(), valid: z.boolean(), errors: stringArray, stale: z.array(freshnessSchema) });
+const contextPageSchema = z.strictObject({
+  snapshot: z.string(), complete: z.boolean(), contextReady: z.boolean(), nextCursor: z.string().nullable(), totalSources: z.number().int(),
+  errors: stringArray, staleMemory: z.array(freshnessSchema),
+  excerpts: z.array(z.strictObject({ path: z.string(), sha256: z.string(), reason: z.string(), section: z.string(),
+    format: z.enum(["source", "handoff"]), content: z.string(), contentHash: z.string(), reused: z.boolean(), offset: z.number().int(), endOffset: z.number().int(), sourceComplete: z.boolean() }))
+});
 const pathSchema = z.string().min(1);
 const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const commitSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
@@ -62,6 +72,7 @@ const templateDescriptorSchema = z.strictObject({
   uri: z.string().min(1),
   mimeType: z.string().min(1),
   sha256: digestSchema,
+  content: z.string().optional(),
   artifactPath: pathSchema.optional()
 });
 const templateSetSchema = z.strictObject({
@@ -114,6 +125,7 @@ const executionNodeSchema = z.strictObject({
   status: executionNodeStatusSchema,
   workerId: z.string().nullable(),
   workerHistory: stringArray.optional(),
+  handoff: handoffSchema.optional(),
   worktreePath: z.string().nullable(),
   branch: z.string().nullable(),
   workerCommit: commitSchema.nullable(),
@@ -210,6 +222,10 @@ const worktreeRuntimeSchema = z.strictObject({
   orphanedDirectories: stringArray
 });
 const projectStatusProjectSchema = z.strictObject({
+  detail: z.enum(["summary", "full"]),
+  projectState: jsonObjectSchema.nullable().optional(),
+  trackDetails: z.array(z.strictObject({ trackId: z.string(), state: jsonObjectSchema.nullable(), graph: planGraphSchema.nullable(),
+    execution: jsonObjectSchema.nullable(), executionError: z.string().nullable(), sources: z.array(artifactSchema) })).optional(),
   valid: z.boolean(),
   derivedStateCurrent: z.boolean(),
   project: z.strictObject({
@@ -225,6 +241,8 @@ const projectStatusProjectSchema = z.strictObject({
   targetTemplateSetVersion: z.string(),
   counts: z.record(z.string(), z.number().int()),
   tracks: z.array(projectTrackSummarySchema),
+  listing: listingSchema,
+  staleMemory: z.array(freshnessSchema),
   errors: stringArray,
   warnings: stringArray,
   stagedTrackCandidates: z.array(stagedCandidateSchema),
@@ -253,6 +271,9 @@ const canonicalTrackStatusShape = {
   targetTemplateSetVersion: z.string(),
   track: trackSummarySchema,
   state: jsonObjectSchema.nullable(),
+  detail: z.enum(["summary", "full"]),
+  sources: z.array(artifactSchema),
+  staleMemory: z.array(freshnessSchema),
   dependencies: z.array(trackSummarySchema),
   errors: stringArray,
   focusedErrors: stringArray,
@@ -264,6 +285,7 @@ const implementationStatusSchema = z.strictObject({
   ...canonicalTrackStatusShape,
   graph: z.strictObject({ valid: z.boolean(), graph: jsonObjectSchema, errors: stringArray }),
   execution: executionStatusSchema.nullable(),
+  executionJournal: jsonObjectSchema.nullable().optional(),
   worktrees: worktreeRuntimeSchema.shape.worktrees,
   orphanedDirectories: stringArray
 });
@@ -273,6 +295,7 @@ const validationSchema = z.strictObject({
   derivedStateCurrent: z.boolean(),
   project: jsonObjectSchema.nullable(),
   tracks: z.array(jsonObjectSchema),
+  staleMemory: z.array(freshnessSchema),
   errors: stringArray,
   warnings: stringArray
 });
@@ -283,6 +306,9 @@ const stagePrepareSchema = z.strictObject({
   removedFiles: stringArray
 });
 const candidateInspectSchema = z.strictObject({
+  learning: z.array(learningInspectionSchema),
+  memoryInputs: z.array(artifactSchema),
+  memoryPolicy: z.strictObject({ templateSetVersion: z.string().nullable(), historicalPaths: stringArray }),
   candidateId: z.string(),
   files: z.array(artifactSchema),
   plans: z.array(z.strictObject({
@@ -457,6 +483,7 @@ const workflowOutcomeSchema = z.strictObject({
 });
 
 export const CADRE_MCP_OUTPUT_SCHEMAS = {
+  [CADRE_MCP_TOOLS.contextRead]: compatibleOutputSchema(contextPageSchema),
   [CADRE_MCP_TOOLS.workflowElicit]: compatibleOutputSchema(workflowOutcomeSchema),
   [CADRE_MCP_TOOLS.templateGetMany]: compatibleOutputSchema(templateSetSchema),
   [CADRE_MCP_TOOLS.styleguideResolve]: compatibleOutputSchema(templateSetSchema),

@@ -1,4 +1,10 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { contextInputSchema, readContext } from "../domain/context.js";
+import { handoffSchema, requireFreshTrackMemory } from "../domain/memory.js";
+import { inspectStagedMemory } from "../domain/staged-memory.js";
+import { validateStagedState } from "../domain/staged-state.js";
+import { fullProjectTracks } from "../domain/status-views.js";
+import { lifecycleSchema, pageTracks, summarizeGraph, summarizeTrackState, trackSources } from "../domain/status-views.js";
+import { McpServer, type RegisteredTool, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -92,7 +98,7 @@ import {
 } from "../domain/staging.js";
 import { CADRE_MCP_TOOLS } from "./tool-names.js";
 import { CADRE_MCP_OUTPUT_SCHEMAS } from "./output-schemas.js";
-import { failure, result, templateResult } from "./results.js";
+import { clientResultFormat, createResultFormatter } from "./results.js";
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -171,6 +177,7 @@ function serializableValidation(validation: ReturnType<typeof validateProject>) 
     derivedStateCurrent: validation.warnings.length === 0,
     project: validation.project,
     tracks: validation.tracks,
+    staleMemory: validation.staleMemory,
     errors: validation.errors,
     warnings: validation.warnings
   };
@@ -299,6 +306,7 @@ const PLAN_VALIDATION_STATUSES = [
 const MAX_DRAFT_PLAN_CHARACTERS = 256 * 1024;
 
 export function createCadreServer(): McpServer {
+  const { result, failure, templateResult } = createResultFormatter(() => clientResultFormat(server.server.getClientVersion()));
   const proposalTokens = new ProposalTokenStore();
   function proposalResult<T extends object & { digest: string }>(kind: string, input: unknown, value: T) {
     return result({
@@ -341,13 +349,36 @@ export function createCadreServer(): McpServer {
         "Use workflow_elicit for concise approval or clarification forms when supported. When active task context reports a non-interactive approval policy such as Codex Full Access, skip the form and ask one short chat question.",
         "Use one adaptive command call when authorization already exists. A command returns approval_required with a proposal token only when a human decision is required; call that same command with the token only after approval.",
         "Cadre state is resumable: inspect project_status once at command entry and reserve state_validate for final mutation gates.",
-        "Every tool result ends with a compact JSON text block exactly mirroring structuredContent; use that block for all next-step fields when structured results are unavailable.",
+        "Read structuredContent when present; otherwise parse the final JSON text block for next-step fields. Template bodies are included once in the selected representation.",
         "The plan is the implementation source of truth. Cadre MCP exposes only constrained, digest-gated Git worktree operations and never approves its own changes."
       ].join(" ")
     }
   );
 
-  server.registerTool(CADRE_MCP_TOOLS.workflowElicit, {
+  const registeredTools: RegisteredTool[] = [];
+  const registerTool: typeof server.registerTool = (name, config, callback) => {
+    const tool = server.registerTool(name, config, (async (input: Record<string, unknown>, extra: Parameters<ToolCallback<z.ZodRawShape>>[1]) => {
+      const response = await (callback as ToolCallback<z.ZodRawShape>)(input, extra);
+      // Retain server-side variant validation even when no schema is advertised.
+      if (!response.isError) {
+        const payload = response.structuredContent
+          ?? JSON.parse((response.content.at(-1) as { text: string }).text);
+        CADRE_MCP_OUTPUT_SCHEMAS[name as keyof typeof CADRE_MCP_OUTPUT_SCHEMAS].parse(payload);
+      }
+      return response;
+    }) as typeof callback);
+    registeredTools.push(tool);
+    return tool;
+  };
+  server.server.oninitialized = () => {
+    if (clientResultFormat(server.server.getClientVersion()) === "text") {
+      // A published outputSchema requires structuredContent. Text clients get
+      // the same payload without advertising a structured-output contract.
+      for (const tool of registeredTools) delete tool.outputSchema;
+    }
+  };
+
+  registerTool(CADRE_MCP_TOOLS.workflowElicit, {
     title: "Collect Cadre workflow input",
     description: "Request a decision.",
     inputSchema: workflowElicitationInputSchema,
@@ -383,7 +414,7 @@ export function createCadreServer(): McpServer {
     );
   }
 
-  server.registerTool(CADRE_MCP_TOOLS.templateGetMany, {
+  registerTool(CADRE_MCP_TOOLS.templateGetMany, {
     title: "Get multiple Cadre templates",
     description: "Read templates.",
     inputSchema: {
@@ -400,7 +431,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.styleguideResolve, {
+  registerTool(CADRE_MCP_TOOLS.styleguideResolve, {
     title: "Resolve default styleguides",
     description: "Resolve styleguides.",
     inputSchema: { technologies: z.array(z.string()).min(1) },
@@ -420,22 +451,33 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.projectStatus, {
+  registerTool(CADRE_MCP_TOOLS.contextRead, {
+    title: "Read required track context", description: "Read scoped context; consume all pages before acting. Sources remain authoritative.",
+    inputSchema: contextInputSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.contextRead],
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  }, async (input) => { try { return result(readContext(input)); } catch (error) { return failure(error); } });
+
+  registerTool(CADRE_MCP_TOOLS.projectStatus, {
     title: "Read Cadre project status",
     description: "Read project status.",
     inputSchema: {
       projectRoot: z.string().min(1),
       view: z.enum(["project", "track", "implementation"]).optional().default("project"),
+      detail: z.enum(["summary", "full"]).default("summary"),
+      statuses: z.array(lifecycleSchema).optional(), limit: z.number().int().min(1).max(200).default(50),
+      cursor: z.string().max(1024).optional(),
       trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
       executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).optional()
     },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.projectStatus],
     annotations: { readOnlyHint: true, openWorldHint: false }
-  }, async ({ projectRoot, view, trackId, executionId }) => {
+  }, async ({ projectRoot, view, trackId, executionId, detail, statuses, limit, cursor }) => {
     try {
       const root = safeProjectRoot(projectRoot);
       const validation = validateProject(root);
       if (view === "project") {
+        const page = pageTracks(validation.tracks, { statuses, limit, cursor });
         let worktreeRuntime = null;
         try {
           worktreeRuntime = managedWorktreeStatus(root);
@@ -443,7 +485,9 @@ export function createCadreServer(): McpServer {
           worktreeRuntime = null;
         }
         return result(
-          { ...projectStatusView(validation), stagedTrackCandidates: stagedTrackCandidates(root, validation), worktreeRuntime },
+          { ...projectStatusView(validation), detail,
+            ...(detail === "full" ? { projectState: validation.project, trackDetails: fullProjectTracks(root, page.tracks, validation.states, validation.plans) } : {}),
+            tracks: page.tracks.map(projectTrackSummary), listing: page.listing, staleMemory: validation.staleMemory, stagedTrackCandidates: stagedTrackCandidates(root, validation), worktreeRuntime },
           `Cadre project ${validation.errors.length ? "has validation errors" : "is valid"}; ${validation.tracks.length} track${validation.tracks.length === 1 ? "" : "s"}.`
         );
       }
@@ -503,7 +547,9 @@ export function createCadreServer(): McpServer {
         targetRuntimeVersion: CADRE_RUNTIME_VERSION,
         targetTemplateSetVersion: TEMPLATE_SET_VERSION,
         track: trackSummary(track),
-        state: validation.states.get(trackId) ?? null,
+        state: detail === "full" ? validation.states.get(trackId) ?? null : summarizeTrackState(validation.states.get(trackId)),
+        detail, sources: trackSources(root, track.location),
+        staleMemory: validation.staleMemory.filter((finding) => [trackId, ...dependencies.map((dependency) => dependency.id)].includes(finding.trackId)),
         dependencies,
         errors: validation.errors,
         focusedErrors: focusedValidationErrors(validation, root, [trackId, ...dependencies.map((dependency) => dependency.id)]),
@@ -515,20 +561,20 @@ export function createCadreServer(): McpServer {
       }
       const planPath = join(root, ".cadre", track.location, "plan.md");
       const graphErrors: string[] = [];
-      const graph = parsePlan(planPath, graphErrors);
+      const graph = validation.plans.get(trackId) ?? parsePlan(planPath, graphErrors);
       validatePlanGraph(planPath, graph, track.status, graphErrors);
       const activeExecutionId = executionId
         ?? (typeof track.operation?.executionId === "string" ? track.operation.executionId : undefined)
         ?? track.lastExecution?.executionId;
-      const execution = activeExecutionId
-        ? compactExecutionStatus(executionStatus(root, trackId, activeExecutionId).journal)
-        : null;
+      const executionJournal = activeExecutionId ? executionStatus(root, trackId, activeExecutionId).journal : null;
+      const execution = executionJournal ? compactExecutionStatus(executionJournal) : null;
       const worktreeStatus = managedWorktreeStatus(root);
       const trackWorktreeSegment = `${join(".cadre", ".worktrees", trackId)}/`;
       return result({
         ...focused,
-        graph: { valid: graphErrors.length === 0, graph, errors: graphErrors },
+        graph: { valid: graphErrors.length === 0, graph: detail === "full" ? graph : summarizeGraph(graph), errors: graphErrors },
         execution,
+        ...(detail === "full" ? { executionJournal } : {}),
         worktrees: worktreeStatus.worktrees.filter((entry) => entry.path.includes(trackWorktreeSegment)),
         orphanedDirectories: worktreeStatus.orphanedDirectories.filter((path) => path.includes(trackWorktreeSegment))
       }, `${trackId}: implementation status is ${track.status}.`);
@@ -537,7 +583,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.stateValidate, {
+  registerTool(CADRE_MCP_TOOLS.stateValidate, {
     title: "Validate Cadre project state",
     description: "Validate state.",
     inputSchema: { projectRoot: z.string().min(1) },
@@ -551,7 +597,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.candidateStagePrepare, {
+  registerTool(CADRE_MCP_TOOLS.candidateStagePrepare, {
     title: "Prepare a Cadre candidate stage",
     description: "Prepare staging.",
     inputSchema: {
@@ -572,7 +618,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.candidateInspect, {
+  registerTool(CADRE_MCP_TOOLS.candidateInspect, {
     title: "Inspect staged artifact candidates",
     description: "Inspect staging.",
     inputSchema: z.strictObject({
@@ -590,6 +636,7 @@ export function createCadreServer(): McpServer {
     try {
       const root = safeProjectRoot(projectRoot);
       const candidates = readCandidateFiles(root, candidateId, files);
+      validateStagedState(root, candidateId, candidates);
       const manifest = candidateManifest(candidates);
       const actualPaths = listCandidatePaths(root, candidateId);
       const expectedPaths = manifest.map((file) => file.path);
@@ -635,14 +682,16 @@ export function createCadreServer(): McpServer {
         validatePlanGraph(candidate.path, graph, validation.targetStatus, errors);
         return { ...validation, valid: errors.length === 0, graph, errors };
       });
+      const memory = inspectStagedMemory(root, candidateId, candidates);
       return result({
         candidateId,
         files: manifest,
-        plans,
+        plans, learning: memory.learning, memoryInputs: memory.inputs, memoryPolicy: memory.policy,
         digest: sha256(JSON.stringify({
           projectRoot: root,
           candidateId,
           files: manifest,
+          memoryInputs: memory.inputs, memoryPolicy: memory.policy,
           planValidations: normalizedPlanValidations
         }))
       }, `Inspected ${manifest.length} staged Cadre artifact${manifest.length === 1 ? "" : "s"}.`);
@@ -651,7 +700,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.executionGraphValidate, {
+  registerTool(CADRE_MCP_TOOLS.executionGraphValidate, {
     title: "Validate a track execution graph",
     description: "Validate plan DAG.",
     inputSchema: { projectRoot: z.string().min(1), trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) },
@@ -679,7 +728,7 @@ export function createCadreServer(): McpServer {
     acceptedRisks: z.array(z.string().min(1)).optional()
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.reviewComplete, {
+  registerTool(CADRE_MCP_TOOLS.reviewComplete, {
     title: "Complete a clean review",
     description: "Complete review.",
     inputSchema: adaptiveInputSchema(reviewCompleteSchema),
@@ -742,7 +791,7 @@ export function createCadreServer(): McpServer {
     updates: z.array(archiveCandidateUpdateSchema)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.archiveBatchCandidate, {
+  registerTool(CADRE_MCP_TOOLS.archiveBatchCandidate, {
     title: "Govern a staged archive batch",
     description: "Apply archive batch.",
     inputSchema: adaptiveInputSchema(archiveBatchCandidateSchema),
@@ -802,7 +851,7 @@ export function createCadreServer(): McpServer {
     batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
+  registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
     title: "Record archive provenance",
     description: "Record archive.",
     inputSchema: archiveRecordSchema,
@@ -838,7 +887,7 @@ export function createCadreServer(): McpServer {
     maxWorkers: z.number().int().min(1).max(32).optional().default(3)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.executionStart, {
+  registerTool(CADRE_MCP_TOOLS.executionStart, {
     title: "Start implementation execution",
     description: "Start execution.",
     inputSchema: executionStartSchema,
@@ -847,6 +896,7 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
+      requireFreshTrackMemory(input.projectRoot, input.trackId);
       const derived = deriveExecutionStartInput(input as ExecutionStartRequest);
       const preview = previewExecutionStart(derived);
       const applied = applyExecutionStart(derived, preview.digest, preview);
@@ -892,6 +942,7 @@ export function createCadreServer(): McpServer {
     }),
     z.strictObject({
       event: z.literal("record_commit"),
+      handoff: handoffSchema.optional(),
       commit: commitSchema,
       verification: evidenceSchema,
       authorization: evidenceSchema
@@ -913,11 +964,11 @@ export function createCadreServer(): McpServer {
       verification: evidenceSchema.optional(),
       authorization: evidenceSchema.optional()
     }),
-    z.strictObject({ event: z.literal("block"), blocker: evidenceSchema }),
+    z.strictObject({ event: z.literal("block"), blocker: evidenceSchema, handoff: handoffSchema.optional() }),
     z.strictObject({ event: z.literal("resume") })
   ]);
 
-  server.registerTool(CADRE_MCP_TOOLS.executionCheckpoint, {
+  registerTool(CADRE_MCP_TOOLS.executionCheckpoint, {
     title: "Apply an execution checkpoint",
     description: "Checkpoint execution.",
     inputSchema: {
@@ -928,7 +979,13 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ scope, action }) => {
     try {
-      requireCurrentProject(scope.projectRoot);
+      const recoveryNode = ["complete", "record_integration"].includes(action.event)
+        ? executionStatus(scope.projectRoot, scope.trackId, scope.executionId).journal.nodes[scope.nodeId] : undefined;
+      const recovery = action.event === "block"
+        || action.event === "complete" && ["committed", "integrated"].includes(recoveryNode?.status ?? "")
+        || action.event === "record_integration" && recoveryNode?.status === "integrated";
+      if (!recovery) requireCurrentProject(scope.projectRoot);
+      if (["start", "resume", "record_commit", "record_verification"].includes(action.event)) requireFreshTrackMemory(scope.projectRoot, scope.trackId);
       const checkpointInput = { ...scope, ...action } as ExecutionCheckpointInput;
       const preview = previewExecutionCheckpoint(checkpointInput);
       const applied = applyExecutionCheckpoint(checkpointInput, preview.digest, preview);
@@ -944,7 +1001,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.executionStatus, {
+  registerTool(CADRE_MCP_TOOLS.executionStatus, {
     title: "Read implementation execution status",
     description: "Read execution.",
     inputSchema: {
@@ -970,7 +1027,7 @@ export function createCadreServer(): McpServer {
     executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.executionFinish, {
+  registerTool(CADRE_MCP_TOOLS.executionFinish, {
     title: "Complete implementation execution",
     description: "Finish execution.",
     inputSchema: executionFinishSchema,
@@ -979,6 +1036,7 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
+      requireFreshTrackMemory(input.projectRoot, input.trackId);
       const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
       const preview = previewExecutionFinish(derived);
       const applied = applyExecutionFinish(derived, preview.digest, preview);
@@ -1004,7 +1062,7 @@ export function createCadreServer(): McpServer {
     nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.worktreeCreate, {
+  registerTool(CADRE_MCP_TOOLS.worktreeCreate, {
     title: "Create a Cadre worker worktree",
     description: "Create worktree.",
     inputSchema: worktreeSchema,
@@ -1013,6 +1071,7 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       requireCurrentProject(input.projectRoot);
+      requireFreshTrackMemory(input.projectRoot, input.trackId);
       const preview = previewWorktreeCreate(input as WorktreeCreateInput);
       const applied = applyWorktreeCreate(input as WorktreeCreateInput, preview.digest, preview);
       const journal = executionStatus(input.projectRoot, input.trackId, input.executionId).journal;
@@ -1037,7 +1096,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.integration, {
+  registerTool(CADRE_MCP_TOOLS.integration, {
     title: "Integrate a worker branch",
     description: "Integrate branch.",
     inputSchema: adaptiveInputSchema(worktreeSchema),
@@ -1052,7 +1111,13 @@ export function createCadreServer(): McpServer {
       );
       if (adaptive.mode === "apply") {
         const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_integrate", adaptive.proposalToken);
+        const recoveryPreview = previewWorktreeIntegration(proposal.input);
+        if (recoveryPreview.alreadyIntegrated) {
+          const applied = applyWorktreeIntegration(proposal.input, recoveryPreview.digest, recoveryPreview);
+          return result({ commandStatus: "applied" as const, ...applied, ...recordIntegrationNow(proposal.input, recoveryPreview.targetHead) });
+        }
         requireCurrentProject(proposal.input.projectRoot);
+        requireFreshTrackMemory(proposal.input.projectRoot, proposal.input.trackId);
         const applied = applyWorktreeIntegration(proposal.input, proposal.digest);
         const checkpoint = applied.status === "integrated" && applied.mergeCommit
           ? recordIntegrationNow(proposal.input, applied.mergeCommit)
@@ -1060,8 +1125,13 @@ export function createCadreServer(): McpServer {
         return result({ commandStatus: "applied" as const, ...applied, ...checkpoint }, `Integrated ${proposal.input.nodeId}.`);
       }
       const integrationInput = adaptive.request as unknown as WorktreeIntegrationInput;
-      requireCurrentProject(integrationInput.projectRoot);
       const preview = previewWorktreeIntegration(integrationInput);
+      if (preview.alreadyIntegrated) {
+        const applied = applyWorktreeIntegration(integrationInput, preview.digest, preview);
+        return result({ commandStatus: "applied" as const, ...applied, ...recordIntegrationNow(integrationInput, preview.targetHead) });
+      }
+      requireCurrentProject(integrationInput.projectRoot);
+      requireFreshTrackMemory(integrationInput.projectRoot, integrationInput.trackId);
       if (integrationRequiresApproval(integrationInput)) {
         return proposalResult("worktree_integrate", integrationInput, preview);
       }
@@ -1079,7 +1149,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.worktreeCleanup, {
+  registerTool(CADRE_MCP_TOOLS.worktreeCleanup, {
     title: "Clean up an integrated worker",
     description: "Clean worktree.",
     inputSchema: worktreeSchema,
@@ -1088,7 +1158,7 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const cleanupInput = input as WorktreeIntegrationInput;
-      requireCurrentProject(cleanupInput.projectRoot);
+      // Verified cleanup remains available during an upgrade; its invariants are unchanged.
       const preview = previewWorktreeCleanup(cleanupInput);
       const applied = applyWorktreeCleanup(cleanupInput, preview.digest, preview);
       const journal = executionStatus(input.projectRoot, input.trackId, input.executionId).journal;
@@ -1117,7 +1187,7 @@ export function createCadreServer(): McpServer {
     styleguideIds: z.array(z.string().min(1)).min(1)
   };
 
-  server.registerTool(CADRE_MCP_TOOLS.projectInitCandidate, {
+  registerTool(CADRE_MCP_TOOLS.projectInitCandidate, {
     title: "Initialize from a staged Cadre candidate",
     description: "Initialize project.",
     inputSchema: adaptiveInputSchema(initCandidateSchema),
@@ -1161,7 +1231,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
+  registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
     title: "Record the project setup commit",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordCommit],
@@ -1176,7 +1246,7 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
+  registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
     title: "Record Git initialization checkpoint",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordGitInitialized],
@@ -1190,14 +1260,14 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  server.registerTool(CADRE_MCP_TOOLS.tracksRender, {
+  registerTool(CADRE_MCP_TOOLS.tracksRender, {
     title: "Render the derived tracks index",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.tracksRender],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
-      const input = { projectRoot: requireCurrentProject(projectRoot) };
+      const input = { projectRoot: safeProjectRoot(projectRoot) };
       const preview = renderTracksPreview(input.projectRoot);
       const path = writeTracks(input.projectRoot, preview.digest, preview);
       return result({

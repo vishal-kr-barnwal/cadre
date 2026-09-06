@@ -16,6 +16,14 @@ export interface CandidateFile {
   content: string;
 }
 
+/** One canonical overlay identity for state, plans and learning. */
+export function candidateArtifactPath(candidateId: string, path: string): string {
+  const normalized = normalizeCandidatePath(path);
+  const owner = candidateId.match(/^(?:track|revise|review|revert)-([a-z0-9-]+)$/)?.[1];
+  return owner && !/^(?:tracks|archive|patterns|refreshes)\//.test(normalized)
+    ? `tracks/${owner}/${normalized}` : normalized;
+}
+
 export function normalizeCandidateId(candidateId: string): string {
   if (!CANDIDATE_ID.test(candidateId)) {
     throw new Error("candidateId must contain lowercase letters, digits, and single hyphens");
@@ -28,6 +36,9 @@ export function normalizeCandidatePath(input: string): string {
     throw new Error(`Candidate artifact path must be a portable relative path: ${input}`);
   }
   const normalized = input.replace(/^\.\//, "");
+  if (normalized === ".cadre" || normalized.startsWith(".cadre/")) {
+    throw new Error(`Candidate paths are relative to the candidate stage, without a .cadre/ prefix: ${input}. Use state.json for the owned track or tracks/<id>/state.json for nested updates.`);
+  }
   if (!normalized || normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
     throw new Error(`Candidate artifact path is not canonical: ${input}`);
   }

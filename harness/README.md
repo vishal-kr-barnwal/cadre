@@ -1,5 +1,7 @@
 # Cadre
 
+The **3.7.0 candidate** adds durable task handoffs, freshness-checked learning, selective context with session reuse, and compact status. New projects use template set **v3**; existing projects remain readable and require one approved refresh before delivery. Published v1/v2 templates remain available.
+
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
 is beta. Cadre turns project context into resumable feature and bug tracks,
@@ -25,7 +27,7 @@ templates. A project keeps only approved, mutable delivery state under
 - Isolated phase and task workers in Cadre-managed Git worktrees, coordinated and integrated only by the main agent.
 - Feature and bug tracks with functional requirements, non-functional requirements, acceptance criteria, dependencies, phased tasks, and manual-verification gates.
 - Dependency enforcement before implementation and cascading-impact analysis after specification, workflow, stack, styleguide, or pattern changes.
-- Incremental learning in each track's `learning.md`; every phase reads the previous phase's learning before work starts.
+- Incremental learning in each track's `learning.md`; each phase reads its declared dependency learning and applicable constraints before work starts.
 - Review → remediation → implementation cycles until the human accepts a clean review.
 - Single-track or multi-track archival with consolidated pattern distillation and relevant reseeding of active tracks.
 - Git-aware task, phase, setup, review, revision, refresh, revert, and archive provenance using Conventional Commits.
@@ -313,12 +315,13 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v2/...` and 22 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v3/...` and 23 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
 | `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguide descriptors and hashes for an approved technology list. |
+| `context_read` | No | Read required track/node context with source hashes, freshness findings, and complete continuation pages. |
 | `project_status` | No | Return complete validation plus scoped canonical, staged, shadowed, or implementation status. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
 | `candidate_stage_prepare` | Atomic | Create/resume a stage and optionally prune files outside its exact `expectedFiles` set. |
@@ -341,11 +344,7 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 
 The four adaptive tools use a strict `request` union: prepare accepts only its
 declared fields, while apply accepts only an unchanged `proposalToken`. The MCP
-publishes an output schema for every tool and appends compact JSON as the final
-text block of every response; parsing it yields the exact `structuredContent`,
-including proposal tokens and structured errors. Template and candidate bodies
-remain outside mirrored descriptor data. The Node-18-compatible serialized
-tool catalog is kept below 64 KiB. The MCP
+selects one result representation: structured JSON and output schemas for recognized structured clients, compact text for other clients. Server-side output validation remains strict in both cases. Template bodies appear once. The Node-18-compatible serialized tool catalog is kept below 80 KiB, including the context and handoff contracts. The MCP
 server cannot approve its own proposals or run arbitrary shell commands. Its
 Git surface is limited to derived Cadre worktree creation, non-squash
 integration, status, and verified cleanup. It never force-deletes a branch,
@@ -405,3 +404,9 @@ pnpm --filter cadre-ai check
 pnpm --filter cadre-ai test
 pnpm --filter cadre-ai validate
 ```
+
+### Memory format upgrade
+
+The 3.7.0 candidate uses template set v3 and requires an approved refresh of older projects before delivery. It preserves v1/v2 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+
+Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.

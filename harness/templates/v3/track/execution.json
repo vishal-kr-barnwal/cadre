@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "executionId": "{{EXECUTION_ID}}",
+  "trackId": "{{TRACK_ID}}",
+  "status": "in_progress",
+  "checkpoint": "approved",
+  "requestedMode": "{{parallel|sequential}}",
+  "effectiveMode": "{{parallel|sequential}}",
+  "approvalMode": "{{governed|phase|autonomous}}",
+  "maxWorkers": 3,
+  "planRevision": 1,
+  "planCommit": "{{PLAN_COMMIT}}",
+  "graphDigest": "{{GRAPH_DIGEST}}",
+  "baseCommit": "{{BASE_COMMIT}}",
+  "startedAt": "{{APPROVED_AT}}",
+  "completedAt": null,
+  "headCommit": null,
+  "nodes": {}
+}

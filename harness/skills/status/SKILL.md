@@ -5,9 +5,11 @@ description: Validate and summarize current Cadre project, track, dependency, ph
 
 # Cadre Status
 
-Read `.cadre/workflow.md`, `project.json`, generated `tracks.md`, and track-local state/spec/plan files discovered under both `tracks/` and `archive/`. Read dependency state from each track's `state.json`, never from `tracks.md`. This command is read-only. If the Cadre MCP is unavailable, stop and report it; do not use a copied or reconstructed runtime.
+Read `.cadre/workflow.md` and use structured status for routine reporting. Do not open every active or archived spec/plan. Request `detail: "full"` or read a specific source only when diagnosing, quoting, or interpreting its contents. This command is read-only. If the Cadre MCP is unavailable, stop and report it; do not use a copied or reconstructed runtime.
 
 Call `project_status` once with the narrowest view and use its embedded structured validation; do not repeat `state_validate` at command entry. Treat `errors` as the complete explanation for `valid` and `focusedErrors` as the selected-track subset. Project view reports staged candidates; focused view distinguishes candidate-only, canonical-with-stage, malformed canonical, and unknown IDs. Never silently treat a stage as canonical or omit a shadowed candidate.
+
+For a whole-project report, consume `listing.nextCursor` until `listing.complete` is true. `statuses` filters rows only; counts and validation remain project-wide. Restart on `STATUS_SNAPSHOT_CHANGED`. Label a deliberately partial or filtered report. Request focused implementation views only for tracks whose live scheduler details are needed. Report `staleMemory` separately from structural errors.
 
 Present:
 

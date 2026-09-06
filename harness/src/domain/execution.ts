@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { handoffSchema, type Handoff } from "./memory.js";
+import { readInspectionJson } from "./inspection.js";
+import { inspectExecutionBindings } from "./execution-evidence.js";
+import { validatePlanProvenance } from "./plan-provenance.js";
+import { readSafeArtifact } from "./memory.js";
 import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
 import { parsePlan, parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
@@ -24,6 +29,7 @@ export interface ExecutionNode {
   status: ExecutionNodeStatus;
   workerId: string | null;
   workerHistory?: string[];
+  handoff?: Handoff;
   worktreePath: string | null;
   branch: string | null;
   workerCommit: string | null;
@@ -45,6 +51,7 @@ export interface ExecutionJournal {
   maxWorkers: number;
   planRevision: number;
   planCommit: string;
+  planSource?: string;
   graphDigest: string;
   baseCommit: string;
   startedAt: string;
@@ -304,6 +311,10 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   const graph = parsePlan(planPath, planErrors);
   validatePlanGraph(planPath, graph, state.status, planErrors);
   if (planErrors.length) throw new Error(planErrors.join("\n"));
+  const planSource = `.cadre/tracks/${input.trackId}/plan.md`;
+  const evidenceErrors = planReachability ? validatePlanProvenance(input.projectRoot, [{ owner: input.trackId, commit: state.commits!.plan!,
+    path: planSource, planRevision: graph.planRevision!, graphDigest: graph.digest }]) : [];
+  if (evidenceErrors.length) throw new Error(evidenceErrors.join("\n"));
   const planRevision = graph.planRevision!;
   const relativeJournal = journalRelative(input.executionId);
   const journalPath = join(trackRoot, relativeJournal);
@@ -319,6 +330,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     maxWorkers: input.maxWorkers,
     planRevision,
     planCommit: state.commits!.plan!,
+    ...(planReachability ? { planSource } : {}),
     graphDigest: graph.digest,
     baseCommit: input.baseCommit,
     startedAt: input.approvedAt,
@@ -394,8 +406,13 @@ function executionPaths(projectRoot: string, trackId: string, executionId: strin
 }
 
 export function readExecution(projectRoot: string, trackId: string, executionId: string): ExecutionJournal {
-  const { journalPath } = executionPaths(projectRoot, trackId, executionId);
-  return JSON.parse(readFileSync(journalPath, "utf8")) as ExecutionJournal;
+  assertIdentifiers(trackId, executionId);
+  const root = safeProjectRoot(projectRoot);
+  const locations = ["tracks", "archive"].filter((location) => existsSync(join(root, ".cadre", location, trackId, journalRelative(executionId))));
+  if (!locations.length) throw new CadreError("EXECUTION_NOT_FOUND", `No execution ${executionId} is recorded for track ${trackId}. Read project_status for the persisted executionId; pass that ID, not a journal filename.`);
+  if (locations.length !== 1) throw new CadreError("EXECUTION_AMBIGUOUS", `Execution ${executionId} exists in both active and archived locations; reconcile duplicate evidence before continuing.`);
+  const location = locations[0]!;
+  return JSON.parse(readSafeArtifact(root, `.cadre/${location}/${trackId}/${journalRelative(executionId)}`)) as ExecutionJournal;
 }
 
 const ALLOWED_TRANSITIONS: Record<ExecutionNodeStatus, ExecutionNodeStatus[]> = {
@@ -417,6 +434,7 @@ export interface ExecutionNodeUpdateInput {
   executionId: string;
   nodeId: string;
   status: ExecutionNodeStatus;
+  handoff?: Handoff;
   workerId?: string | null;
   worktreePath?: string | null;
   branch?: string | null;
@@ -483,6 +501,7 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     if (incompleteTasks.length) throw new Error(`${node.id} has incomplete tasks: ${incompleteTasks.join(", ")}`);
   }
   const updated: ExecutionNode = { ...node, status: input.status };
+  if (input.handoff !== undefined) updated.handoff = handoffSchema.parse(input.handoff);
   for (const field of [
     "workerId", "worktreePath", "branch", "workerCommit", "mergeCommit",
     "verification", "approval", "blocker"
@@ -654,6 +673,8 @@ export function executionSchedulerView(
 ): ExecutionSchedulerView {
   const status = deriveExecutionStatus(journal);
   const relevant = new Set([
+    ...status.readyPhases,
+    ...status.readyTasks,
     ...status.active,
     ...status.blocked,
     ...focusNodeIds
@@ -731,6 +752,7 @@ export interface ExecutionCheckpointInput {
   executionId: string;
   nodeId: string;
   event: ExecutionCheckpointEvent;
+  handoff?: Handoff;
   workerId?: string | null;
   worktreePath?: string | null;
   branch?: string | null;
@@ -842,6 +864,10 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
       break;
   }
   if (!updates.length) throw new Error(`${input.event} produced no change for ${node.id}`);
+  if (input.handoff !== undefined) {
+    if (!["record_commit", "block"].includes(input.event)) throw new Error("handoffs require record_commit or block");
+    updates.at(-1)!.handoff = handoffSchema.parse(input.handoff);
+  }
   return updates;
 }
 
@@ -1098,8 +1124,14 @@ export function validateExecutionJournal(
   trackRoot: string,
   state: { trackId: string; status: string; operation?: Record<string, unknown> | null; lastExecution?: Record<string, unknown> | null },
   graph: PlanGraph | null,
-  errors: string[]
+  errors: string[],
+  inspection?: { read: (path: string) => ExecutionJournal; exists: (path: string) => boolean; journalPaths: string[] }
 ): void {
+  const bindingErrors = inspectExecutionBindings(trackRoot, state,
+    inspection ? (path) => inspection.read(path) as unknown as Record<string, unknown> : undefined,
+    inspection?.journalPaths);
+  errors.push(...bindingErrors.map((error) => `${state.trackId}: ${error}`));
+  if (bindingErrors.some((error) => error.includes("unsafe execution"))) return;
   const operation = state.operation;
   const reference = operation?.action === "implement" ? operation : state.lastExecution;
   if (!reference) {
@@ -1116,13 +1148,13 @@ export function validateExecutionJournal(
     errors.push(`${state.trackId}: execution journal escapes track root`);
     return;
   }
-  if (!existsSync(path)) {
+  if (!(inspection?.exists ?? existsSync)(path)) {
     errors.push(`${state.trackId}: missing execution journal ${relative}`);
     return;
   }
   let journal: ExecutionJournal;
   try {
-    journal = JSON.parse(readFileSync(path, "utf8")) as ExecutionJournal;
+    journal = inspection ? inspection.read(path) : readInspectionJson<ExecutionJournal>(path);
   } catch (error) {
     errors.push(`${state.trackId}: invalid execution journal (${error instanceof Error ? error.message : String(error)})`);
     return;
@@ -1167,6 +1199,10 @@ export function validateExecutionJournal(
     Object.values(journal.nodes ?? {}).filter((node) => node.status === "completed").map((node) => node.id)
   );
   for (const [id, node] of Object.entries(journal.nodes ?? {})) {
+    if (node.handoff !== undefined) {
+      const parsed = handoffSchema.safeParse(node.handoff);
+      if (!parsed.success) errors.push(`${state.trackId}: invalid handoff for ${id}: ${parsed.error.message}`);
+    }
     if (id !== node.id) errors.push(`${state.trackId}: execution node key ${id} does not match node id`);
     if (!validStatuses.has(node.status)) errors.push(`${state.trackId}: execution node ${id} has invalid status ${node.status}`);
     if (node.workerHistory != null && (!Array.isArray(node.workerHistory)

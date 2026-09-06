@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### 3.7.0 candidate: memory, context, and recovery
+
+- Introduce immutable template v3, preserving v1/v2 and requiring approved refresh before legacy delivery.
+- Persist bounded task handoffs with existing execution checkpoints, without additional approval or mutation calls.
+- Validate seed metadata/revisions/pattern fingerprints; distinguish stale active guidance from historical evidence and bind staged memory inputs to approval digests.
+- Add read-only `context_read` with required-context selection, conservative fallback, source hashes, and drift-sensitive 16 KiB pagination.
+- Default status to summaries with explicit full detail and paged/filtered track listings; retain project-wide validation and counts.
+- Reuse reads/parses within validation and batch Git provenance resolution. Add correctness, compatibility, recovery, and byte-cost fixtures, including small-project overhead.
+- Expand the measured catalog ceiling to 80 KiB for the additional typed context and handoff interfaces; byte counts are not billed token counts.
+
+- Select one MCP result representation from the initialized client identity:
+  structured JSON for recognized Codex and Claude Code 2.0.21+ clients, compact
+  JSON text for Zed and unknown clients. Remove redundant summaries and JSON
+  copies, preserve template bodies once, and advertise output schemas only to
+  structured clients while retaining server-side validation for both formats.
+
+### Audit corrections
+
+- Recognize Markdown pattern links and fenced learning examples; expand ambiguous sections and reject incomplete memory metadata.
+- Add session-retained source inventories with explicit reuse and `contextReady`; changed sources must be reread.
+- Reject invalid staged revision paths, stale revert seeds, and disconnected execution bindings before approval. Verify recorded plan revision/graph at its commit.
+- Read archived execution journals, expose complete project/implementation detail, and preserve historical refresh/archive hashes against their artifact commits.
+- Separate clean-review proposal evidence from the digest-bound confirmation recorded by apply. Return visible JSON-text errors in every client.
+- Clarify direct-main checkpoints, revision provenance, refresh recovery ordering, fact-checked learning, and read-only revert preparation that preserves dirty work.
+- Require an exact original execution snapshot before staged reverts reset evidence; retain a durable digest-bound revert receipt, history entry, and reconciliation commit provenance.
+- Make receipt persistence and readback an explicit prerequisite to restoring implement ownership; record a null reconciliation SHA first so interruption cannot erase the revert approval while bookkeeping is unfinished.
+
+This remains unreleased until the local checks and native installation/activation gates pass. No publication or personal-client installation is part of release preparation.
+
 ## [3.6.0] - 2026-09-02
 
 ### MCP Result Contract

@@ -22,26 +22,24 @@ The server tells clients to:
 - inspect `project_status` once at command entry and reserve
   `state_validate` for final mutation gates;
 - treat the plan as the implementation source of truth;
-- parse the final text block as the exact JSON mirror of `structuredContent`
-  when the client does not expose structured results directly.
+- read `structuredContent` when present, otherwise parse the final JSON text block.
 
 Skills contain the full workflow procedure. The MCP does not route generic
 workflow packets.
 
 ## Template Resources
 
-Every file under active `templates/v2/` is registered as an immutable MCP resource:
+Every file under active `templates/v3/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v2/<logical-id>
+cadre://templates/v3/<logical-id>
 ```
 
-Published `templates/v1/` remains byte-stable for legacy reads. The internal
+Published `templates/v1/` and `templates/v2/` remain byte-stable for legacy reads. The internal
 catalog records provider paths, but public descriptors expose logical ID, URI,
-eventual artifact path, media type, and SHA-256 hash. Template content appears
-once, normally as an embedded resource and as a text block when
-`contentMode: "text"` is requested by the Zed Agent beta. It is never
-duplicated in structured content.
+eventual artifact path, media type, and SHA-256 hash. Template content appears once: inside structured template descriptors for
+recognized structured clients, or as embedded resources/text blocks for text
+clients. `contentMode` selects body encoding only for text clients.
 
 Skills normally request known bundles with `template_get_many`; catalog
 discovery is unnecessary when the logical IDs are already declared.
@@ -57,6 +55,7 @@ operation journal are promoted.
 |---|---|
 | Templates | `template_get_many`, `styleguide_resolve`, MCP resources |
 | Project health | `project_status`, `state_validate` |
+| Required context | `context_read` |
 | Candidate artifacts | `candidate_stage_prepare`, `candidate_inspect` |
 | Plan graph | `execution_graph_validate` |
 | Review governance | `review_complete` |
@@ -70,30 +69,35 @@ The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
 
 ## Result Shape
 
-Every one of the 22 tools publishes an output schema. Successful operational
-tools return concise text and typed structured content, then append compact
-JSON as the final text block. Parsing that block produces a value deeply equal
-to `structuredContent`; agents may therefore obtain every decision, recovery,
-and follow-up field from either representation.
+The server selects a single result representation from the MCP initialization
+client name and version. Recognized Codex names (`codex`, `codex_cli_rs`,
+`codex-mcp-client`, `codex_desktop`) and `claude-code` version 2.0.21+ receive
+`structuredContent` with `content: []`. Zed, older Claude Code, and unidentified
+clients receive compact JSON text without a structured duplicate. Unknown or
+proxy client identities deliberately use the text fallback; MCP has no standard
+client capability for structured result consumption.
 
-Template tools preserve one body per template—embedded resource or text—and
-append the same final JSON mirror containing content-free descriptors. Template
-and candidate bodies are never duplicated in the mirrored descriptor data.
+All 23 tools advertise output schemas to structured clients. Text clients do not
+receive output schemas, since MCP requires structured content when a schema is
+advertised. Server-side success-payload validation remains active in both modes.
+Errors retain `isError` and use one JSON text block for every client. This keeps native Claude diagnostics visible without duplicating the payload. No extra prose summary is emitted.
+
+Template bodies occur once: inside structured descriptors, or in the requested
+text/embedded-resource mode followed by content-free descriptor JSON for text
+clients. Candidate inspection still returns manifests rather than file bodies.
 Adaptive commands return `commandStatus: "applied"` when an existing
 authorization permits an atomic mutation. Only a real decision boundary
 returns `commandStatus: "approval_required"` plus a compact opaque
 `proposalToken`; after approval, the same command accepts that token. Tokens
 survive MCP restarts until expiry or bounded oldest-first eviction.
-Failures mark the MCP result as an
-error and end with mirrored `{ error: { code, message, details? } }` JSON.
-`project_status` also returns its human-readable summary as text.
+Failures contain `{ error: { code, message, details? } }` JSON. Successes have no extra prose summary.
 
 Inputs are validated with Zod before reaching domain behavior. Track, phase,
 task, execution, batch, commit, digest, and timestamp formats are constrained at
 the tool boundary. Output schemas use Node-18-compatible object roots that
 advertise the complete stable field superset; server-side refinements still
 require each emitted value to match one exact success or structured-error
-variant. The serialized catalog is capped at 64 KiB.
+variant. The serialized catalog is capped at 80 KiB.
 
 ## Adaptive Command Contract
 
@@ -156,3 +160,15 @@ resets history, force-deletes branches, or decides conflict resolution.
 3. Add positive, rejection, stale-digest, and recovery coverage.
 4. Update the owning skill contract and MCP reference.
 5. Run harness check, tests, validation, and package inspection.
+
+## Memory and inspection cost
+
+Template v3 adds a marked JSON memory block inside Pattern Seed: schema version 1, spec/plan revisions, and safe pattern paths with SHA-256 fingerprints. Structural corruption is invalid state; stale active guidance is reported separately and blocks dependent execution until reassessed. Terminal history remains evidence of its original context. Semantic reassessment stays within existing human-governed workflows.
+
+Task handoffs persist within execution checkpoints, with an 8 KiB cap and no new approval or mutation call. Context reads use dependency/section selection with conservative fallback, source hashes, and drift-sensitive pagination. Summaries never replace original scope, affected code inspection, or authorization.
+
+Validation reuses file contents and parsed journals within one read-only inspection. Parsed plans are reused by status, and Git reachability resolves recorded commits in a single `cat-file --batch-check` process after history enumeration. No cache survives the validation operation. Full mutation gates remain in force.
+
+`node --import tsx --test test/memory.test.ts` from `harness/` runs recovery, freshness, client-format, and context-size scenarios. Diagnostics report bytes, file reads/reuse, Git process counts, and timings. The 100-task fixture compares the former full-read behavior with scoped reads on the same evidence corpus; it is not a claim about billed tokens or live-agent task success. Small-project overhead is reported separately, and client schema catalog growth is measured rather than hidden.
+
+Retained-source inventories are session-scoped declarations, not a server cache. The runtime rechecks hashes on each read and explicitly marks reused sections; fresh sessions must reacquire their text. Markdown fences do not define learning sections, and ambiguous structure expands the read.

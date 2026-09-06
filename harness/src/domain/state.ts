@@ -1,5 +1,7 @@
+import { inspectOnce, readInspectionText as readFileSync, readInspectionJson, type InspectionMetrics } from "./inspection.js";
+import { inspectMemory, readSafeArtifact, type FreshnessFinding } from "./memory.js";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   CADRE_RUNTIME_VERSION,
@@ -10,7 +12,8 @@ import {
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
 import { buildTracks } from "./tracks-index.js";
-import { reachableGitCommits } from "./git.js";
+import { reachableGitCommits, readGitBlobs } from "./git.js";
+import { validatePlanProvenance, type PlanEvidence } from "./plan-provenance.js";
 export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
@@ -93,6 +96,8 @@ export interface ValidationResult {
   project: ProjectState | null;
   tracks: DiscoveredTrack[];
   states: Map<string, TrackState>;
+  plans: Map<string, PlanGraph>;
+  staleMemory: FreshnessFinding[];
   errors: string[];
   warnings: string[];
 }
@@ -133,7 +138,7 @@ export function cadreRoot(projectRoot: string): string {
 
 function readJson<T>(path: string, errors: string[]): T | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as T;
+    return readInspectionJson<T>(path);
   } catch (error) {
     errors.push(`${path}: invalid JSON (${error instanceof Error ? error.message : String(error)})`);
     return null;
@@ -174,6 +179,10 @@ function validateOperation(
         seen.add(artifact.path);
         if (!/^[0-9a-f]{64}$/.test(artifact.sha256 ?? "")) {
           errors.push(`${owner}: operation artifact hash for ${artifact.path} must be SHA-256`);
+        }
+        if (isAbsolute(artifact.path) || artifact.path.includes("\\") || artifact.path.split("/").some((part) => !part || part === "." || part === "..")) {
+          errors.push(`${owner}: unsafe approved artifact hash path: ${artifact.path}`);
+          continue;
         }
         if (artifactRoot && artifactProgress.includes(artifact.path) && /^[0-9a-f]{64}$/.test(artifact.sha256 ?? "")) {
           const target = resolve(artifactRoot, artifact.path);
@@ -286,6 +295,14 @@ function validateRevertOperation(state: TrackState, owner: string, errors: strin
   }
 }
 
+export function validateTrackOperation(state: TrackState, owner: string, errors: string[], artifactRoot?: string): void {
+  if (state.operation == null) return;
+  validateOperation(state.operation, owner, errors, artifactRoot, state.artifactProgress);
+  validateRevisionOperation(state, owner, errors);
+  validateImplementOperation(state, owner, errors);
+  validateRevertOperation(state, owner, errors);
+}
+
 function validateLearning(path: string, required: boolean, errors: string[]): void {
   if (!existsSync(path)) {
     if (required) errors.push(`${path}: missing learning file`);
@@ -314,6 +331,7 @@ function validateSpec(path: string, errors: string[]): void {
 }
 
 function validateProjectOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {
+  const historicalHashes: Array<{ owner: string; request: string; sha256: string }> = [];
   const operationsRoot = join(root, "operations");
   if (!existsSync(operationsRoot)) return;
   let activeProjectOperations = 0;
@@ -331,7 +349,15 @@ function validateProjectOperations(root: string, byId: Map<string, DiscoveredTra
       refreshCommit?: string | null;
     }>(join(operationsRoot, file), errors);
     if (!operation) continue;
-    validateOperation(operation, owner, errors, root);
+    // Completed operation hashes describe the approved artifact commit, not the
+    // current project files (which later approved refreshes may legitimately change).
+    validateOperation(operation, owner, errors, root, operation.status === "completed" ? [] : operation.artifactProgress);
+    const artifactCommit = operation.action === "refresh" ? operation.refreshCommit : operation.archiveCommit;
+    if (operation.status === "completed" && /^[0-9a-f]{7,40}$/.test(artifactCommit ?? "")) {
+      for (const artifact of operation.approvedArtifactHashes ?? []) {
+        historicalHashes.push({ owner, request: `${artifactCommit}:.cadre/${artifact.path}`, sha256: artifact.sha256 });
+      }
+    }
     if (!operation.status || !["in_progress", "completed"].includes(operation.status)) {
       errors.push(`${owner}: status must be in_progress or completed`);
     }
@@ -399,6 +425,17 @@ function validateProjectOperations(root: string, byId: Map<string, DiscoveredTra
     }
   }
   if (activeProjectOperations > 1) errors.push("operations: more than one project operation is in progress");
+  try {
+    const blobs = existsSync(join(root, "../.git"))
+      ? readGitBlobs(resolve(root, ".."), [...new Set(historicalHashes.map((entry) => entry.request))]) : null;
+    for (const entry of historicalHashes) {
+      if (!blobs) continue; // Non-Git diagnostic fixtures have no resolvable provenance.
+      const content = blobs.get(entry.request);
+      if (content == null || createHash("sha256").update(content).digest("hex") !== entry.sha256) {
+        errors.push(`${entry.owner}: committed approved artifact differs from its hash: ${entry.request}`);
+      }
+    }
+  } catch (error) { errors.push(`historical operation evidence: ${String(error)}`); }
 }
 
 function discoverTracks(root: string, errors: string[]): {
@@ -440,7 +477,13 @@ function discoverTracks(root: string, errors: string[]): {
   return { tracks, states, byId };
 }
 
-export function validateProject(projectRoot: string): ValidationResult {
+export function validateProject(projectRoot: string, metrics?: InspectionMetrics): ValidationResult {
+  return inspectOnce(() => validateProjectSnapshot(projectRoot), metrics);
+}
+
+function validateProjectSnapshot(projectRoot: string): ValidationResult {
+  const staleMemory: FreshnessFinding[] = [];
+  const plans = new Map<string, PlanGraph>();
   const root = cadreRoot(projectRoot);
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -460,13 +503,14 @@ export function validateProject(projectRoot: string): ValidationResult {
     }
   }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
-  if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), errors, warnings };
+  if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), plans, staleMemory, errors, warnings };
   if (!candidateStageIgnored) {
     if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) {
       warnings.push("PROJECT_REFRESH_REQUIRED: .cadre/.gitignore must ignore /stage/");
     } else errors.push(`${gitignorePath}: must ignore /stage/`);
   }
   const commitReferences: CommitReference[] = [];
+  const planEvidence: PlanEvidence[] = [];
   collectCommitReferences(project, "project.json", commitReferences);
   if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
   if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) {
@@ -520,12 +564,7 @@ export function validateProject(projectRoot: string): ValidationResult {
     if (!Number.isInteger(track.revision) || (track.revision ?? 0) < 1) errors.push(`${track.id}: revision must be a positive integer`);
     if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
     if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
-    if (state.operation != null) {
-      validateOperation(state.operation, `${track.id} state`, errors, trackRoot, state.artifactProgress);
-      validateRevisionOperation(state, `${track.id} state`, errors);
-      validateImplementOperation(state, `${track.id} state`, errors);
-      validateRevertOperation(state, `${track.id} state`, errors);
-    }
+    validateTrackOperation(state, `${track.id} state`, errors, trackRoot);
     if (Object.hasOwn(state, "activePhase") || Object.hasOwn(state, "activeTask")) {
       errors.push(`${track.id}: activePhase and activeTask are redundant; derive active nodes from the execution journal`);
     }
@@ -550,6 +589,7 @@ export function validateProject(projectRoot: string): ValidationResult {
     let planGraph: PlanGraph | null = null;
     if (existsSync(planPath)) {
       planGraph = readAndValidatePlan(planPath, track.status, errors);
+      plans.set(track.id, planGraph);
       for (const phase of planGraph.phases) {
         if (phase.completionCommit) commitReferences.push({
           owner: `${track.id}/plan.md:${phase.id}`,
@@ -569,6 +609,14 @@ export function validateProject(projectRoot: string): ValidationResult {
         && state?.operation?.action !== "plan",
       errors
     );
+    if (existsSync(learningPath)) {
+      const memory = inspectMemory({ trackId: track.id, path: learningPath, body: readFileSync(learningPath, "utf8"),
+        graph: planGraph, required: project.templateSetVersion === "v3" && !["drafting-spec", "drafting-plan"].includes(track.status),
+        historical: ["completed", "archived"].includes(track.status),
+        readPattern: (path) => readSafeArtifact(projectRoot, `.cadre/${path}`) });
+      errors.push(...memory.errors);
+      staleMemory.push(...memory.stale);
+    }
     validateExecutionJournal(trackRoot, state, planGraph, errors);
     const executionReference = state.operation?.action === "implement" ? state.operation : state.lastExecution;
     const journalRelative = typeof executionReference?.journal === "string" ? executionReference.journal : null;
@@ -576,7 +624,12 @@ export function validateProject(projectRoot: string): ValidationResult {
       const journalPath = join(trackRoot, journalRelative);
       if (existsSync(journalPath)) {
         try {
-          collectCommitReferences(JSON.parse(readFileSync(journalPath, "utf8")), `${track.id}/${journalRelative}`, commitReferences);
+          const journal = readInspectionJson<import("./execution.js").ExecutionJournal>(journalPath);
+          collectCommitReferences(journal, `${track.id}/${journalRelative}`, commitReferences);
+          if ((journal.planSource || state.operation?.action === "implement") && /^[0-9a-f]{7,40}$/.test(journal.planCommit)) {
+            planEvidence.push({ owner: track.id, commit: journal.planCommit,
+              path: journal.planSource ?? `.cadre/tracks/${track.id}/plan.md`, planRevision: journal.planRevision, graphDigest: journal.graphDigest });
+          }
         } catch {
           // The journal validator reports malformed JSON with richer context.
         }
@@ -638,6 +691,10 @@ export function validateProject(projectRoot: string): ValidationResult {
   for (const id of byId.keys()) visit(id, []);
   const reachability = reachableGitCommits(projectRoot, commitReferences.map((reference) => reference.commit));
   if (reachability) {
+    try { errors.push(...validatePlanProvenance(projectRoot, planEvidence)); }
+    catch (error) { errors.push(`plan provenance: ${String(error)}`); }
+  }
+  if (reachability) {
     for (const reference of commitReferences) {
       if (reachability.get(reference.commit) === false) {
         errors.push(`${reference.owner}: commit is not reachable: ${reference.commit}`);
@@ -648,7 +705,7 @@ export function validateProject(projectRoot: string): ValidationResult {
   if (existsSync(tracksPath) && readFileSync(tracksPath, "utf8") !== buildTracks(tracks)) {
     warnings.push("TRACKS_INDEX_STALE: tracks.md is stale; regenerate it after approved state changes");
   }
-  return { project, tracks, states, errors, warnings };
+  return { project, tracks, states, plans, staleMemory, errors, warnings };
 }
 
 function nextCommand(track: DiscoveredTrack): string {

@@ -105,6 +105,14 @@ until the approved index repair is applied.
 ## Versioning
 
 `runtimeVersion` identifies Cadre behavior. `templateSetVersion` identifies the
-immutable artifact format bundle. Cadre 3.4 creates v2 projects; published v1
-projects remain readable and upgrade only through approved refresh. Active
-resources use `cadre://templates/v2/...` URIs and include SHA-256 hashes.
+immutable artifact format bundle. Cadre 3.7 creates v3 projects; published v1/v2
+projects remain readable and require approved refresh before delivery. Active
+resources use `cadre://templates/v3/...` URIs and include SHA-256 hashes.
+
+## Candidate and historical evidence
+
+Candidate inspection validates state/plan/journal relationships in one canonical overlay, including journal-only updates. Paths cannot start with `.cadre/` or alias the same artifact. Stage the final reconciliation state; generate the temporary digest-bound operation journal after approval, before mutation, without unresolved placeholders in promoted bytes.
+
+New executions record `planSource`; its committed plan must match the approved revision and graph. Completed project-operation fingerprints address the original artifact commit, so later authorized edits do not corrupt old evidence. Clean-review cycles store proposal prose in `reviewEvidence` and the apply receipt in `approvalConfirmation` with the proposal digest, confirmation time, and explicit-apply method. Legacy approval prose remains readable as historical evidence.
+
+Reverts preserve the exact pre-revert journal in an approved `reverts/revert-<id>-execution-before.json` snapshot before resetting task evidence. Before restoring implement ownership, the workflow persists and rereads `reverts/revert-<id>.json` with the actual approval digest, original/reversal commits, and a null reconciliation commit. This receipt is included in the reconciliation commit; its actual SHA and one history entry are then recorded in a follow-up commit. A null reconciliation SHA means bookkeeping remains unfinished and recovery must inspect Git before creating another commit. Receipt/history recording is part of the original approved bookkeeping; status validity alone does not certify that every workflow consequence was recorded.

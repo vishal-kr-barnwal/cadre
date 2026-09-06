@@ -7,6 +7,18 @@ order: 230
 
 # Release Notes
 
+## 3.7.0 - Unreleased candidate
+
+Adds template v3, durable task handoffs, seed-freshness validation, scoped `context_read` with drift-sensitive pagination, compact status/detail views, and batched provenance validation. Existing projects require an approved refresh before further delivery; v1/v2 templates and historical evidence remain unchanged. The runtime remains self-contained, and approval, verification, and commit provenance requirements remain intact. This candidate has not been published.
+
+### Audit corrections
+
+The 3.7.0 candidate now checks linked pattern references and Markdown fences, rejects invalid staged revision paths and lost execution bindings, verifies plan provenance, and reads archived execution detail. Review preparation evidence is separate from the confirmation recorded by apply. Error messages remain visible in native Claude. Refresh bookkeeping retains history against committed artifacts, and revert preparation explicitly preserves the target worktree and index. Resetting execution evidence requires an exact original journal snapshot, and completion retains the approval digest and resulting commit provenance in a durable receipt/history entry.
+
+Context reuse requires retained source text in the current session; fresh sessions read it again. Aggregate byte measurements include requests and a cold resume. Small projects can have higher overhead. Bytes are not tokens, and structural checks do not prove the truth of agent-authored learning. Native installation and activation across all three clients remain release prerequisites.
+
+The native Zed audit also made the revert write order explicit: persist and reread the approval receipt before restoring implement ownership, initially leaving the reconciliation SHA null. Commit that receipt with reconciliation, then record the actual SHA and history entry. This keeps approval evidence available during interrupted bookkeeping.
+
 ## 3.6.0 - 2026-09-02
 
 ### Agent-visible MCP results

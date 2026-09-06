@@ -2,6 +2,7 @@ export const CADRE_MCP_TOOLS = {
   workflowElicit: "workflow_elicit",
   templateGetMany: "template_get_many",
   styleguideResolve: "styleguide_resolve",
+  contextRead: "context_read",
   projectStatus: "project_status",
   stateValidate: "state_validate",
   candidateStagePrepare: "candidate_stage_prepare",

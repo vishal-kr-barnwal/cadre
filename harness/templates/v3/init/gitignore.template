@@ -1,0 +1,8 @@
+# Cadre-managed temporary execution worktrees
+/.worktrees/
+
+# Disposable Wisp output
+/wisps/
+
+# Unapproved candidate artifacts
+/stage/

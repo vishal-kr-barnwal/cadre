@@ -1,5 +1,6 @@
+import { readInspectionText as readFileSync } from "./inspection.js";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 export interface PlanTask {
   checked: boolean;
