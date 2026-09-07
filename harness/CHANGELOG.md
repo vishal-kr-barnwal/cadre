@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [3.7.1] - 2026-09-07
+
+- Fix finding-bearing review and scope-revision candidate inspection using the old `ready_for_review` status and execution graph instead of the proposed lifecycle transition. Canonical state and completed journals remain unchanged before approval.
+- Preserve completed historical track-verification phases and their original dependencies when remediation adds a new final gate; replacement executions retain completed provenance.
+- Keep `context_read` available between approved remediation and replacement execution: label retained completed handoffs as historical evidence, with their recorded revision and graph, instead of treating them as a current-graph mismatch.
+- Reject staged state/plan target conflicts, terminal-track reopening, empty approved plans, and malformed staged plan syntax. Retain active execution and journal integrity checks.
+- Add temporary-project regressions for repeated review, replacement execution, nested revisions, and structured/text MCP responses for Codex, Claude, and Zed client identities.
+
 ## [3.7.0] - 2026-09-06
 
 ### Memory, context, and recovery

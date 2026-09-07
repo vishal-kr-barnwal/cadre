@@ -185,7 +185,10 @@ function findCycles(nodes: Array<{ id: string; dependencies: string[] }>, owner:
 }
 
 export function validatePlanGraph(path: string, graph: PlanGraph, status: string, errors: string[]): void {
-  if (!graph.phases.length) return;
+  if (!graph.phases.length) {
+    if (!["drafting-spec", "drafting-plan"].includes(status)) errors.push(`${path}: approved plan must contain phases`);
+    return;
+  }
   if (!Number.isInteger(graph.specRevision) || (graph.specRevision ?? 0) < 1) {
     errors.push(`${path}: Spec revision must be a positive integer`);
   }
@@ -197,8 +200,13 @@ export function validatePlanGraph(path: string, graph: PlanGraph, status: string
   graph.phases.forEach((phase, phaseIndex) => {
     if (phase.number !== phaseIndex + 1) errors.push(`${path}: phases must be sequential from 1`);
     if (!phase.tasks.length) errors.push(`${path}: ${phase.id} has no tasks`);
-    if (phase.trackVerification && phase !== finalPhase) {
-      errors.push(`${path}: Track-level User Manual Verification must be the final phase`);
+    if (phase.trackVerification) {
+      // A completed former final gate remains evidence after review/revision appends work.
+      // Its dependencies must stay limited to the phases it originally verified.
+      phase.dependencies = graph.phases.slice(0, phaseIndex).map((previous) => previous.id);
+      if (phase !== finalPhase && (!phase.completionCommit || !phase.tasks.length || phase.tasks.some((task) => !task.checked))) {
+        errors.push(`${path}: historical Track-level User Manual Verification must be completed with commit provenance`);
+      }
     }
     if (!phase.trackVerification && !phase.dependencyDeclared) {
       errors.push(`${path}:${phase.line}: ${phase.id} must declare phase dependencies`);
@@ -248,7 +256,6 @@ export function validatePlanGraph(path: string, graph: PlanGraph, status: string
     findCycles(phase.tasks, `${path}:${phase.id}`, errors);
   });
   if (!finalPhase.trackVerification) errors.push(`${path}: final phase must be Track-level User Manual Verification`);
-  finalPhase.dependencies = graph.phases.slice(0, -1).map((phase) => phase.id);
   findCycles(graph.phases, path, errors);
   if (["ready_for_review", "completed", "archived"].includes(status)) {
     const pending = graph.phases.flatMap((phase) => phase.tasks).filter((task) => !task.checked);

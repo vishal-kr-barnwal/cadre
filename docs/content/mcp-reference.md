@@ -71,6 +71,8 @@ Track status reports an exact staged `track-<id>` as a `staged_track_candidate` 
 
 Validates the approved canonical plan graph. Implementation preflight normally receives this through implementation status view.
 
+For finding-bearing reviews, use `candidate_inspect` with target status `in_progress`. It validates the proposed transition while the canonical track remains `ready_for_review`, checking the existing execution against its original plan. Scope revisions can similarly target `in_progress` or `planned`. Included staged states must agree with their declared plan target; active execution checks remain mandatory, and terminal tracks cannot be reopened. Completed former final verification phases remain historical evidence when new remediation and final verification phases are appended.
+
 ## review_complete
 
 Approval-aware clean-review completion. Prepare accepts `projectRoot`, `trackId`, `approval`, and optional `acceptedRisks`; the server derives `<execution.baseCommit>..<lastExecution.headCommit>`, so the first implementation commit is included. The legacy `approval` input stores proposal evidence as `reviewEvidence`; prepare does not record confirmed approval. Apply persists a separate `approvalConfirmation` receipt bound to the proposal digest. There is no caller-supplied range start. Apply returns a compact receipt, recognizes an already-written matching review cycle, and repairs a stale derived index without duplicating history.
@@ -143,4 +145,4 @@ Validates and atomically regenerates deterministic `tracks.md`.
 
 ## Upgrade and recovery
 
-Runtime 3.7.0 uses template set v3. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.
+Runtime 3.7.1 uses template set v3. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.

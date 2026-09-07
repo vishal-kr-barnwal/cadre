@@ -636,7 +636,6 @@ export function createCadreServer(): McpServer {
     try {
       const root = safeProjectRoot(projectRoot);
       const candidates = readCandidateFiles(root, candidateId, files);
-      validateStagedState(root, candidateId, candidates);
       const manifest = candidateManifest(candidates);
       const actualPaths = listCandidatePaths(root, candidateId);
       const expectedPaths = manifest.map((file) => file.path);
@@ -672,6 +671,7 @@ export function createCadreServer(): McpServer {
           `Candidate planValidations must exactly match staged plan files; expected ${candidatePlanPaths.join(", ") || "none"}, found ${validationPaths.join(", ") || "none"}`
         );
       }
+      validateStagedState(root, candidateId, candidates, normalizedPlanValidations);
       const plans = normalizedPlanValidations.map((validation) => {
         const candidate = candidates.find((file) => file.path === validation.path)!;
         if (Buffer.byteLength(candidate.content, "utf8") > MAX_DRAFT_PLAN_CHARACTERS) {

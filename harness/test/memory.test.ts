@@ -12,6 +12,7 @@ import { createCadreServer } from "../src/mcp/server.js";
 import { readContext } from "../src/domain/context.js";
 import { contentHash, handoffSchema, inspectMemory, MEMORY_START, MEMORY_END, requireFreshTrackMemory } from "../src/domain/memory.js";
 import { inspectStagedMemory } from "../src/domain/staged-memory.js";
+import { validateStagedState } from "../src/domain/staged-state.js";
 import { inspectOnce, inspectionMetrics } from "../src/domain/inspection.js";
 import { reachableGitCommits } from "../src/domain/git.js";
 import { parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
@@ -46,7 +47,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.7.0", templateSetVersion: "v3", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 1, runtimeVersion: "3.7.1", templateSetVersion: "v3", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");
@@ -84,6 +85,140 @@ async function connected(name: string) {
   const [ct, st] = InMemoryTransport.createLinkedPair(); await server.connect(st); await client.connect(ct);
   return { client, close: async () => { await client.close(); await server.close(); } };
 }
+
+function reviewFixture(t: Parameters<typeof fixture>[0]) {
+  const f = fixture(t), archived = archiveFixture(f, "reviewed");
+  const base = join(f.projectRoot, ".cadre/tracks/reviewed");
+  renameSync(archived, base);
+  const state = JSON.parse(readFileSync(join(base, "state.json"), "utf8"));
+  state.status = state.checkpoint = "ready_for_review"; state.reviewCycles = [];
+  write(join(base, "state.json"), JSON.stringify(state));
+  const journalPath = join(base, "executions/execution-reviewed-run.json"), journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.nodes["T1.1"].handoff = { decisions: ["Keep the transport boundary"], failedApproaches: [], openQuestions: [], nextAction: "Review integration behavior", sources: [] };
+  write(journalPath, JSON.stringify(journal));
+  const original = readFileSync(join(base, "plan.md"), "utf8");
+  const plan = original.replace("Plan revision: 1", "Plan revision: 2") + `
+## Phase 3: Remediate findings
+- Phase dependencies: P2
+- [ ] T3.1 Fix finding
+  - Task dependencies: none
+- [ ] T3.2 User Manual Verification
+- Phase completion commit: pending
+## Phase 4: Track-level User Manual Verification
+- [ ] T4.1 User Manual Verification
+- Phase completion commit: pending
+`;
+  git(f.projectRoot, "add", "."); git(f.projectRoot, "commit", "-m", "test: completed review baseline");
+  state.commits.plan = git(f.projectRoot, "rev-parse", "HEAD");
+  write(join(base, "state.json"), JSON.stringify(state));
+  writeTracks(f.projectRoot, renderTracksPreview(f.projectRoot).digest);
+  assert.deepEqual(validateProject(f.projectRoot).errors, []);
+  const files = [
+    { path: "plan.md", content: plan, absolutePath: "unused" },
+    { path: "learning.md", content: learning({ ...metadata, planRevision: 2 }), absolutePath: "unused" },
+    { path: "bugs/review-001.md", content: "# Finding\nRepair the reproduced defect.\n", absolutePath: "unused" }
+  ];
+  return { ...f, base, state, original, plan, files };
+}
+
+test("review remediation preserves historical gates and starts a replacement execution across MCP adapters", async (t) => {
+  const f = reviewFixture(t), candidateId = "review-reviewed";
+  const stateBefore = readFileSync(join(f.base, "state.json"), "utf8");
+  const journalPath = join(f.base, "executions/execution-reviewed-run.json");
+  const journalBefore = readFileSync(journalPath, "utf8");
+  let digest: string | undefined;
+  for (const name of ["codex_cli_rs", "claude-code", "zed"]) {
+    const c = await connected(name);
+    try {
+      payload(await c.client.callTool({ name: "candidate_stage_prepare", arguments: { projectRoot: f.projectRoot, candidateId, expectedFiles: f.files.map((file) => file.path) } }));
+      for (const file of f.files) write(join(f.projectRoot, ".cadre/stage", candidateId, file.path), file.content);
+      const args = { projectRoot: f.projectRoot, candidateId, files: f.files.map((file) => file.path), planValidations: [{ path: "plan.md", targetStatus: "in_progress" }] };
+      const result = payload(await c.client.callTool({ name: "candidate_inspect", arguments: args }));
+      assert.equal(result.plans[0].valid, true); assert.equal(result.learning[0].valid, true);
+      assert.deepEqual(result.plans[0].graph.phases[1].dependencies, ["P1"]);
+      assert.deepEqual(result.plans[0].graph.phases[3].dependencies, ["P1", "P2", "P3"]);
+      if (digest) assert.equal(result.digest, digest); else digest = result.digest;
+      assert.equal(payload(await c.client.callTool({ name: "candidate_inspect", arguments: args })).digest, digest);
+      const rejected = await c.client.callTool({ name: "candidate_inspect", arguments: { ...args, planValidations: [{ path: "plan.md", targetStatus: "ready_for_review" }] } });
+      assert.equal(rejected.isError, true); assert.match(JSON.stringify(rejected.content), /pending task/);
+    } finally { await c.close(); }
+  }
+  assert.equal(readFileSync(join(f.base, "state.json"), "utf8"), stateBefore);
+  assert.equal(readFileSync(journalPath, "utf8"), journalBefore);
+  // Simulate the already approved promotion in this disposable fixture, then exercise runtime start.
+  for (const file of f.files) write(join(f.base, file.path), file.content);
+  f.state.status = "in_progress"; f.state.checkpoint = "review-changes-requested"; f.state.revision = 2;
+  write(join(f.base, "state.json"), JSON.stringify(f.state));
+  git(f.projectRoot, "add", "."); git(f.projectRoot, "commit", "-m", "test: approved remediation");
+  f.state.commits.plan = git(f.projectRoot, "rev-parse", "HEAD");
+  write(join(f.base, "state.json"), JSON.stringify(f.state));
+  writeTracks(f.projectRoot, renderTracksPreview(f.projectRoot).digest);
+  assert.deepEqual(validateProject(f.projectRoot).errors, []);
+  const context = readContext({ projectRoot: f.projectRoot, trackId: "reviewed", nodeId: "T3.1", maxBytes: 65536 });
+  assert.equal(context.contextReady, true, JSON.stringify(context.errors));
+  const evidence = context.excerpts.find((entry) => entry.format === "handoff" && entry.section === "T1.1")!;
+  assert.equal(JSON.parse(evidence.content).historical, true);
+  assert.match(evidence.content, /Keep the transport boundary/);
+  const corrupted = JSON.parse(journalBefore); corrupted.graphDigest = "a".repeat(64);
+  write(journalPath, JSON.stringify(corrupted));
+  assert.equal(readContext({ projectRoot: f.projectRoot, trackId: "reviewed", nodeId: "T3.1", maxBytes: 65536 }).contextReady, false);
+  write(journalPath, journalBefore);
+  const start = { projectRoot: f.projectRoot, trackId: "reviewed", executionId: "remediation-2", requestedMode: "sequential" as const, effectiveMode: "sequential" as const, maxWorkers: 1, baseCommit: f.state.commits.plan, approvedAt: new Date().toISOString() };
+  applyExecutionStart(start, previewExecutionStart(start).digest);
+  const journal = readExecution(f.projectRoot, "reviewed", "remediation-2");
+  assert.equal(journal.nodes.P2!.status, "completed");
+  assert.equal(journal.nodes["T2.1"]!.status, "completed");
+  assert.equal(journal.nodes.P3!.status, "pending");
+  assert.equal(journal.nodes.P4!.status, "pending");
+  assert.deepEqual(journal.nodes.P2!.dependencies, ["P1"]);
+  assert.equal(readFileSync(journalPath, "utf8"), journalBefore);
+  assert.deepEqual(validateProject(f.projectRoot).errors, []);
+});
+
+test("staged lifecycle targets support revisions without bypassing state or execution validation", (t) => {
+  const f = reviewFixture(t), target = [{ path: "plan.md", targetStatus: "in_progress" }];
+  validateStagedState(f.projectRoot, "revise-reviewed", f.files, target);
+  validateStagedState(f.projectRoot, "revise-reviewed", f.files, [{ path: "plan.md", targetStatus: "planned" }]);
+  const nested = f.files.map((file) => ({ ...file, path: `tracks/reviewed/${file.path}` }));
+  validateStagedState(f.projectRoot, "revise-other", nested, [{ path: "tracks/reviewed/plan.md", targetStatus: "in_progress" }]);
+  assert.throws(() => validateStagedState(f.projectRoot, "review-reviewed", [...f.files,
+    { path: "state.json", content: JSON.stringify(f.state), absolutePath: "unused" }], target), /conflicts with plan targetStatus/);
+  assert.throws(() => validateStagedState(f.projectRoot, "review-reviewed", f.files.map((file) => file.path === "plan.md"
+    ? { ...file, content: "- [ ] T9.1 Stray task before a phase\n" + file.content } : file), target), /task appears before a phase/);
+  const journalPath = join(f.base, "executions/execution-reviewed-run.json"), journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  write(journalPath, JSON.stringify({ ...journal, graphDigest: "a".repeat(64) }));
+  assert.throws(() => validateStagedState(f.projectRoot, "review-reviewed", f.files, target), /does not match/);
+  write(journalPath, JSON.stringify(journal));
+  write(join(f.base, "state.json"), JSON.stringify({ ...f.state, status: "completed" }));
+  assert.throws(() => validateStagedState(f.projectRoot, "revise-reviewed", [...f.files,
+    { path: "state.json", content: JSON.stringify({ ...f.state, status: "in_progress" }), absolutePath: "unused" }], target), /terminal tracks cannot be reopened/);
+  const active = fixture(t);
+  const start = { projectRoot: active.projectRoot, trackId: "sample", executionId: "active-run", requestedMode: "sequential" as const, effectiveMode: "sequential" as const, maxWorkers: 1, baseCommit: active.head, approvedAt: new Date().toISOString() };
+  applyExecutionStart(start, previewExecutionStart(start).digest);
+  const changed = readFileSync(join(active.base, "plan.md"), "utf8").replace("Plan revision: 1", "Plan revision: 2");
+  assert.throws(() => validateStagedState(active.projectRoot, "revise-sample", [{ path: "plan.md", content: changed, absolutePath: "unused" }], [{ path: "plan.md", targetStatus: "planned" }]), /does not match/);
+  const drafting = fixture(t), proposedPlan = readFileSync(join(drafting.base, "plan.md"), "utf8");
+  write(join(drafting.base, "state.json"), JSON.stringify({ ...drafting.state, status: "drafting-plan", commits: { ...drafting.state.commits, plan: null } }));
+  rmSync(join(drafting.base, "plan.md"));
+  const draft = [{ path: "plan.md", content: proposedPlan, absolutePath: "unused" }];
+  validateStagedState(drafting.projectRoot, "track-sample", draft, [{ path: "plan.md", targetStatus: "planned" }]);
+  write(join(drafting.base, "plan.md"), "- [ ] T9.1 malformed unapproved draft\n");
+  validateStagedState(drafting.projectRoot, "track-sample", draft, [{ path: "plan.md", targetStatus: "planned" }]);
+});
+
+test("historical verification requires evidence, retains dependencies over repeated review, and rejects empty approved plans", (t) => {
+  const f = reviewFixture(t);
+  const inspect = (body: string) => { const errors: string[] = []; const graph = parsePlanContent(body, "plan.md", errors); validatePlanGraph("plan.md", graph, "in_progress", errors); return { graph, errors }; };
+  assert.match(inspect(f.plan.replace(/- \[x\] T2.1.*\n/, "- [ ] T2.1 User Manual Verification\n")).errors.join(";"), /historical.*completed/);
+  assert.match(inspect(f.plan.replace(`- Phase completion commit: \`${f.head}\`\n\n## Phase 3`, "- Phase completion commit: pending\n\n## Phase 3")).errors.join(";"), /historical.*provenance/);
+  const completed = f.plan.replace(/- \[ \] (T\d+\.\d+) (.+)/g, `- [x] $1 $2 <!-- commit: ${f.head} -->`).replaceAll("Phase completion commit: pending", `Phase completion commit: \`${f.head}\``);
+  const round3 = completed + f.plan.slice(f.plan.indexOf("## Phase 3:")).replaceAll("Phase 3:", "Phase 5:").replaceAll("Phase 4:", "Phase 6:").replaceAll("T3.", "T5.").replaceAll("T4.", "T6.").replace("dependencies: P2", "dependencies: P4");
+  const result = inspect(round3); assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.graph.phases[1]!.dependencies, ["P1"]);
+  assert.deepEqual(result.graph.phases[3]!.dependencies, ["P1", "P2", "P3"]);
+  assert.deepEqual(result.graph.phases[5]!.dependencies, ["P1", "P2", "P3", "P4", "P5"]);
+  assert.match(inspect("# Empty plan\n").errors.join(";"), /must contain phases/);
+});
 function payload(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, any> {
   assert.equal(result.isError, undefined, JSON.stringify(result));
   return (result.structuredContent ?? JSON.parse((result.content as Array<{ text: string }>).at(-1)!.text)) as Record<string, any>;

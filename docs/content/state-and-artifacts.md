@@ -80,6 +80,17 @@ archived tracks remain immutable; changed intent creates a successor.
 
 ## Operation Journals
 
+A plan may retain completed `Track-level User Manual Verification` phases from
+earlier review or revision cycles. Preserve their titles, task IDs, checks, and
+commit provenance. Each depends on the phases preceding it, as it did when it
+was the final gate. Appended work must end with a new final verification phase;
+an unfinished verification phase cannot become historical. Replacement
+executions carry completed nodes forward and preserve the earlier journal.
+Between approved promotion and replacement execution, `context_read` returns
+handoffs from the retained completed execution as historical evidence, labeled
+with their recorded revision and graph. Reassess them against the new plan;
+they do not describe its execution state or grant approval.
+
 Every multi-step mutation records intent and progress before changing the next
 artifact or Git state. Common fields include:
 

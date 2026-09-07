@@ -7,6 +7,46 @@ order: 230
 
 # Release Notes
 
+## 3.7.1 - 2026-09-07
+
+Fixes finding-bearing review and scope-revision proposals that failed validation
+before Cadre could return an approval digest. Inspection now validates the proposed
+lifecycle transition while preserving the canonical state and completed execution
+until approval. The digest requirement remains intact.
+
+Completed former final verification phases keep their titles, task IDs, commit
+provenance, and original dependencies when remediation adds a new final gate.
+Replacement executions carry that completed work forward. Between approved
+promotion and replacement execution, `context_read` labels retained handoffs as
+historical evidence instead of blocking on the older graph.
+
+Validation also rejects conflicting staged state/plan targets, empty approved
+plans, malformed staged plan syntax, and reopening terminal tracks. Active
+execution checks remain enforced, and missing or malformed unapproved drafts
+can still be repaired through staging.
+
+### Upgrade
+
+```bash
+npm install -g cadre-ai@3.7.1
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, run `/reload-plugins` in Claude Code, and open a new Zed
+Agent thread. Template set v3 and published v1/v2/v3 files are unchanged.
+Existing projects, including 3.7.0 projects, remain readable and use the approved
+`refresh` workflow to record runtime 3.7.1 before delivery. Re-inspect a blocked
+review proposal with the updated server, then obtain approval bound to its digest.
+
+### Validation
+
+The 82 automated tests cover staged review, nested revision, repeated verification
+cycles, replacement execution, historical context, and Codex/Claude structured
+responses plus Zed text responses. Release checks include type checking, package
+validation and dry-run inspection, documentation checks, and native installer,
+discovery, and MCP activation. Zed remains beta.
+
 ## 3.7.0 - 2026-09-06
 
 Adds template v3, durable task handoffs, seed-freshness validation, scoped `context_read` with drift-sensitive pagination, compact status/detail views, and batched provenance validation. Existing projects require an approved refresh before further delivery; v1/v2 templates and historical evidence remain unchanged. The runtime remains self-contained, and approval, verification, and commit provenance requirements remain intact.

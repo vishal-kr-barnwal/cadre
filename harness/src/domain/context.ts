@@ -9,6 +9,7 @@ import { safeProjectRoot } from "./paths.js";
 import type { ExecutionJournal } from "./execution.js";
 import { markdownHeadings } from "./markdown-context.js";
 import { inspectExecutionBindings } from "./execution-evidence.js";
+import type { TrackState } from "./state.js";
 
 const id = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const contextInputSchema = z.strictObject({
@@ -73,7 +74,7 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
   };
   const trackPath = locate(input.trackId);
   const stateBody = read(`${trackPath}/state.json`);
-  const state = JSON.parse(stateBody) as { status: string; dependencies?: string[]; operation?: { executionId?: string }; lastExecution?: { executionId?: string } };
+  const state = JSON.parse(stateBody) as TrackState;
   errors.push(...inspectExecutionBindings(join(root, trackPath), state));
   add(`${trackPath}/spec.md`, "complete approved scope and acceptance criteria");
   const planBody = add(`${trackPath}/plan.md`, "complete plan, including task descriptions and verification requirements");
@@ -125,20 +126,28 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
     try { add(`.cadre/${path}`, uncertainPatterns ? "full pattern fallback: applicability metadata unavailable" : "explicit seed reference"); }
     catch (error) { errors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`); }
   }
-  const executionId = input.executionId ?? state.operation?.executionId ?? state.lastExecution?.executionId;
+  const executionId = contextInputSchema.shape.executionId.parse(input.executionId ?? state.operation?.executionId ?? state.lastExecution?.executionId);
   if (executionId) {
-    contextInputSchema.shape.executionId.parse(executionId);
     const path = `${trackPath}/executions/execution-${executionId}.json`, body = read(path);
     const journal = JSON.parse(body) as ExecutionJournal;
     if (journal.trackId !== input.trackId || journal.executionId !== executionId) throw new Error("execution identity mismatch");
-    if (journal.graphDigest !== graph.digest) errors.push("execution handoffs belong to a different plan graph; reconcile before use");
+    const differentGraph = journal.graphDigest !== graph.digest || journal.planRevision !== graph.planRevision;
+    const historical = differentGraph && ["planned", "in_progress"].includes(state.status)
+      && journal.status === "completed" && state.lastExecution?.executionId === executionId
+      && state.lastExecution.journal === `executions/execution-${executionId}.json`
+      && state.lastExecution.graphDigest === journal.graphDigest && state.lastExecution.planRevision === journal.planRevision
+      && state.lastExecution.headCommit === journal.headCommit;
+    if (differentGraph && !historical) errors.push("execution handoffs belong to a different plan graph; reconcile before use");
     for (const node of Object.values(journal.nodes)) {
       if (phases && !phases.has(node.phaseId)) continue;
       const handoff = node.handoff === undefined ? null : handoffSchema.parse(node.handoff);
       if (!handoff && node.id !== input.nodeId) continue;
-      const content = JSON.stringify({ nodeId: node.id, handoff, note: handoff ? "Persisted evidence, not authorization" : "not recorded",
+      const content = JSON.stringify({ nodeId: node.id, handoff,
+        ...(historical ? { historical: true, planRevision: journal.planRevision, graphDigest: journal.graphDigest } : {}),
+        note: (historical ? "Historical execution; reassess for the current plan. " : "") + (handoff ? "Persisted evidence, not authorization" : "not recorded"),
         sources: handoff?.sources.map((reference) => ({ ...reference, freshness: sourceFreshness(root, reference, read) })) ?? [] });
-      sources.push({ path, sha256: contentHash(body), section: node.id, reason: "persisted handoff; reconcile journal/Git before resuming", format: "handoff", content });
+      sources.push({ path, sha256: contentHash(body), section: node.id,
+        reason: historical ? "historical handoff from retained completed execution; not current execution state" : "persisted handoff; reconcile journal/Git before resuming", format: "handoff", content });
     }
   }
   const identity = { projectRoot: root, trackId: input.trackId, executionId: executionId ?? null, nodeId: input.nodeId ?? null,
