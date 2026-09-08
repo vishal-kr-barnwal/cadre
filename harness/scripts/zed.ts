@@ -20,7 +20,7 @@ export const CADRE_WORKFLOWS = [
 
 const ZED_COMPATIBILITY = `## Zed compatibility
 
-Zed Agent consumes Cadre templates through tools rather than MCP resource discovery. Whenever this workflow calls \`template_get_many\`, include \`contentMode: "text"\`. Use known template IDs and descriptor tools such as \`styleguide_resolve\`; do not attempt to list or read MCP resources directly. When recommending another Cadre workflow, use its Zed command \`/cadre-<workflow>\` and never a dollar-prefixed or colon command.`;
+Zed Agent consumes Cadre templates through tools rather than MCP resource discovery. Whenever this workflow calls \`template_get_many\`, include \`contentMode: "text"\`. Use known template IDs and descriptor tools such as \`styleguide_resolve\`; do not attempt to list or read MCP resources directly. When recommending another Cadre workflow, use its Zed command \`/cadre-<workflow>\` and never a dollar-prefixed or colon command. For MCP \`nextStep\` with plugin \`cadre\`, resolve skill \`review\` or \`implement\` to the installed \`cadre-review\` or \`cadre-implement\` skill and execute it in the same task; printing a command is not invocation.`;
 
 function pathExists(path: string): boolean {
   try {

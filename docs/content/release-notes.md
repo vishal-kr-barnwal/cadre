@@ -7,6 +7,89 @@ order: 230
 
 # Release Notes
 
+## 3.8.0 - 2026-09-08
+
+Cadre 3.8.0 makes Track the default approval mode and introduces continuous
+Autonomous implementation, verification, cumulative review, and remediation.
+Parallel remains the scheduling default; Sequential is available with all four
+approval modes. Codex and Claude Code remain stable integrations; Zed remains beta.
+
+### Approval modes
+
+| Mode | Human approval boundaries |
+|---|---|
+| Governed | Task, integration, phase verification, track verification, and review |
+| Phase | Phase verification, track verification, and review |
+| **Track — default** | Track verification and review; the previous Autonomous behavior |
+| Autonomous | One final approval after implementation, verification, review, and remediation reach a clean result |
+
+Autonomous follows MCP `nextStep` into the installed implement/review skills.
+`ready_for_review` is an internal lifecycle handoff, not an intermediate pause.
+After a clean review, Cadre presents verification results, remediation history,
+and the exact completion proposal. The author can approve that proposal without
+running review again or report additional bugs to continue remediation. Only
+explicit approval marks the track completed. Changed product or verification
+inputs require renewed verification/review.
+
+### Durable review and recovery
+
+- Persist the original authorization, initial review baseline, loop checkpoint,
+  stable finding identities, and remediation attempt history.
+- Inspect and bind exact staged remediation artifacts to the persisted Autonomous
+  authorization; validate review journals before promotion and revalidate digests
+  during recovery.
+- Start a new execution for each remediation graph while preserving completed
+  phases, historical execution journals, findings, and commit provenance.
+- Review the complete accumulated implementation, including remediation changes.
+- Continue while making verifiable progress; pause after the same finding remains
+  unresolved through two remediation attempts, or for scope decisions, conflicting
+  requirements, unavailable verification, and external blockers.
+- Never treat persisted-mode authorization as the final human completion decision.
+
+### Fixes
+
+- Start the MCP server through symlinked payload paths, including macOS temporary
+  directory aliases.
+- Accept `project_status` with an omitted or null execution ID to select persisted
+  current state, while rejecting invented execution IDs.
+- Reject malformed review operation/artifact fields before promotion and document
+  the exact resumable journal contract.
+
+### Upgrade and migration
+
+```bash
+npm install -g cadre-ai@3.8.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, run `/reload-plugins` in Claude Code, and open a new Zed
+Agent thread. Existing projects remain readable and require an approved refresh
+to runtime 3.8.0 and template set v4 before further delivery. Published v1–v3
+templates remain unchanged, and v4 retains the v3 memory requirements.
+
+Legacy Autonomous does not authorize the expanded loop. At a quiescent worker
+boundary, use the existing staged, digest-bound refresh to explicitly choose
+Track (retain the previous gates) or Autonomous (authorize the continuous loop).
+Status exposes the migration requirement; the refresh journals the exact choice
+and preserves completed historical evidence. Existing Governed and Phase choices
+remain intact. Journals without an approval mode retain conservative handling.
+Installation itself neither migrates project authority nor approves completion.
+
+### Validation
+
+96 automated tests cover modes independently of scheduling, inheritance, legacy
+migration, repeated remediation, stalls and blockers, stale proposals, recovery,
+and v3/v4 compatibility. Release validation also includes strict TypeScript,
+package validation and dry-run inspection, documentation checks, and native
+Codex/Claude/Zed installation, skill discovery, and MCP activation.
+
+Disposable native projects verified clean-first-pass and remediation loops,
+Track-default gates, and withheld final approval. Native Zed also recovered a
+validated pre-promotion review journal in a fresh task without duplicate phases,
+findings, executions, or commits. Zed can still need recoverable tool-input and
+plan-format retries; validation rejects invalid inputs without weakening gates.
+
 ## 3.7.1 - 2026-09-07
 
 Fixes finding-bearing review and scope-revision proposals that failed validation

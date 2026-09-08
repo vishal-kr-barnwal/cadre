@@ -70,9 +70,11 @@ The execution journal persists requested/effective mode and its worker bound.
 Changing mode after execution starts requires a clean safe boundary and
 approval.
 
-Approval prompts are configured independently. `phase` is the default;
-explicitly request `governed` for task-by-task approval or `autonomous` to pause
-only at track-level verification:
+Approval prompts are configured independently. `track` is the default;
+it verifies phases automatically and pauses for track verification and ordinary
+review approval. Request `phase` for phase gates, `governed` for task gates, or
+`autonomous` for implementation, verification, review, and in-scope remediation
+until a clean review with one final completion approval:
 
 ```text
 $cadre:implement checkout governed
@@ -102,3 +104,8 @@ expect their changes to be approved, journaled, validated, and committed with
 matching provenance. Use the owning workflow instead of manually changing
 `project.json`, track `state.json`, execution journals, operation journals, or
 the generated `tracks.md` index.
+
+Legacy Autonomous executions require an explicit Track-or-Autonomous choice through
+an approved refresh before resuming. New policies persist `approvalPolicyVersion: 2`.
+Autonomous pauses when a finding survives two remediation attempts or needs a scope
+decision, required human input, or an external prerequisite.

@@ -1,4 +1,5 @@
 import { handoffSchema } from "../domain/memory.js";
+import { nextStepSchema } from "../domain/next-step.js";
 import { listingSchema } from "../domain/status-views.js";
 import { z } from "zod/v4";
 import {
@@ -173,6 +174,7 @@ const executionStatusSchema = z.strictObject({
     requestedMode: z.enum(["parallel", "sequential"]),
     effectiveMode: z.enum(["parallel", "sequential"]),
     approvalMode: z.enum(EXECUTION_APPROVAL_MODES),
+    approvalPolicyVersion: z.number().int().optional(),
     maxWorkers: z.number().int(),
     planRevision: z.number().int(),
     startedAt: z.string(),
@@ -263,6 +265,7 @@ const stagedTrackStatusSchema = z.strictObject({
   nextAction: z.string()
 });
 const canonicalTrackStatusShape = {
+  nextStep: nextStepSchema.nullable(),
   kind: z.literal("canonical_track"),
   valid: z.boolean(),
   derivedStateCurrent: z.boolean(),
@@ -391,6 +394,7 @@ const executionStartOutputSchema = z.strictObject({
     requestedMode: z.enum(["parallel", "sequential"]),
     effectiveMode: z.enum(["parallel", "sequential"]),
     approvalMode: z.enum(EXECUTION_APPROVAL_MODES),
+    approvalPolicyVersion: z.number().int().optional(),
     maxWorkers: z.number().int(),
     nodeCount: z.number().int()
   }),
@@ -404,6 +408,7 @@ const checkpointOutputSchema = z.strictObject({
   derivedStatus: schedulerSchema
 });
 const executionFinishOutputSchema = z.strictObject({
+  nextStep: nextStepSchema.nullable(),
   ...appliedReceiptBase,
   executionId: z.string(),
   status: z.literal("completed"),

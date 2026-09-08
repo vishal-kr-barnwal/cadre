@@ -1,6 +1,6 @@
 # Cadre
 
-**Cadre 3.7.1** fixes review and revision proposals that could not obtain an approval digest, preserves completed verification phases when remediation is appended, and keeps historical handoffs readable before replacement execution. It retains durable memory, selective context, and template set **v3**. Existing projects remain readable and use an approved refresh to record the new runtime before delivery; published templates remain unchanged.
+**Cadre 3.8.0** makes **Track** the default approval mode and adds continuous **Autonomous** implementation, verification, review, and remediation until clean. Parallel remains the scheduling default; Sequential works with every approval mode. The author makes the final completion decision. Template set **v4** preserves v1–v3; existing projects require an approved refresh, and legacy Autonomous executions require an explicit Track-or-Autonomous migration choice.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
@@ -21,7 +21,7 @@ templates. A project keeps only approved, mutable delivery state under
 ## Capabilities
 
 - Greenfield and brownfield project onboarding, with an explicit classification gate when the repository is ambiguous.
-- Human approval of every generated artifact and lifecycle state transition.
+- Human approval of scope and approval policy, with explicit author approval for clean track completion.
 - Resumable create, specification, planning, implementation, review, revision, refresh, revert, and archive flows.
 - Parallel-by-default implementation of dependency DAGs, with an explicit sequential mode.
 - Isolated phase and task workers in Cadre-managed Git worktrees, coordinated and integrated only by the main agent.
@@ -35,6 +35,29 @@ templates. A project keeps only approved, mutable delivery state under
 - Stateless exploration through `wisp`, without mutating Cadre lifecycle state.
 
 Default idiomatic styleguides are included for Go, Java, Kotlin, Maven, Gradle, HTML/CSS, JavaScript, TypeScript, React, Dart, Flutter, Swift, SwiftUI, and Python. During project creation, each applicable guide can be accepted, amended, or replaced.
+
+## Approval modes and continuous Autonomous delivery
+
+| Approval mode | Human decisions |
+|---|---|
+| Governed | Task, integration, phase/track verification, and review gates |
+| Phase | Phase verification, track verification, and review |
+| **Track — default** | Track verification and review |
+| Autonomous | One final completion decision after implementation, verification, review, and remediation are clean |
+
+Scheduling is separate: Parallel is the default; request Sequential with any
+approval mode. To use the continuous loop, ask your client’s `implement` skill
+to implement the track with Autonomous approval mode. Cadre invokes the review
+skill through MCP next steps and repeats fixes, verification, and cumulative
+review without another command.
+
+`ready_for_review` is an internal handoff during that loop, not an approval
+pause. Once clean, Cadre returns verification results, remediation history, and
+the exact completion proposal. Approve it to mark the track completed without
+running review again, or report additional bugs to continue remediation. Changed
+implementation or verification inputs require renewed verification/review.
+Autonomous pauses for scope decisions, unavailable checks, external blockers,
+or the same unresolved finding after two remediation attempts.
 
 ## Requirements
 
@@ -315,7 +338,7 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v3/...` and 23 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v4/...` and 23 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
@@ -367,7 +390,7 @@ Phase and task worktrees are siblings because Git worktrees cannot be physically
 
 Task branches in one dependency wave start from the same clean phase HEAD and merge into the registered phase integration branch one at a time. The next wave starts from the updated phase HEAD. Direct canonical integration is reserved for an explicitly main-coordinated single-task phase; multi-task and phase-verified delivery uses a phase integration branch. Phase branches merge into the canonical branch. Cleanup prunes the worktree and branch only after ancestry proves the integration is present in the derived parent.
 
-Codex uses implementation subagents when parallel nodes are available. Claude Code uses the packaged `cadre-phase-worker` and `cadre-task-worker` definitions. Both follow the same contract: workers stay in their assigned worktree, read before editing, modify product files only, run focused verification, never spawn nested workers, and stop uncommitted until the main agent presents their work and obtains human approval. A phase worker holds only a temporary execution lease: it checkpoints one regular task at a time, creates a distinct approved commit for each task, and must report a clean committed HEAD and remain inactive before task-worker fan-out. The journal retains worker history across later reassignment. Manual-verification evidence does not require an empty commit. Claude agent teams are intentionally not required.
+Codex uses implementation subagents when parallel nodes are available. Claude Code uses the packaged `cadre-phase-worker` and `cadre-task-worker` definitions. Both follow the same contract: workers stay in their assigned worktree, read before editing, modify product files only, run focused verification, never spawn nested workers, and stop uncommitted until the main agent reviews their work and provides the human approval or persisted-mode authorization required by the execution policy. A phase worker holds only a temporary execution lease: it checkpoints one regular task at a time, creates a distinct approved commit for each task, and must report a clean committed HEAD and remain inactive before task-worker fan-out. The journal retains worker history across later reassignment. Manual-verification evidence does not require an empty commit. Claude agent teams are intentionally not required.
 
 ## Resumability and safety
 
@@ -380,7 +403,7 @@ Multi-step state changes—including revisions, refreshes, reverts, archive batc
 - committed or integrated DAG nodes are not repeated, and newly ready nodes are scheduled immediately after durable transitions;
 - any mismatch stops and is presented to the human rather than guessed, discarded, reset, or restarted.
 
-Task conflicts are resolved and reverified in the owning phase worktree. Phase conflicts are resolved and reverified in the canonical worktree. The main agent presents every resolution before recording its merge commit. A revision or refresh that changes execution-governing context first quiesces active workers and reconciles their work; a changed plan graph creates a new execution identity rather than rewriting the old journal.
+Task conflicts are resolved and reverified in the owning phase worktree. Phase conflicts are resolved and reverified in the canonical worktree. The main agent reviews each resolution and records its verification and mode-appropriate authorization before its merge commit. A revision or refresh that changes execution-governing context first quiesces active workers and reconciles their work; a changed plan graph creates a new execution identity rather than rewriting the old journal.
 
 Archive remains deliberately small: it accepts only tracks that centralized state validation already proves are `completed` with a clean review bound to the current execution, plan revision, graph digest, and reviewed head. It does not rerun implementation barriers or review logic.
 
@@ -407,6 +430,18 @@ pnpm --filter cadre-ai validate
 
 ### Memory format upgrade
 
-Cadre 3.7.1 uses template set v3 and requires an approved refresh of older projects before delivery. It preserves v1/v2 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+The current source uses template set v4 and requires an approved refresh of older projects before delivery. It preserves v1/v2/v3 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
 
 Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.
+
+
+### Implementation approval modes
+
+Track is the default: phase checks run automatically, followed by track verification
+and ordinary review approval. Phase retains phase verification gates; Governed retains
+task and integration gates. Explicit Autonomous implements, verifies, reviews, and
+remediates in-scope findings until clean, then asks for one final completion approval.
+Parallel scheduling remains the default and Sequential is available independently.
+Legacy Autonomous requires an explicit Track-or-Autonomous choice through approved
+refresh. Policy v2 persists loop authority, cumulative review baseline, and stable
+findings; a finding unresolved after two remediation attempts pauses for guidance.

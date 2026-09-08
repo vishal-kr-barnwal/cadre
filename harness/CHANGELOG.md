@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## [3.8.0] - 2026-09-08
+
+- Make Track the default approval mode, retaining Governed and Phase with independent Parallel/Sequential scheduling.
+- Add continuous policy-v2 Autonomous implementation, verification, cumulative review, and in-scope remediation until clean; return a summary and exact completion proposal for the author's explicit decision.
+- Route continuation through MCP `nextStep` and installed implement/review skills across Codex, Claude, and Zed. `ready_for_review` is an internal handoff; approving unchanged clean evidence does not require another review command.
+- Persist originating authority, cumulative baseline, stable finding identities, and loop checkpoints. Preserve completed phases and execution history across new remediation graphs and interruption recovery.
+- Pause for material scope decisions, unavailable verification, external blockers, or the same finding after two failed remediation attempts. Revalidate staged digests and changed completion evidence.
+- Require explicit Track-or-Autonomous migration for legacy Autonomous executions through the existing quiescent, journaled, digest-bound refresh. Preserve Governed/Phase choices and conservative missing-mode handling.
+- Introduce immutable template v4 while preserving v1–v3 and v3 memory requirements.
+- Fix MCP startup through symlinked payload paths; accept null current-execution selection in status; reject malformed review journals before promotion.
+- Clarify that authors can approve a clean completion proposal or report additional bugs; persisted Autonomous authority never substitutes for the final decision.
+
+Validated with 96 automated tests, harness types, package validation and dry-run inspection, docs checks, and native Codex/Claude/Zed tests. Native Zed fresh-task recovery preserved exact staged authorization and history; tool-input retries remain a non-blocking beta reliability limitation.
 
 ## [3.7.1] - 2026-09-07
 

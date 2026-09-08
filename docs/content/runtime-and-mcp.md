@@ -29,10 +29,10 @@ workflow packets.
 
 ## Template Resources
 
-Every file under active `templates/v3/` is registered as an immutable MCP resource:
+Every file under active `templates/v4/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v3/<logical-id>
+cadre://templates/v4/<logical-id>
 ```
 
 Published `templates/v1/` and `templates/v2/` remain byte-stable for legacy reads. The internal

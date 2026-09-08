@@ -41,6 +41,26 @@ export function isGitAncestor(projectRoot: string, ancestor: string, descendant 
   }).status === 0;
 }
 
+/** Completion may follow bookkeeping commits, but never unreviewed product edits. */
+export function requireReviewedProductUnchanged(projectRoot: string, reviewedHead: string, trackId: string): void {
+  const root = gitRoot(projectRoot);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trackId)) throw new Error("invalid trackId");
+  const scopes = [[".", ":(exclude).cadre/**"],
+    [".cadre/workflow.md", ".cadre/guidelines.md", ".cadre/tech-stack.md", ".cadre/product.md",
+      ".cadre/styleguides", ".cadre/patterns", `.cadre/tracks/${trackId}/spec.md`]];
+  for (const scope of scopes) for (const args of [
+    ["diff", "--name-only", "-z", reviewedHead, "HEAD", "--", ...scope],
+    ["diff", "--name-only", "-z", reviewedHead, "--", ...scope],
+    ["diff", "--cached", "--name-only", "-z", reviewedHead, "--", ...scope],
+    ["ls-files", "--others", "--exclude-standard", "-z", "--", ...scope]
+  ]) {
+    countGitProcess();
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    if (result.status !== 0) throw new Error("Cannot verify reviewed product content");
+    if (result.stdout) throw new Error("Product content changed or verification policy changed after reviewed HEAD; verify and review the current product before completion");
+  }
+}
+
 export function reachableGitCommits(projectRoot: string, revisions: Iterable<string>): Map<string, boolean> | null {
   let root: string;
   try {

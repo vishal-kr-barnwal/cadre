@@ -118,7 +118,7 @@ until the approved index repair is applied.
 `runtimeVersion` identifies Cadre behavior. `templateSetVersion` identifies the
 immutable artifact format bundle. Cadre 3.7 creates v3 projects; published v1/v2
 projects remain readable and require approved refresh before delivery. Active
-resources use `cadre://templates/v3/...` URIs and include SHA-256 hashes.
+resources use `cadre://templates/v4/...` URIs and include SHA-256 hashes.
 
 ## Candidate and historical evidence
 

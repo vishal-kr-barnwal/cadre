@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync,
-  unlinkSync, writeFileSync
+  rmSync, unlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -52,9 +52,9 @@ import {
 } from "../src/domain/init.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const templateRoot = join(root, "templates", "v3", "init");
+const templateRoot = join(root, "templates", "v4", "init");
 const legacyTemplateRoot = join(root, "templates", "v1", "init");
-const providerRoot = join(root, "templates", "v3");
+const providerRoot = join(root, "templates", "v4");
 
 test("published v1 templates remain byte-for-byte immutable", () => {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
@@ -97,8 +97,8 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.7.1";
-  project.templateSetVersion = "v3";
+  project.runtimeVersion = "3.8.0";
+  project.templateSetVersion = "v4";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
   project.setup = {
@@ -426,8 +426,8 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.7.1",
-    templateSetVersion: "v3"
+    runtimeVersion: "3.8.0",
+    templateSetVersion: "v4"
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
@@ -665,15 +665,15 @@ test("execution journal gates tasks behind their running phase and validates per
     approvedAt: "2026-07-28T01:00:00.000Z"
   };
   const preview = previewExecutionStart(input);
-  assert.equal(preview.journal.approvalMode, "phase");
-  assert.equal((preview.state.operation as { approvalMode?: string }).approvalMode, "phase");
+  assert.equal(preview.journal.approvalMode, "track");
+  assert.equal((preview.state.operation as { approvalMode?: string }).approvalMode, "track");
   const governedPreview = previewExecutionStart({ ...input, approvalMode: "governed" });
   assert.equal(governedPreview.journal.approvalMode, "governed");
   assert.notEqual(governedPreview.digest, preview.digest);
   assert.throws(() => previewExecutionStart({
     ...input,
     approvalMode: "invalid" as never
-  }), /approvalMode must be governed, phase, or autonomous/);
+  }), /approvalMode must be governed, phase, track, or autonomous/);
   const started = applyExecutionStart(input, preview.digest);
   assert.deepEqual(started.derivedStatus.readyPhases, ["P1"]);
   const initialStatus = executionStatus(projectRoot, input.trackId, input.executionId);
@@ -1661,11 +1661,11 @@ test("installer prepares a shared three-client payload", async () => {
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.7.1+codex.test-build");
-  assert.equal(claudeManifest.version, "3.7.1+claude.test-build");
+  assert.equal(codexManifest.version, "3.8.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.8.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v3", "track", "spec.md")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v3", "init", "gitignore.template")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v4", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v4", "init", "gitignore.template")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -1699,7 +1699,7 @@ test("installer prepares a shared three-client payload", async () => {
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const resources = await client.listResources();
     assert.deepEqual(
-      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v3/", "")),
+      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v4/", "")),
       [...TEMPLATE_IDS]
     );
   } finally {
@@ -1720,9 +1720,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.7.1+codex.test-build");
+  assert.equal(previousManifest.version, "3.8.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.7.1+codex.second-build");
+  assert.equal(updatedManifest.version, "3.8.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1887,11 +1887,12 @@ test("workflow elicitation builds bounded approval and clarification forms", () 
         label: "Approval mode",
         required: true,
         options: [
+          { value: "track", label: "Track" },
           { value: "phase", label: "Phase" },
           { value: "governed", label: "Governed" },
           { value: "autonomous", label: "Autonomous" }
         ],
-        default: "phase"
+        default: "track"
       },
       {
         id: "parallel",
@@ -1932,6 +1933,26 @@ test("workflow elicitation builds bounded approval and clarification forms", () 
       answers: { decision: "approve", notes: "Looks good" }
     }
   );
+});
+
+test("compiled MCP starts through a symlinked payload path for native clients", async (t) => {
+  const temporary = mkdtempSync(join(tmpdir(), "cadre-linked-mcp-"));
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  const linked = join(temporary, "payload");
+  symlinkSync(root, linked, "dir");
+  for (const name of ["codex_cli_rs", "claude-code", "zed"]) {
+    const client = new Client({ name, version: "2.1.0" });
+    const transport = new StdioClientTransport({ command: process.execPath, args: [join(linked, "dist/cadre-mcp.mjs")] });
+    try {
+      await client.connect(transport, { timeout: 2000 });
+      const tools = await client.listTools();
+      assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
+      const result = await client.callTool({ name: "template_get_many", arguments: { ids: ["project/workflow"], contentMode: "text" } });
+      assert.equal(result.isError, undefined, JSON.stringify(result));
+    } finally {
+      await client.close();
+    }
+  }
 });
 
 test("compiled MCP exposes versioned templates and initializes projects without copied runtime", async () => {
@@ -2025,22 +2046,22 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     );
     agentVisibleResult(fallback);
     const resources = await client.listResources();
-    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v3/track/spec"));
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v4/track/spec"));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v3/track/revise-operation"
+      (resource) => resource.uri === "cadre://templates/v4/track/revise-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v3/project/refresh-operation"
+      (resource) => resource.uri === "cadre://templates/v4/project/refresh-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v3/project/gitignore"
+      (resource) => resource.uri === "cadre://templates/v4/project/gitignore"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v3/track/revert-operation"
+      (resource) => resource.uri === "cadre://templates/v4/track/revert-operation"
     ));
 
-    const workflow = await client.readResource({ uri: "cadre://templates/v3/project/workflow" });
-    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v3/project/workflow");
+    const workflow = await client.readResource({ uri: "cadre://templates/v4/project/workflow" });
+    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v4/project/workflow");
     assert.match((workflow.contents[0] as { text?: string }).text ?? "", /^# Cadre Workflow/);
 
     const bundle = await client.callTool({
@@ -2484,7 +2505,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.7.1"
+      "3.8.0"
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "execution_start",
@@ -2494,7 +2515,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.7.1");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.8.0");
     assert.equal(
       (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
@@ -2505,8 +2526,8 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(legacyStage.isError, undefined);
     agentVisibleResult(legacyStage);
-    legacyProject.runtimeVersion = "3.7.1";
-    legacyProject.templateSetVersion = "v3";
+    legacyProject.runtimeVersion = "3.8.0";
+    legacyProject.templateSetVersion = "v4";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(
       join(legacyRoot, ".cadre", "workflow.md"),
@@ -3103,7 +3124,7 @@ test("implementation guidance preserves approval, permission, semantic checkpoin
   assert.match(governed, /human review of each regular task diff/);
   assert.match(conflicts, /Never force-delete, reset, or silently choose a side/);
   assert.match(recovery, /Existing merge commit but missing integration transition/);
-  assert.equal(executionTemplate.approvalMode, "{{governed|phase|autonomous}}");
+  assert.equal(executionTemplate.approvalMode, "{{governed|phase|track|autonomous}}");
   assert.match(phaseWorker, /one regular task at a time/);
   assert.match(phaseWorker, /commit only that task/i);
   assert.match(phaseWorker, /unexpected host permission/);

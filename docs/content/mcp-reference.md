@@ -1,6 +1,6 @@
 ---
 title: MCP Reference
-description: Immutable v3 resources and the 23 Cadre 3.7 MCP tools.
+description: Immutable v4 resources and the 23 Cadre 3.7 MCP tools.
 section: Reference
 order: 210
 ---
@@ -22,7 +22,7 @@ The prepare token is available in the selected JSON representation; applied resu
 
 ## Template Resources
 
-The active catalog is readable at `cadre://templates/v3/<logical-id>`. Published v1 and v2 resources remain packaged for compatibility but new projects use v3.
+The active catalog is readable at `cadre://templates/v4/<logical-id>`. Published v1, v2, and v3 templates remain packaged for compatibility; new projects use v4.
 
 ## workflow_elicit
 
@@ -51,7 +51,11 @@ Continuation is bound to the scope, retained-source inventory, and every inspect
 
 ## project_status
 
-Requires the project root and accepts `view: project | track | implementation` plus `detail: summary | full` (default summary). Summary omits full state history and parsed graph detail, retaining operation/checkpoint, dependencies, scheduler, graph digest/counts, and source hashes. Full project detail adds `projectState` and paged `trackDetails` with complete state, graph, execution, and source references. Full implementation detail adds `executionJournal` alongside the scheduler. `staleMemory` is distinct from structural `errors`. Project listings accept `statuses`, `limit` (default 50, maximum 200), and `cursor`; consume `listing.nextCursor` until complete. Counts and validation remain project-wide, even for filtered pages. Restart pagination on `STATUS_SNAPSHOT_CHANGED`. Project view returns validation, checkpoint, counts, compact track summaries, runtime worktrees, and sorted `stagedTrackCandidates` with canonical-presence, validity, path/hash manifest, errors, and next action. Focused views always return the complete `errors` array when `valid: false` and a `focusedErrors` subset for the selected track and its dependencies. Track view requires `trackId` and returns `kind: "canonical_track"` for canonical state, including any matching shadowed `stagedCandidate`. If only `.cadre/stage/track-<id>` exists, it instead returns `kind: "staged_track_candidate"` and recovery guidance. Implementation view adds graph, scheduler, and focused worktrees, with optional `executionId`; it rejects candidate-only tracks with `TRACK_CANDIDATE_ONLY`. Malformed canonical, malformed stage, candidate-only, shadowed, and unknown states remain distinct. Legacy projects report `upgradeRequired` and target versions.
+Requires the project root and accepts `view: project | track | implementation` plus `detail: summary | full` (default summary). Summary omits full state history and parsed graph detail, retaining operation/checkpoint, dependencies, scheduler, graph digest/counts, and source hashes. Full project detail adds `projectState` and paged `trackDetails` with complete state, graph, execution, and source references. Full implementation detail adds `executionJournal` alongside the scheduler. `staleMemory` is distinct from structural `errors`. Project listings accept `statuses`, `limit` (default 50, maximum 200), and `cursor`; consume `listing.nextCursor` until complete. Counts and validation remain project-wide, even for filtered pages. Restart pagination on `STATUS_SNAPSHOT_CHANGED`. Project view returns validation, checkpoint, counts, compact track summaries, runtime worktrees, and sorted `stagedTrackCandidates` with canonical-presence, validity, path/hash manifest, errors, and next action. Focused views always return the complete `errors` array when `valid: false` and a `focusedErrors` subset for the selected track and its dependencies. Track view requires `trackId` and returns `kind: "canonical_track"` for canonical state, including any matching shadowed `stagedCandidate`. If only `.cadre/stage/track-<id>` exists, it instead returns `kind: "staged_track_candidate"` and recovery guidance. Implementation view adds graph, scheduler, and focused worktrees, with optional `executionId` (omit or use `null` to select persisted state); it rejects candidate-only tracks with `TRACK_CANDIDATE_ONLY`. Malformed canonical, malformed stage, candidate-only, shadowed, and unknown states remain distinct. Legacy projects report `upgradeRequired` and target versions.
+
+Focused canonical track and implementation views include nullable `nextStep`, also returned by `execution_finish`. It carries `action` (`invoke_skill`, `await_approval`, or `blocked`), logical `plugin: "cadre"` and nullable `skill`, `projectRoot`, `trackId`, nullable current `executionId`, nullable `prerequisite`, and `reason`. The agent resolves the installed skill through the host and executes it in the same task. Codex/Claude use the Cadre plugin workflow; Zed uses `cadre-review` or `cadre-implement`. The MCP does not dispatch skills itself.
+
+Before an invocation, satisfy `implementation_bookkeeping_commit` or `review_bookkeeping_commit` when returned; resume from journal and Git evidence without duplicate commits. A pending review promotion routes back to review even after partial transition to `in_progress`. A clean Autonomous checkpoint returns `await_approval`: review must revalidate evidence with `review_complete` prepare and obtain explicit approval before applying its token. Legacy ambiguous authority and blocked loops stop with an actionable reason. Normal modes and terminal tracks return `null` and retain their ordinary gates. Next steps describe current persisted progress, even when status also requests a historical execution.
 
 ## state_validate
 
@@ -109,7 +113,7 @@ Creates or reconciles the derived worktree and records the node's `start` transi
 
 ## integration
 
-Validates and non-squash merges a worker branch, then records integration and returns scheduler state. Phase/autonomous mode completes in prepare; governed mode pauses and requires apply after approval.
+Validates and non-squash merges a worker branch, then records integration and returns scheduler state. Phase/track/autonomous mode completes in prepare; governed mode pauses and requires apply after approval.
 
 ## worktree_cleanup
 
@@ -117,7 +121,7 @@ Removes a verified integrated worktree/branch and records node completion. Retry
 
 ## project_init_candidate
 
-Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v3 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
+Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v4 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
 
 ## setup_record_commit
 
@@ -145,4 +149,4 @@ Validates and atomically regenerates deterministic `tracks.md`.
 
 ## Upgrade and recovery
 
-Runtime 3.7.1 uses template set v3. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.
+The current source uses template set v4. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.

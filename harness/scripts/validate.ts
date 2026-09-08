@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
+import { TEMPLATE_IDS, TEMPLATE_SET_VERSION, templateCatalog } from "../src/domain/templates.js";
 import { createCadreServer } from "../src/mcp/server.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 
@@ -44,8 +44,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.7.1") {
-  errors.push("package: expected publish identity cadre-ai@3.7.1");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.8.0") {
+  errors.push("package: expected publish identity cadre-ai@3.8.0");
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
@@ -145,7 +145,7 @@ if (/runtimeVersion:\s*\d|templateSetVersion:\s*v\d/.test(refreshSkill)) {
   errors.push("refresh: upgrade guidance must not hard-code runtime or template versions");
 }
 
-const templateRoot = join(root, "templates", "v3");
+const templateRoot = join(root, "templates", TEMPLATE_SET_VERSION);
 const projectTemplate = join(templateRoot, "init");
 for (const file of [
   "gitignore.template", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",

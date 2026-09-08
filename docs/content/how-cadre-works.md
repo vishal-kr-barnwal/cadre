@@ -24,7 +24,8 @@ agents/                  # Claude phase and task worker definitions
 dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
 templates/v1/            # immutable published legacy templates
 templates/v2/            # immutable compact legacy templates
-templates/v3/            # active memory and context templates
+templates/v3/            # immutable memory and context templates
+templates/v4/            # active approval policy and review-loop templates
 .codex-plugin/           # Codex manifest
 .claude-plugin/          # Claude manifest
 ```

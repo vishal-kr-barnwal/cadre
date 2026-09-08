@@ -31,7 +31,7 @@ function git(root: string, ...args: string[]) { return execFileSync("git", args,
 function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-memory-"));
   t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
-  cpSync(join(root, "templates/v3/init"), join(projectRoot, ".cadre"), { recursive: true });
+  cpSync(join(root, "templates/v4/init"), join(projectRoot, ".cadre"), { recursive: true });
   renameSync(join(projectRoot, ".cadre/gitignore.template"), join(projectRoot, ".cadre/.gitignore"));
   for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "styleguides/general.md"]) write(join(projectRoot, ".cadre", file), `# ${file}\nRequired constraint: preserve approval and evidence.\n`);
   const base = join(projectRoot, ".cadre/tracks/sample");
@@ -47,7 +47,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.7.1", templateSetVersion: "v3", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 1, runtimeVersion: "3.8.0", templateSetVersion: "v4", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");
@@ -224,7 +224,7 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>): Record<string
   return (result.structuredContent ?? JSON.parse((result.content as Array<{ text: string }>).at(-1)!.text)) as Record<string, any>;
 }
 
-test("v2 templates remain immutable alongside v3", () => {
+test("v2 templates remain immutable alongside v4", () => {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)]);
   const hash = createHash("sha256"), base = join(root, "templates/v2");
   for (const path of files(base).sort()) { hash.update(relative(base, path)); hash.update("\0"); hash.update(readFileSync(path)); hash.update("\0"); }

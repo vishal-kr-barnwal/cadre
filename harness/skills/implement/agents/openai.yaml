@@ -1,4 +1,4 @@
 interface:
   display_name: "Cadre: Implement"
   short_description: "Execute a track DAG with safe workers"
-  default_prompt: "Use $implement to execute or resume an approved track DAG, in parallel scheduling and phase approval mode by default unless explicitly requested otherwise."
+  default_prompt: "Use $implement to execute or resume an approved track DAG, in parallel scheduling and Track approval mode by default unless explicitly requested otherwise. Explicit Autonomous continues verification, review, and in-scope remediation until a clean review and one final human completion approval."

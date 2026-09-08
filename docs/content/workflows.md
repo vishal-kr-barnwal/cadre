@@ -61,19 +61,24 @@ already be completed or archived after completion.
 Approval mode is independent of parallel/sequential scheduling:
 
 - `governed` presents each regular task and material integration transition;
-- `phase` is the default and runs a phase autonomously until its final User Manual Verification task;
-- `autonomous` pauses only at Track-level User Manual Verification.
+- `phase` runs a phase autonomously until its final User Manual Verification task;
+- `track` is the default and pauses at Track-level User Manual Verification and ordinary review approval;
+- `autonomous` implements, verifies, reviews, and fixes in-scope findings until clean, then asks for one final completion approval.
 
 The `implement` invocation authorizes execution start with the requested modes
-or their defaults. `phase` and `autonomous` do not add a separate start prompt.
+or their defaults. `phase`, `track`, and `autonomous` do not add a separate start prompt.
 All modes stop for material ambiguity, scope divergence, unsafe state, or a
-required-check exception. Track-level verification always requires the human.
-An approved execution finish moves the track to `ready_for_review`, never
-directly to `completed`.
+required-check exception. Track-level verification requires the human in Governed,
+Phase, and Track; Autonomous records actual verification under persisted authority.
+Execution finish moves the track to `ready_for_review`, never directly to
+`completed`. In Autonomous this is an internal handoff: after committing
+implementation bookkeeping, the agent invokes review through MCP `nextStep`
+and continues fixes → verification → cumulative review until clean.
 
 ## review
 
-Use `review` only for `ready_for_review` tracks.
+Use `review` for `ready_for_review` tracks or to recover a journaled Autonomous
+review operation from `in_progress`.
 
 The reviewer inspects the recorded implementation range, affected callers,
 tests, error paths, security boundaries, compatibility, requirements, and
@@ -85,7 +90,14 @@ learning. Findings are presented before they enter state.
 - An approved clean review binds evidence to the current execution, plan
   revision, graph digest, and reviewed HEAD, then marks the track `completed`.
 
-Only `review` can complete a track.
+Autonomous continues through the same review and remediation procedure using its
+persisted authority, retaining findings and reviewing the cumulative implementation.
+It pauses when a finding survives two remediation attempts. Final clean completion
+still requires explicit human approval. The final summary presents verification,
+remediation history, and the exact completion proposal. The author can approve
+that proposal without invoking review again, or report additional bugs to
+continue remediation. Changed implementation or verification inputs require
+renewed checks and review. Only `review` can complete a track.
 
 ## revise
 

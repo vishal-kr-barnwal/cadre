@@ -96,11 +96,12 @@ $cadre:implement passwordless-login sequentially
 /cadre-implement passwordless-login sequentially
 ```
 
-Phase approval is also the default: Cadre runs regular work autonomously and
-pauses once at each phase's final verification task. Request `governed` for
-task-by-task gates or `autonomous` to pause only at track-level verification.
-The implement command itself authorizes execution start, so phase and
-autonomous modes do not add a start-approval prompt.
+Track approval is the default: Cadre verifies phases automatically and pauses at
+track verification, then ordinary review approval. Request `phase` for phase
+verification gates, `governed` for task gates, or `autonomous` to implement, verify,
+review, and fix in-scope findings until clean, with one final completion approval.
+Parallel/Sequential scheduling remains independent. Phase, Track, and Autonomous
+do not add a start-approval prompt.
 
 Cadre starts a digest-gated execution journal, derives a global queue from ready
 phases and phase-local tasks, and creates workers only when at least two safe

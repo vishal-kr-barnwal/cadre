@@ -60,7 +60,7 @@ export function inspectStagedMemory(projectRoot: string, candidateId: string, fi
     const reportedPath = originalPaths.get(path) ?? path;
     if (historical) historicalPaths.push(reportedPath);
     const inspected = inspectMemory({ trackId: id, path: reportedPath, body: read(path), graph,
-      required: project.templateSetVersion === "v3", historical, readPattern: read });
+      required: ["v3", "v4"].includes(project.templateSetVersion ?? ""), historical, readPattern: read });
     return { path: reportedPath, valid: inspected.errors.length === 0 && inspected.stale.length === 0,
       errors: inspected.errors, stale: inspected.stale };
   });

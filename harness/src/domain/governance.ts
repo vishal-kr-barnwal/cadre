@@ -1,3 +1,5 @@
+import { resolveApprovalMode } from "./approval-policy.js";
+import { requireCleanAutonomousReview } from "./autonomous-review.js";
 import { inspectStagedMemory } from "./staged-memory.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -6,7 +8,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 import { readCandidateFiles } from "./staging.js";
-import { isGitAncestor, resolveGitCommit } from "./git.js";
+import { isGitAncestor, resolveGitCommit, requireReviewedProductUnchanged } from "./git.js";
 import { executionStatus } from "./execution.js";
 import {
   buildTracks, cadreRoot, validateProject,
@@ -103,7 +105,7 @@ export function deriveReviewCompleteInput(input: ReviewCompleteRequest): ReviewC
       ? matchingCycle.reviewedAt
       : new Date().toISOString(),
     reviewedHead,
-    commitRange: `${execution.baseCommit}..${reviewedHead}`,
+    commitRange: `${state?.autonomousReview?.initialBaseCommit ?? execution.baseCommit}..${reviewedHead}`,
     approval: input.approval,
     ...(acceptedRisks.length ? { acceptedRisks } : {})
   };
@@ -137,6 +139,17 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     || execution.headCommit !== input.reviewedHead) {
     throw new Error("review evidence does not match the current completed execution");
   }
+  const approvalMode = resolveApprovalMode(execution, current.approvalModeMigration);
+  if (current.autonomousReview && approvalMode !== "autonomous") {
+    throw new Error("Changing Autonomous authority requires an approved refresh preserving the former loop in history");
+  }
+  if (approvalMode === "autonomous") {
+    if (!current.autonomousReview) throw new Error("Autonomous completion requires persisted review loop authority");
+    requireCleanAutonomousReview(current.autonomousReview, execution, input.acceptedRisks ?? []);
+    if (range[1] !== current.autonomousReview.initialBaseCommit) throw new Error("Autonomous review must cover the cumulative implementation range");
+    if (!isGitAncestor(root, range[1]!, input.reviewedHead)) throw new Error("Autonomous review baseline is not an ancestor of reviewed HEAD");
+    requireReviewedProductUnchanged(root, input.reviewedHead, input.trackId);
+  }
   const statePath = join(cadreRoot(root), track.location, "state.json");
   const tracksPath = join(cadreRoot(root), "tracks.md");
   const stateBody = readFileSync(statePath, "utf8");
@@ -164,6 +177,7 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     ...current,
     status: "completed",
     checkpoint: "completed",
+    ...(current.autonomousReview ? { autonomousReview: { ...current.autonomousReview, checkpoint: "completed" as const } } : {}),
     reviewCycles: [...(current.reviewCycles ?? []), cycle]
   };
   const tracks = validation.tracks.map((candidate): DiscoveredTrack => candidate.id === input.trackId

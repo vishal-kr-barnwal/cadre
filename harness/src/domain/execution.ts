@@ -1,3 +1,6 @@
+import { APPROVAL_POLICY_VERSION, EXECUTION_APPROVAL_MODES, resolveApprovalMode, requireExecutionAuthority, type ExecutionApprovalMode, type ApprovalModeMigration } from "./approval-policy.js";
+import { requireReviewProgress, type AutonomousReview } from "./autonomous-review.js";
+export { EXECUTION_APPROVAL_MODES, type ExecutionApprovalMode } from "./approval-policy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -17,9 +20,6 @@ export const EXECUTION_NODE_STATUSES = [
   "conflicted", "integrated", "awaiting_manual_verification", "completed", "blocked"
 ] as const;
 export type ExecutionNodeStatus = typeof EXECUTION_NODE_STATUSES[number];
-
-export const EXECUTION_APPROVAL_MODES = ["governed", "phase", "autonomous"] as const;
-export type ExecutionApprovalMode = typeof EXECUTION_APPROVAL_MODES[number];
 
 export interface ExecutionNode {
   id: string;
@@ -48,6 +48,7 @@ export interface ExecutionJournal {
   requestedMode: "parallel" | "sequential";
   effectiveMode: "parallel" | "sequential";
   approvalMode: ExecutionApprovalMode;
+  approvalPolicyVersion?: number;
   maxWorkers: number;
   planRevision: number;
   planCommit: string;
@@ -72,6 +73,7 @@ interface ExecutionOperation {
   journal: string;
   mode: "parallel" | "sequential";
   approvalMode: ExecutionApprovalMode;
+  approvalPolicyVersion?: number;
   graphDigest: string;
   planRevision: number;
 }
@@ -80,9 +82,11 @@ interface ExecutionTrackState {
   trackId: string;
   status: string;
   checkpoint?: string;
-  commits?: { plan?: string | null };
+  commits?: { spec?: string | null; plan?: string | null };
   operation?: ExecutionOperation | Record<string, unknown> | null;
-  lastExecution?: ({ approvalMode?: ExecutionApprovalMode } & Record<string, unknown>) | null;
+  autonomousReview?: AutonomousReview;
+  approvalModeMigration?: ApprovalModeMigration;
+  lastExecution?: ({ executionId?: string; approvalMode?: ExecutionApprovalMode; approvalPolicyVersion?: number } & Record<string, unknown>) | null;
   [key: string]: unknown;
 }
 
@@ -108,7 +112,10 @@ export interface ExecutionStartRequest {
 
 export function deriveExecutionStartInput(input: ExecutionStartRequest): ExecutionStartInput {
   const startedAt = new Date().toISOString();
-  const requestedMode = input.requestedMode ?? "parallel";
+  const state = JSON.parse(readSafeArtifact(input.projectRoot, `.cadre/tracks/${input.trackId}/state.json`)) as ExecutionTrackState;
+  const previousId = state.autonomousReview ? state.lastExecution?.executionId : undefined;
+  const previous = previousId ? readExecution(input.projectRoot, input.trackId, previousId) : undefined;
+  const requestedMode = input.requestedMode ?? previous?.requestedMode ?? "parallel";
   return {
     projectRoot: input.projectRoot,
     trackId: input.trackId,
@@ -116,7 +123,7 @@ export function deriveExecutionStartInput(input: ExecutionStartRequest): Executi
     requestedMode,
     effectiveMode: requestedMode,
     ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
-    maxWorkers: input.maxWorkers ?? 3,
+    maxWorkers: input.maxWorkers ?? previous?.maxWorkers ?? 3,
     baseCommit: resolveGitCommit(input.projectRoot),
     approvedAt: startedAt
   };
@@ -177,6 +184,7 @@ export interface ExecutionStatusView {
     requestedMode: ExecutionJournal["requestedMode"];
     effectiveMode: ExecutionJournal["effectiveMode"];
     approvalMode: ExecutionApprovalMode;
+    approvalPolicyVersion?: number;
     maxWorkers: number;
     planRevision: number;
     startedAt: string;
@@ -297,8 +305,18 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   const planPath = join(trackRoot, "plan.md");
   const stateBody = readFileSync(statePath, "utf8");
   const state = JSON.parse(stateBody) as ExecutionTrackState;
-  const approvalMode = input.approvalMode ?? state.lastExecution?.approvalMode ?? "phase";
-  if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, or autonomous");
+  // Check inherited authority even when the caller supplies a new mode: a legacy
+  // Autonomous execution must first receive an explicit refresh migration.
+  const inheritedMode = state.lastExecution ? resolveApprovalMode(state.lastExecution, state.approvalModeMigration) : undefined;
+  const approvalMode = input.approvalMode ?? inheritedMode ?? "track";
+  if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, track, or autonomous");
+  if (approvalMode === "autonomous" && !SHA.test(state.commits?.spec ?? "")) throw new Error("Autonomous execution requires an approved specification commit");
+  if (state.autonomousReview && approvalMode !== "autonomous") throw new Error("Changing an active Autonomous loop requires an approved refresh that archives its authority in history");
+  if (state.autonomousReview && approvalMode === "autonomous") {
+    requireReviewProgress(state.autonomousReview);
+    if (state.autonomousReview.specCommit !== state.commits?.spec) throw new Error("Autonomous scope changed; obtain a new explicit authorization through refresh");
+    if (state.autonomousReview.checkpoint !== "remediating") throw new Error("Autonomous review must authorize remediation before starting another execution");
+  }
   if (state.trackId !== input.trackId) throw new Error("track state does not match trackId");
   if (!["planned", "in_progress"].includes(state.status)) throw new Error(`track ${input.trackId} is not implementable from ${state.status}`);
   if (state.operation != null) throw new Error(`track ${input.trackId} already has an active operation`);
@@ -327,6 +345,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     requestedMode: input.requestedMode,
     effectiveMode: input.effectiveMode,
     approvalMode,
+    approvalPolicyVersion: APPROVAL_POLICY_VERSION,
     maxWorkers: input.maxWorkers,
     planRevision,
     planCommit: state.commits!.plan!,
@@ -362,6 +381,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     journal: relativeJournal,
     mode: input.effectiveMode,
     approvalMode,
+    approvalPolicyVersion: APPROVAL_POLICY_VERSION,
     graphDigest: graph.digest,
     planRevision
   };
@@ -369,7 +389,12 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     ...state,
     status: "in_progress",
     checkpoint: "executing",
-    operation
+    operation,
+    ...(approvalMode === "autonomous" ? { autonomousReview: state.autonomousReview
+      ? { ...state.autonomousReview, checkpoint: "implementing" as const }
+      : { policyVersion: 2 as const, originExecutionId: input.executionId, authorizedAt: input.approvedAt,
+        initialBaseCommit: input.baseCommit, specCommit: state.commits!.spec!,
+        checkpoint: "implementing" as const, findings: [] } } : {})
   };
   return {
     journalPath,
@@ -413,6 +438,13 @@ export function readExecution(projectRoot: string, trackId: string, executionId:
   if (locations.length !== 1) throw new CadreError("EXECUTION_AMBIGUOUS", `Execution ${executionId} exists in both active and archived locations; reconcile duplicate evidence before continuing.`);
   const location = locations[0]!;
   return JSON.parse(readSafeArtifact(root, `.cadre/${location}/${trackId}/${journalRelative(executionId)}`)) as ExecutionJournal;
+}
+
+export function requireTrackExecutionAuthority(projectRoot: string, trackId: string, executionId: string): ExecutionApprovalMode {
+  const journal = readExecution(projectRoot, trackId, executionId);
+  const state = journal.approvalMode === "autonomous"
+    ? JSON.parse(readSafeArtifact(projectRoot, `.cadre/tracks/${trackId}/state.json`)) as ExecutionTrackState : {};
+  return requireExecutionAuthority(journal, state);
 }
 
 const ALLOWED_TRANSITIONS: Record<ExecutionNodeStatus, ExecutionNodeStatus[]> = {
@@ -580,6 +612,12 @@ export function previewExecutionNodesUpdate(input: ExecutionNodesUpdateInput): {
   const { journalPath } = executionPaths(input.projectRoot, input.trackId, input.executionId);
   const currentBody = readFileSync(journalPath, "utf8");
   const journal = JSON.parse(currentBody) as ExecutionJournal;
+  // Recovery may block work before migration; progressing it requires current authority.
+  if (input.updates.some((update) => update.status !== "blocked"
+    && !(update.status === "completed" && ["integrated", "completed"].includes(journal.nodes[update.nodeId]?.status ?? ""))
+    && !(update.status === "integrated" && journal.nodes[update.nodeId]?.status === "integrated"))) {
+    requireExecutionAuthority(journal, journal.approvalMode === "autonomous" ? JSON.parse(readSafeArtifact(input.projectRoot, `.cadre/tracks/${input.trackId}/state.json`)) as ExecutionTrackState : {});
+  }
   for (const update of input.updates) applyNodeTransition(journal, update);
   return { path: journalPath, journal, digest: hash({ currentBody, journal }) };
 }
@@ -721,7 +759,8 @@ export function compactExecutionStatus(journal: ExecutionJournal, nodeId?: strin
       checkpoint: journal.checkpoint,
       requestedMode: journal.requestedMode,
       effectiveMode: journal.effectiveMode,
-      approvalMode: journal.approvalMode,
+      approvalMode: journal.approvalMode ?? "governed",
+      approvalPolicyVersion: journal.approvalPolicyVersion ?? 1,
       maxWorkers: journal.maxWorkers,
       planRevision: journal.planRevision,
       startedAt: journal.startedAt,
@@ -1006,11 +1045,13 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   const journalBody = readFileSync(journalPath, "utf8");
   const state = JSON.parse(stateBody) as ExecutionTrackState;
   const journal = JSON.parse(journalBody) as ExecutionJournal;
+  resolveApprovalMode(journal);
   const operation = state.operation as ExecutionOperation | null | undefined;
   const stateAlreadyCompleted = state.status === "ready_for_review"
     && state.lastExecution?.executionId === input.executionId
     && state.lastExecution.headCommit === input.headCommit
     && state.lastExecution.completedAt === input.completedAt;
+  if (!stateAlreadyCompleted) requireExecutionAuthority(journal, state);
   if (!stateAlreadyCompleted && (operation?.action !== "implement" || operation.executionId !== input.executionId)) {
     throw new Error("track does not point to this implementation execution");
   }
@@ -1063,10 +1104,13 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
     status: "ready_for_review",
     checkpoint: "ready_for_review",
     operation: null,
+    ...(state.autonomousReview && journal.approvalMode === "autonomous"
+      ? { autonomousReview: { ...state.autonomousReview, checkpoint: "reviewing" as const } } : {}),
     lastExecution: {
       executionId: input.executionId,
       journal: journalRelative(input.executionId),
-      approvalMode: journal.approvalMode,
+      approvalMode: journal.approvalMode ?? "governed",
+      approvalPolicyVersion: journal.approvalPolicyVersion ?? 1,
       planRevision: journal.planRevision,
       graphDigest: journal.graphDigest,
       headCommit: input.headCommit,
@@ -1171,6 +1215,7 @@ export function validateExecutionJournal(
   if (!EXECUTION_APPROVAL_MODES.includes(journal.approvalMode ?? "governed")) {
     errors.push(`${state.trackId}: invalid execution approval mode`);
   }
+  if (journal.approvalPolicyVersion != null && ![1, APPROVAL_POLICY_VERSION].includes(journal.approvalPolicyVersion)) errors.push(`${state.trackId}: unsupported approvalPolicyVersion`);
   if (!Number.isInteger(journal.maxWorkers) || journal.maxWorkers < 1 || journal.maxWorkers > 32) errors.push(`${state.trackId}: invalid maxWorkers`);
   const requireCurrentGraph = operation?.action === "implement"
     || ["ready_for_review", "completed", "archived"].includes(state.status);
@@ -1223,7 +1268,7 @@ export function validateExecutionJournal(
       errors.push(`${state.trackId}: integrated execution node ${id} lacks merge commit evidence`);
     }
     if (node.kind === "manual-verification" && node.status === "completed" && !node.approval) {
-      errors.push(`${state.trackId}: completed manual verification ${id} lacks human approval`);
+      errors.push(`${state.trackId}: completed manual verification ${id} lacks verification authorization`);
     }
     if (node.kind === "phase" && node.status === "completed") {
       const incompleteTasks = Object.values(journal.nodes).filter(
@@ -1247,6 +1292,7 @@ export function validateExecutionJournal(
     if (operation.executionId !== journal.executionId
       || operation.graphDigest !== journal.graphDigest
       || operation.planRevision !== journal.planRevision
+      || (operation.approvalPolicyVersion ?? 1) !== (journal.approvalPolicyVersion ?? 1)
       || String(operation.approvalMode ?? "governed") !== String(journal.approvalMode ?? "governed")) {
       errors.push(`${state.trackId}: implement operation does not match its execution journal`);
     }
@@ -1255,6 +1301,7 @@ export function validateExecutionJournal(
       || state.lastExecution.graphDigest !== journal.graphDigest
       || state.lastExecution.planRevision !== journal.planRevision
       || state.lastExecution.headCommit !== journal.headCommit
+      || (state.lastExecution.approvalPolicyVersion ?? 1) !== (journal.approvalPolicyVersion ?? 1)
       || String(state.lastExecution.approvalMode ?? "governed") !== String(journal.approvalMode ?? "governed")) {
       errors.push(`${state.trackId}: lastExecution does not match its execution journal`);
     }

@@ -1,3 +1,5 @@
+import { requireTrackExecutionAuthority } from "../domain/execution.js";
+import { deriveNextStep } from "../domain/next-step.js";
 import { contextInputSchema, readContext } from "../domain/context.js";
 import { handoffSchema, requireFreshTrackMemory } from "../domain/memory.js";
 import { inspectStagedMemory } from "../domain/staged-memory.js";
@@ -7,9 +9,9 @@ import { lifecycleSchema, pageTracks, summarizeGraph, summarizeTrackState, track
 import { McpServer, type RegisteredTool, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod/v4";
 import {
   applyProjectInitCandidate,
@@ -468,7 +470,8 @@ export function createCadreServer(): McpServer {
       statuses: z.array(lifecycleSchema).optional(), limit: z.number().int().min(1).max(200).default(50),
       cursor: z.string().max(1024).optional(),
       trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
-      executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).optional()
+      executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).nullish()
+        .describe("Known persisted execution ID. Omit or use null to select current state; never infer it from trackId.")
     },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.projectStatus],
     annotations: { readOnlyHint: true, openWorldHint: false }
@@ -556,8 +559,11 @@ export function createCadreServer(): McpServer {
         ...(stagedCandidate ? { stagedCandidate } : {}),
         warnings: validation.warnings
       };
+      const nextStep = deriveNextStep(root, validation.states.get(trackId), {
+        errors: focused.errors, upgradeRequired: focused.upgradeRequired, staleMemory: focused.staleMemory.length > 0
+      });
       if (view === "track") {
-        return result(focused, `${trackId}: ${track.status}; checkpoint=${track.checkpoint ?? "none"}.`);
+        return result({ ...focused, nextStep }, `${trackId}: ${track.status}; checkpoint=${track.checkpoint ?? "none"}.`);
       }
       const planPath = join(root, ".cadre", track.location, "plan.md");
       const graphErrors: string[] = [];
@@ -572,6 +578,7 @@ export function createCadreServer(): McpServer {
       const trackWorktreeSegment = `${join(".cadre", ".worktrees", trackId)}/`;
       return result({
         ...focused,
+        nextStep: graphErrors.length ? deriveNextStep(root, validation.states.get(trackId), { errors: graphErrors }) : nextStep,
         graph: { valid: graphErrors.length === 0, graph: detail === "full" ? graph : summarizeGraph(graph), errors: graphErrors },
         execution,
         ...(detail === "full" ? { executionJournal } : {}),
@@ -882,9 +889,9 @@ export function createCadreServer(): McpServer {
   const executionStartSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    requestedMode: z.enum(["parallel", "sequential"]).optional().default("parallel"),
+    requestedMode: z.enum(["parallel", "sequential"]).optional(),
     approvalMode: z.enum(EXECUTION_APPROVAL_MODES).optional(),
-    maxWorkers: z.number().int().min(1).max(32).optional().default(3)
+    maxWorkers: z.number().int().min(1).max(32).optional()
   };
 
   registerTool(CADRE_MCP_TOOLS.executionStart, {
@@ -911,6 +918,7 @@ export function createCadreServer(): McpServer {
           requestedMode: applied.journal.requestedMode,
           effectiveMode: applied.journal.effectiveMode,
           approvalMode: applied.journal.approvalMode,
+          approvalPolicyVersion: applied.journal.approvalPolicyVersion,
           maxWorkers: applied.journal.maxWorkers,
           nodeCount: Object.keys(applied.journal.nodes).length
         },
@@ -1040,6 +1048,7 @@ export function createCadreServer(): McpServer {
       const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
       const preview = previewExecutionFinish(derived);
       const applied = applyExecutionFinish(derived, preview.digest, preview);
+      const validation = validateProject(input.projectRoot);
       return result({
         commandStatus: "applied" as const,
         executionId: derived.executionId,
@@ -1048,7 +1057,12 @@ export function createCadreServer(): McpServer {
         headCommit: applied.journal.headCommit,
         digest: preview.digest,
         changedPaths: [applied.journalPath, applied.statePath, applied.planPath, applied.tracksPath],
-        changedCount: 4
+        changedCount: 4,
+        nextStep: deriveNextStep(safeProjectRoot(input.projectRoot), validation.states.get(input.trackId), {
+          errors: validation.errors,
+          staleMemory: validation.staleMemory.some((finding) => [input.trackId,
+            ...(validation.states.get(input.trackId)?.dependencies ?? [])].includes(finding.trackId))
+        })
       });
     } catch (error) {
       return failure(error);
@@ -1072,6 +1086,7 @@ export function createCadreServer(): McpServer {
     try {
       requireCurrentProject(input.projectRoot);
       requireFreshTrackMemory(input.projectRoot, input.trackId);
+      requireTrackExecutionAuthority(input.projectRoot, input.trackId, input.executionId);
       const preview = previewWorktreeCreate(input as WorktreeCreateInput);
       const applied = applyWorktreeCreate(input as WorktreeCreateInput, preview.digest, preview);
       const journal = executionStatus(input.projectRoot, input.trackId, input.executionId).journal;
@@ -1118,6 +1133,7 @@ export function createCadreServer(): McpServer {
         }
         requireCurrentProject(proposal.input.projectRoot);
         requireFreshTrackMemory(proposal.input.projectRoot, proposal.input.trackId);
+        requireTrackExecutionAuthority(proposal.input.projectRoot, proposal.input.trackId, proposal.input.executionId);
         const applied = applyWorktreeIntegration(proposal.input, proposal.digest);
         const checkpoint = applied.status === "integrated" && applied.mergeCommit
           ? recordIntegrationNow(proposal.input, applied.mergeCommit)
@@ -1132,6 +1148,7 @@ export function createCadreServer(): McpServer {
       }
       requireCurrentProject(integrationInput.projectRoot);
       requireFreshTrackMemory(integrationInput.projectRoot, integrationInput.trackId);
+      requireTrackExecutionAuthority(integrationInput.projectRoot, integrationInput.trackId, integrationInput.executionId);
       if (integrationRequiresApproval(integrationInput)) {
         return proposalResult("worktree_integrate", integrationInput, preview);
       }
@@ -1290,7 +1307,8 @@ export async function runCadreServer(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && existsSync(process.argv[1])
+  && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   runCadreServer().catch((error: unknown) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

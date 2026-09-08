@@ -27,8 +27,9 @@ approval.
 | Mode | Human approval boundary |
 |---|---|
 | `governed` | Every regular task diff and material mutation, plus all manual-verification barriers. |
-| `phase` | Default. One approval at each phase's final User Manual Verification task; other in-scope work is autonomous. |
-| `autonomous` | Only Track-level User Manual Verification; phase-level barriers are verified and recorded autonomously. |
+| `phase` | One approval at each phase's final User Manual Verification task; other in-scope work is autonomous. |
+| `track` | Default. Track-level User Manual Verification and ordinary review approval; phase barriers are automated. |
+| `autonomous` | One final approval after implementation, verification, review, and in-scope remediation reach a clean result. |
 
 Approval modes never authorize scope expansion, waived required checks,
 destructive or remote actions, or guessing through a material ambiguity. Those

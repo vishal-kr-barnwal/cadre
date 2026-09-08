@@ -48,22 +48,25 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 
 ## implement
 
-- **Use for:** a `planned` or `in_progress` track whose dependencies are done.
+- **Use for:** a `planned` or `in_progress` track whose dependencies are done;
+  Autonomous can also resume `ready_for_review`, including a clean result awaiting approval.
 - **Scheduling:** parallel by default with a global ready queue and clean
   phase-mode handoffs; sequential only when requested.
-- **Approvals:** `phase` by default, `governed` for task-by-task gates, or
-  `autonomous` until track-level manual verification.
+- **Approvals:** `track` by default for track verification and ordinary review approval; `phase` adds phase gates; `governed` adds task gates; `autonomous` continues through verification, review, and remediation until one final clean-completion approval.
 - **Primary MCP:** execution start/node/status/finish, graph validation,
   worktree create/integrate/cleanup, project/worktree status, and derived index.
 - **Writes:** execution journal, task commits, plan/learning provenance, and
   Cadre bookkeeping commits. After `execution_finish`, one final
   `cadre(implement): complete <track-id>` commit contains only the completed
   journal, plan markers, track state, and derived index.
-- **Stops at:** `ready_for_review`; never `completed`.
+- **Implementation handoff:** `ready_for_review`; never `completed`. Autonomous
+  automatically invokes review after bookkeeping and continues in-scope remediation.
+  It returns to the author only after a clean review or a blocker.
 
 ## review
 
-- **Use for:** `ready_for_review` only.
+- **Use for:** `ready_for_review`, or interrupted Autonomous review promotion
+  journaled at `in_progress`.
 - **Evidence:** recorded implementation range, relevant files/callers, tests,
   requirements, error/security/compatibility paths, and learning.
 - **Finding path:** exact approved bug/remediation artifacts return the track to
@@ -71,7 +74,11 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Clean path:** adaptive `review_complete` binds approval to execution,
   plan revision, graph digest, reviewed HEAD, accepted risks, and the server-
   derived range from execution base through reviewed HEAD.
-- **Stops at:** `completed` only after a clean approved cycle.
+- **Final decision:** after a clean Autonomous review, summarize verification and
+  remediation and present the exact completion proposal. The author can approve
+  without invoking review again or report additional bugs. Changed product or
+  verification inputs require renewed checks/review.
+- **Stops at:** `completed` only after explicit approval of a clean cycle.
 
 ## revise
 

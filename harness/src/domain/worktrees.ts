@@ -1,3 +1,4 @@
+import { resolveApprovalMode } from "./approval-policy.js";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -353,7 +354,7 @@ export function applyWorktreeCleanup(
 }
 
 export function integrationRequiresApproval(input: WorktreeIntegrationInput): boolean {
-  return (readExecution(input.projectRoot, input.trackId, input.executionId).approvalMode ?? "governed") === "governed";
+  return resolveApprovalMode(readExecution(input.projectRoot, input.trackId, input.executionId)) === "governed";
 }
 
 export function managedWorktreeStatus(projectRoot: string): {

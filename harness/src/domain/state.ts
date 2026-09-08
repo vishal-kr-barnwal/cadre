@@ -11,6 +11,8 @@ import {
 } from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
+import { validateTrackApprovalPolicy, type ApprovalModeMigration } from "./approval-policy.js";
+import { type AutonomousReview } from "./autonomous-review.js";
 import { buildTracks } from "./tracks-index.js";
 import { reachableGitCommits, readGitBlobs } from "./git.js";
 import { validatePlanProvenance, type PlanEvidence } from "./plan-provenance.js";
@@ -59,12 +61,15 @@ export interface TrackState {
     executionId?: string;
     journal?: string;
     approvalMode?: string;
+    approvalPolicyVersion?: number;
     planRevision?: number;
     graphDigest?: string;
     headCommit?: string;
     completedAt?: string;
   } | null;
   reviewCycles?: ReviewCycle[];
+  approvalModeMigration?: ApprovalModeMigration;
+  autonomousReview?: AutonomousReview;
   path?: unknown;
   [key: string]: unknown;
 }
@@ -160,6 +165,9 @@ function validateOperation(
   if (!operation.expectedCommit) errors.push(`${owner}: operation expectedCommit is required`);
   if (!Array.isArray(operation.approvedArtifacts) || !operation.approvedArtifacts.length) {
     errors.push(`${owner}: operation approvedArtifacts must be a non-empty array`);
+  } else if (operation.approvedArtifacts.some((path) => typeof path !== "string" || !path
+    || isAbsolute(path) || path.includes(".."))) {
+    errors.push(`${owner}: operation approvedArtifacts must contain relative path strings; put path/hash objects in approvedArtifactHashes`);
   }
   if (!operation.approvedAt) errors.push(`${owner}: operation approvedAt is required`);
   if (operation.approvalDigest !== undefined && !/^[0-9a-f]{64}$/.test(operation.approvalDigest)) {
@@ -261,7 +269,7 @@ function validateImplementOperation(state: TrackState, owner: string, errors: st
     errors.push(`${owner}: implement journal path is invalid`);
   }
   if (!["parallel", "sequential"].includes(String(operation.mode ?? ""))) errors.push(`${owner}: implement mode is invalid`);
-  if (!["governed", "phase", "autonomous"].includes(String(operation.approvalMode ?? "governed"))) {
+  if (!["governed", "phase", "track", "autonomous"].includes(String(operation.approvalMode ?? "governed"))) {
     errors.push(`${owner}: implement approvalMode is invalid`);
   }
   if (!/^[0-9a-f]{64}$/.test(String(operation.graphDigest ?? ""))) errors.push(`${owner}: implement graphDigest is invalid`);
@@ -556,6 +564,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     const state = states.get(track.id)!;
     collectCommitReferences(state, `${track.id}/state.json`, commitReferences);
     const trackRoot = join(root, track.location);
+    validateTrackApprovalPolicy(state, errors, warnings);
     if (state.schemaVersion !== 1) errors.push(`${track.id}: unsupported state schemaVersion`);
     if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
     if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
@@ -611,7 +620,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     );
     if (existsSync(learningPath)) {
       const memory = inspectMemory({ trackId: track.id, path: learningPath, body: readFileSync(learningPath, "utf8"),
-        graph: planGraph, required: project.templateSetVersion === "v3" && !["drafting-spec", "drafting-plan"].includes(track.status),
+        graph: planGraph, required: ["v3", "v4"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
         historical: ["completed", "archived"].includes(track.status),
         readPattern: (path) => readSafeArtifact(projectRoot, `.cadre/${path}`) });
       errors.push(...memory.errors);

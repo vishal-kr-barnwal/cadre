@@ -78,7 +78,8 @@ Paths and active phase/task are derived; they are not duplicated in state.
 - execution and track identity;
 - `status` and `checkpoint`;
 - `requestedMode` and `effectiveMode` (`parallel` or `sequential`);
-- `approvalMode` (`governed`, `phase`, or `autonomous`), defaulting to `phase`
+- `approvalPolicyVersion` (`2` for new authority; legacy Autonomous requires explicit refresh migration);
+- `approvalMode` (`governed`, `phase`, `track`, or `autonomous`), defaulting to `track`
   for new executions; legacy journals without it retain governed behavior;
 - `maxWorkers`, an approved delegated-worker bound from `1` through `32` (the
   generated workflow defaults to `3`, and host capacity may reduce it);
@@ -113,3 +114,21 @@ provenance, and the resulting commit when known.
 - `wisps/` — disposable untracked exploration output.
 
 Neither path is durable delivery state.
+
+
+### Autonomous review state
+
+Track `state.json` stores `autonomousReview` for policy-v2 Autonomous: originating
+execution and authorization time, approved specification commit, initial cumulative
+review baseline, checkpoint, and stable findings with distinct remediation execution
+IDs. Checkpoints are `implementing`, `reviewing`, `remediating`, `awaiting_approval`,
+`blocked`, and `completed`. Clean evidence includes the reviewed execution and HEAD;
+a blocker explains why continuation needs human input or an external prerequisite.
+
+Review stages `reviews/loop-<cycle>.json` alongside remediation artifacts. The exact
+inspected snapshot becomes canonical loop state through the journaled promotion.
+Its manifest digest is held by the review operation, separately from human approval.
+Legacy Autonomous migration records `approvalModeMigration` with the old execution
+ID, chosen Track/Autonomous mode, approval time, and approved `refreshPath`.
+Completed execution journals remain historical; active journals and operations are
+upgraded together to policy v2 under the same refresh envelope.

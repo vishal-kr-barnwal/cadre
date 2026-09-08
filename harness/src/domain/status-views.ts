@@ -1,3 +1,4 @@
+import { migrationRequired, type ApprovalPolicyReference } from "./approval-policy.js";
 import { z } from "zod/v4";
 import { CadreError } from "./errors.js";
 import { contentHash, readSafeArtifact } from "./memory.js";
@@ -27,6 +28,8 @@ export function summarizeTrackState(state: TrackState | undefined) {
       executionId: operation.executionId ?? null, expectedCommit: operation.expectedCommit ?? null,
       baseCommit: operation.baseCommit ?? null, approvalMode: operation.approvalMode ?? null } : null,
     lastExecution: state.lastExecution ?? null, commits: state.commits ?? null,
+    approvalModeMigrationRequired: !["completed", "archived"].includes(state.status) && migrationRequired((operation?.action === "implement" ? operation : state.lastExecution) as ApprovalPolicyReference | undefined, operation?.action === "implement" ? undefined : state.approvalModeMigration),
+    approvalModeMigration: state.approvalModeMigration ?? null, autonomousReview: state.autonomousReview ?? null,
     historyCount: Array.isArray(state.history) ? state.history.length : 0, reviewCycleCount: state.reviewCycles?.length ?? 0 };
 }
 export function summarizeGraph(graph: PlanGraph) {

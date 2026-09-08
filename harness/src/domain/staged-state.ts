@@ -1,3 +1,5 @@
+import { validateTrackApprovalPolicy } from "./approval-policy.js";
+import { autonomousReviewSchema, validateAutonomousRemediation } from "./autonomous-review.js";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { validateExecutionJournal, type ExecutionJournal } from "./execution.js";
@@ -16,6 +18,13 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
   const read = (path: string) => overlay.get(path) ?? readSafeArtifact(root, `.cadre/${path}`);
   const parents = new Set<string>();
   for (const file of files) {
+    const loopMatch = canonical(file.path).match(/^tracks\/([^/]+)\/reviews\/loop-\d+\.json$/);
+    if (loopMatch && candidateId.startsWith("review-")) {
+      const state = JSON.parse(readSafeArtifact(root, `.cadre/tracks/${loopMatch[1]}/state.json`));
+      if (!state.autonomousReview || state.status !== "ready_for_review") throw new Error("Autonomous remediation requires a ready_for_review track and persisted authority");
+      if (state.autonomousReview.specCommit !== state.commits?.spec) throw new Error("Autonomous scope changed; obtain explicit authorization before remediation");
+      validateAutonomousRemediation(autonomousReviewSchema.parse(state.autonomousReview), JSON.parse(file.content), state.lastExecution ?? {});
+    }
     if (/(?:^|\/)revisions\//.test(file.path) && !/(?:^|\/)revisions\/revision-[^/]+\.md$/.test(file.path)) {
       throw new Error(`Invalid revision artifact ${file.path}; use revisions/revision-<id>.md before approval`);
     }
@@ -53,6 +62,7 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
     for (const key of overlay.keys()) if (key.startsWith(`${parent}/executions/`)) paths.add(key.slice(`${parent}/executions/`.length));
     const errors: string[] = [];
     validateTrackOperation(state, path, errors);
+    validateTrackApprovalPolicy(state, errors);
     const key = (absolute: string) => absolute.slice(join(root, ".cadre").length + 1);
     const plan = `${parent}/plan.md`;
     const graph = overlay.has(plan) || existsSync(join(root, ".cadre", plan)) ? parsePlanContent(read(plan), plan, errors) : null;

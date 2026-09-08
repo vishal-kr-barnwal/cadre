@@ -60,7 +60,8 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `scripts/` | Build, CLI, installation, uninstall, permissions, packaging, and source validation. |
 | `templates/v1/` | Immutable published 3.3 template set. |
 | `templates/v2/` | Immutable published compact template set. |
-| `templates/v3/` | Active project, learning-memory, track, operation, and styleguide templates. |
+| `templates/v3/` | Immutable published memory and context templates. |
+| `templates/v4/` | Active approval policy, workflow, learning, track, and styleguide templates. |
 
 The domain directory currently includes filesystem and Git-aware behavior; it
 is not a pure dependency-free DDD layer. Preserve the real capability
