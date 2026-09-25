@@ -16,6 +16,8 @@ const stringArray = z.array(z.string());
 const freshnessSchema = z.strictObject({ trackId: z.string(), path: z.string(), reason: z.string() });
 const learningInspectionSchema = z.strictObject({ path: z.string(), valid: z.boolean(), errors: stringArray, stale: z.array(freshnessSchema) });
 const contextPageSchema = z.strictObject({
+  dependencyContext: z.strictObject({ mode: z.enum(["approved", "full-source-fallback"]), reason: z.string().optional() }).optional(),
+  retainedContextToken: z.string().optional(),
   snapshot: z.string(), complete: z.boolean(), contextReady: z.boolean(), nextCursor: z.string().nullable(), totalSources: z.number().int(),
   errors: stringArray, staleMemory: z.array(freshnessSchema),
   excerpts: z.array(z.strictObject({ path: z.string(), sha256: z.string(), reason: z.string(), section: z.string(),
@@ -26,7 +28,15 @@ const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const commitSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
 const proposalTokenSchema = z.string().regex(/^cadre_pt1_[A-Za-z0-9_-]{32}$/);
 const commandStatusSchema = z.enum(["approval_required", "applied"]);
+const receiptResultSchema = z.strictObject({ status: z.enum(["commit_pending", "committed"]), operationId: z.string(), commit: z.string().nullable(), receiptHash: z.string().optional(), trailers: z.array(z.string()).optional(), validation: z.strictObject({ valid: z.boolean(), errors: z.array(z.string()) }).optional() });
 const jsonObjectSchema = z.record(z.string(), z.unknown());
+// Detail views share the standalone graph/execution contracts. Validate those
+// strictly at runtime without duplicating their large schemas in the catalog.
+function sharedDetail(schema: z.ZodType) {
+  return jsonObjectSchema.superRefine((value, context) => {
+    if (!schema.safeParse(value).success) context.addIssue({ code: "custom", message: "Invalid shared detail contract" });
+  });
+}
 
 export const errorSchema = z.strictObject({
   code: z.string().min(1),
@@ -82,6 +92,7 @@ const templateSetSchema = z.strictObject({
 });
 
 const planTaskSchema = z.strictObject({
+  commitGroup: z.string().optional(),
   checked: z.boolean(),
   id: z.string(),
   phaseId: z.string(),
@@ -119,6 +130,7 @@ const graphValidationSchema = z.strictObject({
 const executionNodeStatusSchema = z.enum(EXECUTION_NODE_STATUSES);
 const checkpointEventSchema = z.enum(EXECUTION_CHECKPOINT_EVENTS);
 const executionNodeSchema = z.strictObject({
+  commitGroup: z.string().optional(),
   id: z.string(),
   kind: z.enum(["phase", "task", "manual-verification"]),
   phaseId: z.string(),
@@ -140,6 +152,7 @@ const eventGuidanceSchema = z.record(z.string(), z.strictObject({
   allowed: z.array(z.strictObject({ event: checkpointEventSchema, requiredFields: stringArray }))
 }));
 const schedulerSchema = z.strictObject({
+  readyGroups: z.array(z.strictObject({ id: z.string(), phaseId: z.string(), tasks: stringArray })).optional(),
   readyPhases: stringArray,
   readyTasks: stringArray,
   active: stringArray,
@@ -226,7 +239,7 @@ const worktreeRuntimeSchema = z.strictObject({
 const projectStatusProjectSchema = z.strictObject({
   detail: z.enum(["summary", "full"]),
   projectState: jsonObjectSchema.nullable().optional(),
-  trackDetails: z.array(z.strictObject({ trackId: z.string(), state: jsonObjectSchema.nullable(), graph: planGraphSchema.nullable(),
+  trackDetails: z.array(z.strictObject({ trackId: z.string(), state: jsonObjectSchema.nullable(), graph: sharedDetail(planGraphSchema).nullable(),
     execution: jsonObjectSchema.nullable(), executionError: z.string().nullable(), sources: z.array(artifactSchema) })).optional(),
   valid: z.boolean(),
   derivedStateCurrent: z.boolean(),
@@ -287,7 +300,7 @@ const canonicalTrackStatusSchema = z.strictObject(canonicalTrackStatusShape);
 const implementationStatusSchema = z.strictObject({
   ...canonicalTrackStatusShape,
   graph: z.strictObject({ valid: z.boolean(), graph: jsonObjectSchema, errors: stringArray }),
-  execution: executionStatusSchema.nullable(),
+  execution: sharedDetail(executionStatusSchema).nullable(),
   executionJournal: jsonObjectSchema.nullable().optional(),
   worktrees: worktreeRuntimeSchema.shape.worktrees,
   orphanedDirectories: stringArray
@@ -341,6 +354,7 @@ const reviewPrepareSchema = z.strictObject({
   files: z.array(artifactSchema)
 });
 const reviewAppliedSchema = z.strictObject({
+  receipt: receiptResultSchema.optional(),
   ...appliedReceiptBase,
   trackId: z.string(),
   status: z.string(),
@@ -365,6 +379,7 @@ const archivePrepareSchema = z.strictObject({
   tracks: artifactSchema
 });
 const archiveAppliedSchema = z.strictObject({
+  receipt: receiptResultSchema.optional(),
   ...appliedReceiptBase,
   batchId: z.string(),
   selectedTracks: stringArray,
@@ -384,6 +399,7 @@ const archiveRecordSchema = z.strictObject({
 });
 
 const executionStartOutputSchema = z.strictObject({
+  buildCachePath: pathSchema.optional(),
   commandStatus: z.literal("applied"),
   journalPath: pathSchema,
   statePath: pathSchema,
@@ -408,6 +424,7 @@ const checkpointOutputSchema = z.strictObject({
   derivedStatus: schedulerSchema
 });
 const executionFinishOutputSchema = z.strictObject({
+  receipt: receiptResultSchema.optional(),
   nextStep: nextStepSchema.nullable(),
   ...appliedReceiptBase,
   executionId: z.string(),
@@ -429,6 +446,7 @@ const worktreeCreateOutputSchema = z.strictObject({
   derivedStatus: schedulerSchema
 });
 const integrationPrepareSchema = z.strictObject({
+  ownedState: z.record(z.string(), z.string()),
   ...approvalBase,
   sourcePath: pathSchema,
   sourceBranch: z.string(),
@@ -441,6 +459,7 @@ const integrationPrepareSchema = z.strictObject({
   digest: digestSchema
 });
 const integrationAppliedSchema = z.strictObject({
+  integrationKind: z.enum(["fast-forward", "merge", "already-integrated"]),
   commandStatus: z.literal("applied"),
   status: z.enum(["integrated", "conflicted"]),
   mergeCommit: commitSchema.nullable(),
@@ -465,6 +484,7 @@ const initPrepareSchema = z.strictObject({
   digest: digestSchema
 });
 const initAppliedSchema = z.strictObject({
+  receipt: receiptResultSchema.optional(),
   ...appliedReceiptBase,
   runtimeVersion: z.string(),
   templateSetVersion: z.string()
@@ -489,6 +509,8 @@ const workflowOutcomeSchema = z.strictObject({
 
 export const CADRE_MCP_OUTPUT_SCHEMAS = {
   [CADRE_MCP_TOOLS.contextRead]: compatibleOutputSchema(contextPageSchema),
+  [CADRE_MCP_TOOLS.candidateApply]: compatibleOutputSchema(receiptResultSchema, z.strictObject({ commandStatus: z.literal("approval_required"), proposalToken: proposalTokenSchema, operationId: z.string(), files: z.array(artifactSchema), digest: digestSchema, validation: z.strictObject({ valid: z.boolean(), errors: stringArray }) })),
+  [CADRE_MCP_TOOLS.diagnosticRead]: compatibleOutputSchema(z.strictObject({ diagnosticId: z.string(), content: z.string(), offset: z.number().int(), nextOffset: z.number().int().nullable(), totalBytes: z.number().int() })),
   [CADRE_MCP_TOOLS.workflowElicit]: compatibleOutputSchema(workflowOutcomeSchema),
   [CADRE_MCP_TOOLS.templateGetMany]: compatibleOutputSchema(templateSetSchema),
   [CADRE_MCP_TOOLS.styleguideResolve]: compatibleOutputSchema(templateSetSchema),

@@ -4,7 +4,10 @@ import { existsSync, lstatSync, readdirSync, realpathSync, rmdirSync } from "nod
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { safeProjectRoot } from "./paths.js";
-import { readExecution, type ExecutionNode } from "./execution.js";
+import { readExecution, validateExecutionJournal, type ExecutionNode } from "./execution.js";
+import { contentHash, readSafeArtifact } from "./memory.js";
+import { parsePlanContent, validatePlanGraph } from "./plan.js";
+import { CadreError } from "./errors.js";
 
 const SHA = /^[0-9a-f]{7,40}$/;
 const TRACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -151,7 +154,35 @@ function cleanWorktree(path: string, allowedPaths: ReadonlySet<string> = new Set
     const changedPath = line.slice(3).split(" -> ").at(-1) ?? "";
     return !allowedPaths.has(changedPath);
   });
-  if (unexpected.length) throw new Error(`worktree is not clean: ${path}\n${unexpected.join("\n")}`);
+  if (unexpected.length) throw new CadreError("WORKTREE_DIRTY", `worktree is not clean: ${path}; ${unexpected.length} unexpected changes`, { pathCount: unexpected.length, paths: unexpected });
+}
+
+/** Only the bound coordinator journal/state may remain dirty in the canonical worktree. */
+function ownedExecutionState(root: string, input: WorktreeIntegrationInput): Record<string, string> {
+  const parent = `.cadre/tracks/${input.trackId}`;
+  const statePath = `${parent}/state.json`, journalPath = `${parent}/executions/execution-${input.executionId}.json`;
+  const body = readSafeArtifact(root, statePath), state = JSON.parse(body);
+  if (state.trackId !== input.trackId || state.status !== "in_progress" || state.operation?.action !== "implement"
+    || state.operation.executionId !== input.executionId || state.operation.journal !== `executions/execution-${input.executionId}.json`) {
+    throw new CadreError("INTEGRATION_STATE_OWNERSHIP", "Canonical state is not owned by the active execution.");
+  }
+  const committed = git(root, ["show", `HEAD:${statePath}`], true);
+  if (committed.status !== 0) throw new Error("Integration requires an approved committed track baseline");
+  const previous = JSON.parse(committed.stdout);
+  const stable = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => !["status", "checkpoint", "operation", "autonomousReview"].includes(key)));
+  if (JSON.stringify(stable(previous)) !== JSON.stringify(stable(state))) throw new CadreError("INTEGRATION_STATE_OWNERSHIP", "Unrelated canonical state changes must be reconciled before integration.");
+  const activeJournal = readExecution(root, input.trackId, input.executionId);
+  const expectedAuthority = activeJournal.approvalMode !== "autonomous" ? previous.autonomousReview : previous.autonomousReview
+    ? { ...previous.autonomousReview, checkpoint: "implementing" }
+    : { policyVersion: 2, originExecutionId: input.executionId, authorizedAt: activeJournal.startedAt,
+      initialBaseCommit: activeJournal.baseCommit, specCommit: state.commits?.spec, checkpoint: "implementing", findings: [] };
+  if (JSON.stringify(state.autonomousReview) !== JSON.stringify(expectedAuthority)) throw new CadreError("INTEGRATION_STATE_OWNERSHIP", "Execution authority changed outside the approved operation.");
+  const errors: string[] = [];
+  const graph = parsePlanContent(readSafeArtifact(root, `${parent}/plan.md`), `${parent}/plan.md`, errors);
+  validatePlanGraph(`${parent}/plan.md`, graph, state.status, errors);
+  validateExecutionJournal(join(root, parent), state, graph, errors);
+  if (errors.length) throw new CadreError("INTEGRATION_STATE_INVALID", `Active execution state failed validation: ${errors.slice(0, 3).join("; ")}`, { errors });
+  return { [statePath]: contentHash(body), [journalPath]: contentHash(readSafeArtifact(root, journalPath)) };
 }
 
 function targetIdentity(root: string, input: { trackId: string; executionId: string; nodeId: string }): {
@@ -221,6 +252,7 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
   targetHead: string;
   changedFiles: string[];
   alreadyIntegrated: boolean;
+  ownedState: Record<string, string>;
   digest: string;
 } {
   assertJournalAllowsIntegration(input);
@@ -230,15 +262,14 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
   if (!existsSync(source.path)) throw new Error(`source worktree is missing: ${source.path}`);
   if (!existsSync(target.path)) throw new Error(`target worktree is missing: ${target.path}`);
   cleanWorktree(source.path);
-  const journalPath = `.cadre/tracks/${input.trackId}/executions/execution-${input.executionId}.json`;
-  cleanWorktree(target.path, target.path === root ? new Set([journalPath]) : new Set());
+  const ownedState = target.path === root ? ownedExecutionState(root, input) : {};
+  cleanWorktree(target.path, new Set(Object.keys(ownedState)));
   const checkedSource = git(source.path, ["symbolic-ref", "--short", "HEAD"]).stdout.trim();
   const checkedTarget = git(target.path, ["symbolic-ref", "--short", "HEAD"]).stdout.trim();
   if (checkedSource !== source.branch) throw new Error(`source worktree is on ${checkedSource}, expected ${source.branch}`);
   if (checkedTarget !== target.branch) throw new Error(`target worktree is on ${checkedTarget}, expected ${target.branch}`);
   const sourceHead = git(source.path, ["rev-parse", "HEAD"]).stdout.trim();
   const targetHead = git(target.path, ["rev-parse", "HEAD"]).stdout.trim();
-  if (sourceHead === targetHead) throw new Error("source branch contains no commit to integrate");
   const changedFiles = git(root, ["diff", "--name-only", `${targetHead}...${sourceHead}`]).stdout.split(/\r?\n/).filter(Boolean);
   if (changedFiles.some((file) => file === ".cadre" || file.startsWith(".cadre/"))) {
     throw new Error("worker branch modifies protected .cadre state");
@@ -251,6 +282,7 @@ export function previewWorktreeIntegration(input: WorktreeIntegrationInput): {
     targetBranch: target.branch,
     targetHead,
     changedFiles,
+    ownedState,
     alreadyIntegrated: git(root, ["merge-base", "--is-ancestor", sourceHead, targetHead], true).status === 0
   };
   return { ...proposal, digest: hash(proposal) };
@@ -265,20 +297,28 @@ export function applyWorktreeIntegration(
   mergeCommit: string | null;
   conflicts: string[];
   targetPath: string;
+  integrationKind: "fast-forward" | "merge" | "already-integrated";
 } {
-  const proposal = preparedProposal ?? previewWorktreeIntegration(input);
+  // Re-read ownership and Git heads even when transport supplies its preview.
+  const proposal = previewWorktreeIntegration(input);
   if (proposal.digest !== proposalDigest) throw new Error("integration proposal is stale; preview it again");
   if (proposal.alreadyIntegrated) {
-    return { status: "integrated", mergeCommit: proposal.targetHead, conflicts: [], targetPath: proposal.targetPath };
+    return { status: "integrated", mergeCommit: proposal.targetHead, conflicts: [], targetPath: proposal.targetPath, integrationKind: "already-integrated" };
   }
-  const merge = git(proposal.targetPath, ["merge", "--no-ff", "--no-edit", proposal.sourceBranch], true);
+  const fastForward = git(proposal.targetPath, ["merge-base", "--is-ancestor", proposal.targetHead, proposal.sourceHead], true).status === 0;
+  const integrationKind = fastForward ? "fast-forward" : "merge";
+  const merge = git(proposal.targetPath, ["merge", fastForward ? "--ff-only" : "--no-ff", "--no-edit", proposal.sourceHead], true);
+  for (const [path, expected] of Object.entries(proposal.ownedState)) {
+    if (contentHash(readSafeArtifact(proposal.targetPath, path)) !== expected) throw new CadreError("INTEGRATION_STATE_CHANGED", "Owned execution state changed across integration; stop and reconcile.", { path });
+  }
   if (merge.status !== 0) {
     const conflicts = git(proposal.targetPath, ["diff", "--name-only", "--diff-filter=U"], true).stdout.split(/\r?\n/).filter(Boolean);
     if (!conflicts.length) throw new Error((merge.stderr || merge.stdout || "git merge failed").trim());
-    return { status: "conflicted", mergeCommit: null, conflicts, targetPath: proposal.targetPath };
+    return { status: "conflicted", mergeCommit: null, conflicts, targetPath: proposal.targetPath, integrationKind };
   }
   return {
     status: "integrated",
+    integrationKind,
     mergeCommit: git(proposal.targetPath, ["rev-parse", "HEAD"]).stdout.trim(),
     conflicts: [],
     targetPath: proposal.targetPath

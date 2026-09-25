@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "trackId": "{{TRACK_ID}}",
+  "title": "{{TRACK_TITLE}}",
+  "type": "{{feature|bug}}",
+  "status": "planned",
+  "checkpoint": "ready",
+  "revision": 1,
+  "dependencies": [],
+  "commits": {
+    "spec": null,
+    "plan": null
+  },
+  "artifactProgress": [],
+  "operation": null,
+  "lastExecution": null,
+  "reviewCycles": [],
+  "history": []
+}

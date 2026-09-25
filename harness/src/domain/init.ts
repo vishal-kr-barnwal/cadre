@@ -10,6 +10,7 @@ import { describeTemplate, getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
 import { readGitFileAtCommit } from "./git.js";
+import { operationRef, promoteOperation, reconcileOperation } from "./operation-receipts.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
 export { safeProjectRoot } from "./paths.js";
@@ -46,6 +47,8 @@ export interface ProposedFile extends MaterializedArtifact {
 }
 
 export interface ProjectInitProposal {
+  operationId?: string;
+  receipt?: ReturnType<typeof promoteOperation>;
   runtimeVersion: string;
   templateSetVersion: string;
   files: ProposedFile[];
@@ -195,12 +198,21 @@ function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitPr
   const files = [...generated.entries()]
     .map(([path, content]) => ({ path, content, sha256: hash(content) }))
     .sort((left, right) => left.path.localeCompare(right.path));
-  const digest = hash(JSON.stringify({
+  let digest = hash(JSON.stringify({
     runtimeVersion: CADRE_RUNTIME_VERSION,
     templateSetVersion: TEMPLATE_SET_VERSION,
     files: files.map((file) => ({ path: file.path, sha256: proposalFileHash(file) }))
   }));
-  return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest };
+  const operationId = `create-${digest.slice(0, 32)}`;
+  const projectFile = files.find((file) => file.path === "project.json")!;
+  const finalState = JSON.parse(projectFile.content);
+  finalState.schemaVersion = 2;
+  finalState.setup = { ...finalState.setup, status: "completed", checkpoint: "completed", commit: operationRef(operationId), operation: null };
+  finalState.history = [...(finalState.history ?? []), { action: "create", commit: operationRef(operationId) }];
+  projectFile.content = `${JSON.stringify(finalState, null, 2)}\n`;
+  projectFile.sha256 = hash(projectFile.content);
+  digest = hash(JSON.stringify({ files: files.map(({ path, sha256 }) => ({ path, sha256 })) }));
+  return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest, operationId };
 }
 
 function loadProjectInitCandidate(input: ProjectInitCandidateInput): MaterializedProjectInit {
@@ -306,6 +318,9 @@ export function applyProjectInitCandidate(
   if (proposal.digest !== proposalDigest) {
     throw new Error("Initialization candidate changed after preview; preview it again");
   }
+  if (proposal.operationId) return { ...proposal, receipt: promoteOperation(input.projectRoot, {
+    operationId: proposal.operationId, kind: "create", approvalDigest: proposalDigest, baseCommit: input.baseCommit
+  }, proposal.files.map((file) => ({ path: `.cadre/${file.path}`, content: file.content }))) };
   return applyProjectInitAtRoot(materialized, proposal);
 }
 
@@ -321,6 +336,11 @@ export function recordSetupCommit(projectRootInput: string, commit: string): str
     };
     history?: unknown[];
   };
+  if (project.schemaVersion === 2 && typeof project.setup?.commit === "string" && project.setup.commit.startsWith("op:")) {
+    const actual = reconcileOperation(root, project.setup.commit.slice(3));
+    if (actual !== commit) throw new Error("Setup commit differs from verified operation commit");
+    return path;
+  }
   if (project.setup?.status !== "in_progress" || project.setup.operation?.action !== "create") {
     throw new Error("Project setup is not awaiting its create commit");
   }
@@ -352,6 +372,7 @@ export function recordGitInitialized(projectRootInput: string): string {
   const root = safeProjectRoot(projectRootInput);
   const path = join(root, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(path, "utf8")) as ProjectStateForSetup;
+  if (project.schemaVersion === 2 && project.setup?.status === "completed") return path;
   if (project.setup?.status !== "in_progress" || project.setup.operation?.action !== "create") {
     throw new Error("Project setup is not in an active create operation");
   }

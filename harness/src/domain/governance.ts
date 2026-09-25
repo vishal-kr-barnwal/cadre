@@ -1,4 +1,7 @@
+import { parsePlanContent } from "./plan.js";
+import { inspectDependencyContext } from "./dependency-context.js";
 import { resolveApprovalMode } from "./approval-policy.js";
+import { operationRef, promoteOperation, type ReceiptFile } from "./operation-receipts.js";
 import { requireCleanAutonomousReview } from "./autonomous-review.js";
 import { inspectStagedMemory } from "./staged-memory.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -180,6 +183,10 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     ...(current.autonomousReview ? { autonomousReview: { ...current.autonomousReview, checkpoint: "completed" as const } } : {}),
     reviewCycles: [...(current.reviewCycles ?? []), cycle]
   };
+  if (current.schemaVersion === 2 && !resuming) {
+    const operationId = `review-${hash([input.trackId, input.reviewedHead, cycle.cycle]).slice(0, 32)}`;
+    state.history = [...(Array.isArray(current.history) ? current.history : []), { action: "review", commit: operationRef(operationId) }];
+  }
   const tracks = validation.tracks.map((candidate): DiscoveredTrack => candidate.id === input.trackId
     ? { ...candidate, ...state, id: input.trackId, location: `tracks/${input.trackId}` }
     : candidate);
@@ -203,6 +210,14 @@ export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: 
     proposal.state.reviewCycles!.at(-1)!.approvalConfirmation = {
       status: "approved", proposalDigest, confirmedAt: new Date().toISOString(), method: "explicit-apply"
     };
+  }
+  if (proposal.state.schemaVersion === 2) {
+    const operationId = `review-${hash([input.trackId, input.reviewedHead, proposal.state.reviewCycles?.at(-1)?.cycle]).slice(0, 32)}`;
+    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "review", approvalDigest: proposalDigest, baseCommit: resolveGitCommit(input.projectRoot) }, [
+      { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) },
+      { path: ".cadre/tracks.md", content: proposal.tracksContent }
+    ]);
+    return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
   }
   writeApprovedFile(proposal.statePath, json(proposal.state));
   writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
@@ -230,12 +245,12 @@ interface MaterializedArchiveBatch {
 type MaterializedArchiveDescriptor =
   | { kind: "pattern"; slug: string; content: string }
   | { kind: "pattern_index"; content: string }
-  | { kind: "active_track_seed"; trackId: string; content: string };
+  | { kind: "active_track_seed" | "active_dependency_context"; trackId: string; content: string };
 
 export type ArchiveContentCandidate =
   | { kind: "pattern"; slug: string }
   | { kind: "pattern_index" }
-  | { kind: "active_track_seed"; trackId: string };
+  | { kind: "active_track_seed" | "active_dependency_context"; trackId: string };
 
 interface MaterializedArchiveRequest {
   projectRoot: string;
@@ -333,7 +348,7 @@ function deriveMaterializedArchiveBatch(input: MaterializedArchiveRequest): Mate
     }
     if (update.kind === "pattern_index") return { path: "patterns/index.md", content: update.content };
     if (!TRACK_ID.test(update.trackId)) throw new Error(`invalid active track ID ${update.trackId}`);
-    return { path: `tracks/${update.trackId}/learning.md`, content: update.content };
+    return { path: `tracks/${update.trackId}/${update.kind === "active_dependency_context" ? "dependency-context.json" : "learning.md"}`, content: update.content };
   });
   return {
     projectRoot: root,
@@ -352,7 +367,7 @@ function archiveCandidatePath(update: ArchiveContentCandidate): string {
   }
   if (update.kind === "pattern_index") return "patterns/index.md";
   if (!TRACK_ID.test(update.trackId)) throw new Error(`invalid active track ID ${update.trackId}`);
-  return `tracks/${update.trackId}/learning.md`;
+  return `tracks/${update.trackId}/${update.kind === "active_dependency_context" ? "dependency-context.json" : "learning.md"}`;
 }
 
 function materializeArchiveCandidateUpdates(
@@ -396,7 +411,7 @@ function loadArchiveBatchCandidate(
     .map((update): MaterializedArchiveUpdate => {
       if (update.kind === "pattern") return { path: `patterns/${update.slug}.md`, content: update.content };
       if (update.kind === "pattern_index") return { path: "patterns/index.md", content: update.content };
-      return { path: `tracks/${update.trackId}/learning.md`, content: update.content };
+      return { path: `tracks/${update.trackId}/${update.kind === "active_dependency_context" ? "dependency-context.json" : "learning.md"}`, content: update.content };
     });
   return {
     projectRoot: input.projectRoot,
@@ -418,7 +433,7 @@ export function applyArchiveBatchCandidate(input: ArchiveBatchCandidateInput, pr
 
 function assertArchiveUpdate(path: string, selected: Set<string>): void {
   if (path === "patterns/index.md" || /^patterns\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/.test(path)) return;
-  const seed = path.match(/^tracks\/([a-z0-9]+(?:-[a-z0-9]+)*)\/learning\.md$/);
+  const seed = path.match(/^tracks\/([a-z0-9]+(?:-[a-z0-9]+)*)\/(?:learning\.md|dependency-context\.json)$/);
   if (seed && !selected.has(seed[1]!)) return;
   throw new Error(`archive update path is not allowed: ${path}`);
 }
@@ -482,6 +497,27 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     throw new Error("archive updates contain duplicate paths");
   }
   for (const update of updates) assertArchiveUpdate(update.path, selected);
+  if (validation.project.schemaVersion === 2) {
+    // Relocation is deterministic; changing constraint text still needs an explicit
+    // staged assessment. Both the remapping and its state reference are approved.
+    const relocate = (path: string) => path.replace(/^\.cadre\/tracks\/([^/]+)\//, (prefix, id: string) => selected.has(id) ? `.cadre/archive/${id}/` : prefix);
+    const read = (path: string) => updates.find((item) => `.cadre/${item.path}` === path)?.content ?? readFileSync(join(root, path), "utf8");
+    for (const track of validation.tracks.filter((item) => item.location === `tracks/${item.id}` && !selected.has(item.id) && !["completed", "archived"].includes(item.status))) {
+      const path = `tracks/${track.id}/dependency-context.json`;
+      if (!existsSync(join(root, ".cadre", path))) throw new Error(`${track.id}: reassess missing dependency context before archive`);
+      const state = validation.states.get(track.id)!;
+      const graph = parsePlanContent(read(`.cadre/tracks/${track.id}/plan.md`), "plan.md");
+      const body = read(`.cadre/${path}`);
+      const context = inspectDependencyContext(root, body, state.dependencies ?? [], graph.specRevision, graph.planRevision, read);
+      const next = { ...context, sources: context.sources.map((source) => ({ ...source, path: relocate(source.path) })).sort((a, b) => a.path.localeCompare(b.path)), constraints: context.constraints.map((constraint) => ({ ...constraint, sources: constraint.sources.map(relocate) })) };
+      if (JSON.stringify(next) !== JSON.stringify(context) || updates.some((item) => item.path === path)) {
+        const existing = updates.find((item) => item.path === path);
+        if (existing) existing.content = json(next); else updates.push({ path, content: json(next) });
+        const reference = operationRef(`archive-${hash(input.batchId).slice(0, 32)}`);
+        updates.push({ path: `tracks/${track.id}/state.json`, content: json({ ...state, commits: { ...state.commits, dependencyContext: reference } }) });
+      }
+    }
+  }
   const memory = inspectStagedMemory(root, "archive-validation", updates.map((update) => ({ ...update, absolutePath: join(root, ".cadre", update.path) })));
   const invalidMemory = memory.learning.filter((entry) => !entry.valid);
   if (invalidMemory.length) throw new Error(`Archive seed reassessment required: ${JSON.stringify(invalidMemory)}`);
@@ -588,6 +624,24 @@ function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposal
     if (!proposal.resuming || existing?.approvalDigest !== proposal.initialOperation.approvalDigest) {
       throw new Error("archive batch proposal is stale; preview it again");
     }
+  }
+  const projectPath = join(cadreRoot(input.projectRoot), "project.json");
+  const project = JSON.parse(readFileSync(projectPath, "utf8"));
+  if (project.schemaVersion === 2) {
+    const operationId = `archive-${hash(input.batchId).slice(0, 32)}`, reference = operationRef(operationId);
+    const files: ReceiptFile[] = [];
+    for (const move of proposal.moves) {
+      for (const file of directorySnapshot(move.sourcePath)) {
+        files.push({ path: `.cadre/archive/${move.trackId}/${file.path}`, content: file.path === "state.json"
+          ? json({ ...move.state, checkpoint: "archived", history: [...(Array.isArray(move.state.history) ? move.state.history : []), { action: "archive", commit: reference }] }) : file.content });
+        files.push({ path: `.cadre/tracks/${move.trackId}/${file.path}`, content: null });
+      }
+    }
+    for (const update of proposal.writes) files.push({ path: `.cadre/${update.path}`, content: update.content });
+    project.history = [...(project.history ?? []), { action: "archive", selectedTracks: input.selectedTracks, commit: reference }];
+    files.push({ path: ".cadre/project.json", content: json(project) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
+    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit }, files);
+    return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
   }
   const currentOperation = existsSync(proposal.operationPath)
     ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation

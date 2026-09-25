@@ -54,7 +54,7 @@ import {
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templateRoot = join(root, "templates", "v4", "init");
 const legacyTemplateRoot = join(root, "templates", "v1", "init");
-const providerRoot = join(root, "templates", "v4");
+const providerRoot = join(root, "templates", "v5");
 
 test("published v1 templates remain byte-for-byte immutable", () => {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
@@ -97,8 +97,8 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.8.0";
-  project.templateSetVersion = "v4";
+  project.runtimeVersion = "3.9.0";
+  project.templateSetVersion = "v5";
   project.project.name = "Fixture";
   project.project.context = "brownfield";
   project.setup = {
@@ -426,8 +426,8 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.8.0",
-    templateSetVersion: "v4"
+    runtimeVersion: "3.9.0",
+    templateSetVersion: "v5"
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
   writeFileSync(join(projectRoot, "app.txt"), "base\n");
@@ -452,7 +452,7 @@ function writeWorktreeJournal(
   mkdirSync(dirname(path), { recursive: true });
   const node = (
     id: string,
-    kind: "phase" | "task",
+    kind: "phase" | "task" | "manual-verification",
     phaseId: string,
     status: ExecutionNodeStatus
   ) => ({
@@ -462,6 +462,15 @@ function writeWorktreeJournal(
     verification: null, approval: status === "committed" || status === "completed" ? "approved" : null,
     blocker: null
   });
+  const trackRoot = dirname(dirname(path));
+  const planBody = "# Plan\n- Spec revision: 1\n- Plan revision: 1\n## Phase 1: Test\n- Phase dependencies: none\n- [ ] T1.1 Test task\n  - Task dependencies: none\n- Phase completion commit: pending\n\n## Phase 2: Track-level User Manual Verification\n- [ ] T2.1 User Manual Verification\n- Phase completion commit: pending\n";
+  writeFileSync(join(trackRoot, "plan.md"), planBody);
+  const graph = parsePlanContent(planBody, "fixture");
+  validatePlanGraph("fixture", graph, "in_progress", []);
+  const graphDigest = graph.digest;
+  writeFileSync(join(trackRoot, "state.json"), JSON.stringify({ schemaVersion: 1, trackId, status: "in_progress", operation: {
+    action: "implement", executionId, journal: `executions/execution-${executionId}.json`, graphDigest, planRevision: 1, approvalMode: approvalMode ?? "governed"
+  } }));
   writeFileSync(path, `${JSON.stringify({
     schemaVersion: 1,
     executionId,
@@ -474,19 +483,21 @@ function writeWorktreeJournal(
     maxWorkers: 2,
     planRevision: 1,
     planCommit: "aaaaaaa",
-    graphDigest: "test",
+    graphDigest,
     baseCommit: "bbbbbbb",
     startedAt: "2026-07-28T00:00:00.000Z",
     completedAt: null,
     headCommit: null,
     nodes: {
       P1: node("P1", "phase", "P1", phaseStatus),
-      "T1.1": node("T1.1", "task", "P1", taskStatus)
+      "T1.1": node("T1.1", "task", "P1", taskStatus),
+      P2: { ...node("P2", "phase", "P2", "pending"), dependencies: ["P1"] },
+      "T2.1": { ...node("T2.1", "manual-verification", "P2", "pending"), dependencies: ["P1"] }
     }
   }, null, 2)}\n`);
   const relativePath = relative(projectRoot, path);
   if (gitText(projectRoot, ["ls-files", "--", relativePath]) !== relativePath) {
-    gitText(projectRoot, ["add", relativePath]);
+    gitText(projectRoot, ["add", relative(projectRoot, trackRoot)]);
     gitText(projectRoot, ["commit", "-m", `cadre(test): seed ${trackId} journal`]);
   }
 }
@@ -535,7 +546,7 @@ test("setup commit recording verifies the approved file manifest against Git", (
   writeFileSync(join(projectRoot, ".cadre", "guidelines.md"), "mismatched partial write\n");
   assert.throws(() => previewProjectInitCandidate(input), /Interrupted initialization disagrees/);
   unlinkSync(join(projectRoot, ".cadre", "guidelines.md"));
-  applyProjectInitCandidate(input, preview.digest);
+  const applied = applyProjectInitCandidate(input, preview.digest);
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
   gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
   gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
@@ -546,15 +557,16 @@ test("setup commit recording verifies the approved file manifest against Git", (
   gitText(projectRoot, ["commit", "-m", "cadre(create): initialize wrong content"]);
   assert.throws(
     () => recordSetupCommit(projectRoot, gitText(projectRoot, ["rev-parse", "HEAD"])),
-    /Approved setup artifact changed/
+    /commit_pending/
   );
   writeFileSync(join(projectRoot, ".cadre", "product.md"), "# Product\n");
   gitText(projectRoot, ["add", ".cadre/product.md"]);
-  gitText(projectRoot, ["commit", "-m", "cadre(create): initialize project harness"]);
+  gitText(projectRoot, ["commit", "-m", "cadre(create): initialize project harness", ...applied.receipt!.trailers.flatMap((trailer) => ["-m", trailer])]);
   const approvedCommit = gitText(projectRoot, ["rev-parse", "HEAD"]);
   recordSetupCommit(projectRoot, approvedCommit);
   const state = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
-  assert.equal(state.setup.commit, approvedCommit);
+  assert.equal(state.setup.commit, `op:${applied.receipt!.operationId}`);
+  assert.equal(gitText(projectRoot, ["status", "--porcelain"]), "");
   assert.equal(state.setup.operation, null);
 });
 
@@ -1661,8 +1673,8 @@ test("installer prepares a shared three-client payload", async () => {
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.8.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.8.0+claude.test-build");
+  assert.equal(codexManifest.version, "3.9.0+codex.test-build");
+  assert.equal(claudeManifest.version, "3.9.0+claude.test-build");
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v4", "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", "v4", "init", "gitignore.template")));
@@ -1690,7 +1702,7 @@ test("installer prepares a shared three-client payload", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 23);
+    assert.equal(tools.tools.length, 25);
     assert.deepEqual(Object.keys(CADRE_MCP_OUTPUT_SCHEMAS).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
@@ -1699,7 +1711,7 @@ test("installer prepares a shared three-client payload", async () => {
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const resources = await client.listResources();
     assert.deepEqual(
-      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v4/", "")),
+      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v5/", "")),
       [...TEMPLATE_IDS]
     );
   } finally {
@@ -1720,9 +1732,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.8.0+codex.test-build");
+  assert.equal(previousManifest.version, "3.9.0+codex.test-build");
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.8.0+codex.second-build");
+  assert.equal(updatedManifest.version, "3.9.0+codex.second-build");
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -1966,7 +1978,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 23);
+    assert.equal(tools.tools.length, 25);
     assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 80 * 1024);
     for (const name of [
       "workflow_elicit", "template_get_many", "styleguide_resolve", "context_read", "project_status",
@@ -1997,7 +2009,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     };
     assert.ok(checkpointSchema.required?.includes("scope"));
     assert.ok(checkpointSchema.required?.includes("action"));
-    assert.equal(checkpointSchema.properties?.action?.oneOf?.length, 7);
+    assert.equal(checkpointSchema.properties?.action?.oneOf?.length, 8);
     const checkpointVariants = checkpointSchema.properties?.action?.oneOf as Array<{
       properties?: { event?: { const?: string } }; required?: string[]; additionalProperties?: boolean;
     }>;
@@ -2046,22 +2058,22 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     );
     agentVisibleResult(fallback);
     const resources = await client.listResources();
-    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v4/track/spec"));
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v5/track/spec"));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v4/track/revise-operation"
+      (resource) => resource.uri === "cadre://templates/v5/track/revise-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v4/project/refresh-operation"
+      (resource) => resource.uri === "cadre://templates/v5/project/refresh-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v4/project/gitignore"
+      (resource) => resource.uri === "cadre://templates/v5/project/gitignore"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v4/track/revert-operation"
+      (resource) => resource.uri === "cadre://templates/v5/track/revert-operation"
     ));
 
-    const workflow = await client.readResource({ uri: "cadre://templates/v4/project/workflow" });
-    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v4/project/workflow");
+    const workflow = await client.readResource({ uri: "cadre://templates/v5/project/workflow" });
+    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v5/project/workflow");
     assert.match((workflow.contents[0] as { text?: string }).text ?? "", /^# Cadre Workflow/);
 
     const bundle = await client.callTool({
@@ -2505,7 +2517,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.8.0"
+      "3.9.0"
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "execution_start",
@@ -2515,7 +2527,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.8.0");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.9.0");
     assert.equal(
       (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
@@ -2526,12 +2538,12 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(legacyStage.isError, undefined);
     agentVisibleResult(legacyStage);
-    legacyProject.runtimeVersion = "3.8.0";
-    legacyProject.templateSetVersion = "v4";
+    legacyProject.runtimeVersion = "3.9.0";
+    legacyProject.templateSetVersion = "v5";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(
       join(legacyRoot, ".cadre", "workflow.md"),
-      readFileSync(join(templateRoot, "workflow.md"), "utf8")
+      readFileSync(join(providerRoot, "init/workflow.md"), "utf8")
     );
     assert.equal(validateProject(legacyRoot).errors.length, 0);
     assert.equal(validateProject(legacyRoot).warnings.length, 0);
@@ -2849,11 +2861,13 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     }
     assert.ok(existsSync(join(projectRoot, ".cadre", "project.json")));
     const initializedProject = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
-    assert.equal(initializedProject.setup.operation.approvedAt, approvedAt);
-    assert.ok(initializedProject.setup.operation.approvedArtifactHashes.length > files.length);
+    assert.equal(initializedProject.setup.operation, null);
+    const initReceipt = JSON.parse(readFileSync(join(projectRoot, ".cadre/receipts", initializedProject.setup.commit.slice(3) + ".json"), "utf8"));
+    assert.equal(initReceipt.status, "completed");
+    assert.ok(initReceipt.artifacts.length > files.length);
     assert.equal(
       readFileSync(join(projectRoot, ".cadre", "workflow.md"), "utf8"),
-      readFileSync(join(templateRoot, "workflow.md"), "utf8")
+      readFileSync(join(providerRoot, "init/workflow.md"), "utf8")
     );
     assert.ok(existsSync(join(projectRoot, ".cadre", "styleguides", "javascript.md")));
     assert.ok(existsSync(join(projectRoot, ".cadre", "styleguides", "typescript.md")));
@@ -3080,8 +3094,8 @@ test("proposal workflows validate staged plan files without transporting their c
   const refresh = readFileSync(join(root, "skills", "refresh", "SKILL.md"), "utf8");
   const revert = readFileSync(join(root, "skills", "revert", "SKILL.md"), "utf8");
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
-  assert.match(track, /planValidations: \[\{ path: "plan\.md", targetStatus: "planned" \}\]/);
-  assert.match(review, /planValidations: \[\{ path: "plan\.md", targetStatus: "in_progress" \}\]/);
+  assert.match(track, /candidate_apply.*mode: "prepare"/);
+  assert.match(review, /candidate_apply/);
   for (const [name, body] of [["revise", revise], ["refresh", refresh], ["revert", revert]] as const) {
     assert.match(body, /every staged root or nested `plan\.md`/, `${name} must cover nested plans`);
     assert.match(body, /exact candidate-relative path/, `${name} must identify each plan exactly`);
@@ -3112,7 +3126,7 @@ test("implementation guidance preserves approval, permission, semantic checkpoin
   assert.match(implement, /integration.*recording `record_integration`/s);
   assert.match(implement, /worktree_cleanup.*records `complete`/s);
   assert.match(implement, /Never checkpoint evidence before it exists/);
-  assert.match(implement, /distinct recorded SHA/);
+  assert.match(implement, /commit group/);
   assert.match(implement, /Host security permission is distinct from Cadre approval/);
   assert.match(implement, /independent read-only checks in parallel/);
   assert.match(implement, /\.cadre\/\*\*.*does not invalidate product verification/);
@@ -3259,8 +3273,9 @@ test("semantic authorization envelopes remove deterministic follow-up approvals"
   assert.match(workflow, /need no additional approval/);
   assert.match(track, /Expected human decision count is one for a clear new track/);
   assert.match(track, /do not create a specification-only approval prompt/);
-  assert.match(track, /Copy all three exact staged artifacts into the durable/);
-  assert.deepEqual(trackState.operation.approvedArtifacts, ["spec.md", "plan.md", "learning.md"]);
+  assert.match(track, /one combined commit/);
+  assert.equal(trackState.operation, null);
+  assert.equal(trackState.schemaVersion, 2);
   assert.match(revise, /Expected human decision count is one/);
   assert.match(revise, /without another prompt/);
   assert.match(refresh, /Expected human decision count is one/);

@@ -16,6 +16,7 @@ import { type AutonomousReview } from "./autonomous-review.js";
 import { buildTracks } from "./tracks-index.js";
 import { reachableGitCommits, readGitBlobs } from "./git.js";
 import { validatePlanProvenance, type PlanEvidence } from "./plan-provenance.js";
+import { isCommitRef, resolveOperation, pendingOperationErrors } from "./operation-receipts.js";
 export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
@@ -54,7 +55,7 @@ export interface TrackState {
   checkpoint?: string;
   revision?: number;
   dependencies?: string[];
-  commits?: { spec?: string | null; plan?: string | null };
+  commits?: { spec?: string | null; plan?: string | null; dependencyContext?: string | null };
   artifactProgress?: string[];
   operation?: OperationState | null;
   lastExecution?: {
@@ -118,7 +119,7 @@ function collectCommitReferences(value: unknown, owner: string, references: Comm
   for (const [key, child] of Object.entries(value)) {
     const childOwner = `${owner}.${key}`;
     const isCommit = commitContext || /^(?:commit|.*Commit|reviewedHead)$/.test(key);
-    if (isCommit && typeof child === "string" && /^[0-9a-f]{7,40}$/.test(child)) {
+    if (isCommit && isCommitRef(child)) {
       references.push({ owner: childOwner, commit: child });
     } else {
       collectCommitReferences(child, childOwner, references, key === "commits");
@@ -495,6 +496,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
   const root = cadreRoot(projectRoot);
   const errors: string[] = [];
   const warnings: string[] = [];
+  errors.push(...pendingOperationErrors(projectRoot));
   for (const file of REQUIRED_CONTEXT) {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
@@ -520,7 +522,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
   const commitReferences: CommitReference[] = [];
   const planEvidence: PlanEvidence[] = [];
   collectCommitReferences(project, "project.json", commitReferences);
-  if (project.schemaVersion !== 1) errors.push("project.json: unsupported schemaVersion");
+  if (![1, 2].includes(project.schemaVersion)) errors.push("project.json: unsupported schemaVersion");
   if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) {
     if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) {
       warnings.push(`PROJECT_REFRESH_REQUIRED: runtimeVersion ${project.runtimeVersion} must be refreshed to ${CADRE_RUNTIME_VERSION}`);
@@ -547,7 +549,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
       project.setup.artifactProgress
     );
   } else if (project.setup?.status === "completed") {
-    if (!/^[0-9a-f]{7,40}$/.test(project.setup?.commit ?? "")) {
+    if (!isCommitRef(project.setup?.commit)) {
       errors.push("project.json: completed setup requires a commit SHA");
     }
     if (project.setup.checkpoint !== "completed") errors.push("project.json: completed setup requires completed checkpoint");
@@ -555,7 +557,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
   } else {
     errors.push(`project.json: invalid setup status ${project.setup?.status ?? "<missing>"}`);
   }
-  if (project.lastRefresh && !/^[0-9a-f]{7,40}$/.test(project.lastRefresh.commit ?? "")) {
+  if (project.lastRefresh && !isCommitRef(project.lastRefresh.commit)) {
     errors.push("project.json: lastRefresh requires a commit SHA");
   }
   if (Object.hasOwn(project, "tracks")) errors.push("project.json: must not duplicate track records");
@@ -565,7 +567,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     collectCommitReferences(state, `${track.id}/state.json`, commitReferences);
     const trackRoot = join(root, track.location);
     validateTrackApprovalPolicy(state, errors, warnings);
-    if (state.schemaVersion !== 1) errors.push(`${track.id}: unsupported state schemaVersion`);
+    if (![1, 2].includes(state.schemaVersion)) errors.push(`${track.id}: unsupported state schemaVersion`);
     if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
     if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
     if (!TRACK_STATUSES.has(track.status)) errors.push(`${track.id}: invalid status ${track.status}`);
@@ -620,7 +622,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     );
     if (existsSync(learningPath)) {
       const memory = inspectMemory({ trackId: track.id, path: learningPath, body: readFileSync(learningPath, "utf8"),
-        graph: planGraph, required: ["v3", "v4"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
+        graph: planGraph, required: ["v3", "v4", "v5"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
         historical: ["completed", "archived"].includes(track.status),
         readPattern: (path) => readSafeArtifact(projectRoot, `.cadre/${path}`) });
       errors.push(...memory.errors);
@@ -698,7 +700,13 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     visited.add(id);
   }
   for (const id of byId.keys()) visit(id, []);
-  const reachability = reachableGitCommits(projectRoot, commitReferences.map((reference) => reference.commit));
+  const failedOperations = new Set<string>();
+  for (const reference of commitReferences.filter((reference) => reference.commit.startsWith("op:"))) {
+    if (failedOperations.has(reference.commit)) continue;
+    try { resolveOperation(projectRoot, reference.commit); }
+    catch (error) { failedOperations.add(reference.commit); errors.push(`${reference.owner}: ${String(error)}`); }
+  }
+  const reachability = reachableGitCommits(projectRoot, commitReferences.map((reference) => reference.commit).filter((commit) => !failedOperations.has(commit)));
   if (reachability) {
     try { errors.push(...validatePlanProvenance(projectRoot, planEvidence)); }
     catch (error) { errors.push(`plan provenance: ${String(error)}`); }

@@ -1,6 +1,6 @@
 # Cadre
 
-**Cadre 3.8.0** makes **Track** the default approval mode and adds continuous **Autonomous** implementation, verification, review, and remediation until clean. Parallel remains the scheduling default; Sequential works with every approval mode. The author makes the final completion decision. Template set **v4** preserves v1–v3; existing projects require an approved refresh, and legacy Autonomous executions require an explicit Track-or-Autonomous migration choice.
+**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
@@ -17,6 +17,7 @@ templates. A project keeps only approved, mutable delivery state under
 **Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
 [Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Release notes](https://cadre-docs.pages.dev/release-notes/)
+
 
 ## Capabilities
 

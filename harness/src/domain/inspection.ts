@@ -3,13 +3,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface InspectionMetrics { fileReads: number; reusedReads: number; readBytes: number; gitProcesses: number }
-interface Inspection { text: Map<string, string>; json: Map<string, unknown>; metrics: InspectionMetrics }
+interface Inspection { text: Map<string, string>; json: Map<string, unknown>; values: Map<string, unknown>; metrics: InspectionMetrics }
 const current = new AsyncLocalStorage<Inspection>();
 export function inspectionMetrics(): InspectionMetrics { return { fileReads: 0, reusedReads: 0, readBytes: 0, gitProcesses: 0 }; }
 
 /** Scoped to a read-only validation operation, never retained across mutations. */
 export function inspectOnce<T>(read: () => T, metrics = inspectionMetrics()): T {
-  return current.run({ text: new Map(), json: new Map(), metrics }, read);
+  return current.run({ text: new Map(), json: new Map(), values: new Map(), metrics }, read);
+}
+export function inspectionValue<T>(key: string, read: () => T): T {
+  const cache = current.getStore();
+  if (cache?.values.has(key)) return cache.values.get(key) as T;
+  const value = read(); cache?.values.set(key, value); return value;
 }
 export function readInspectionText(path: string, encoding: "utf8" = "utf8"): string {
   const cache = current.getStore(), key = resolve(path);

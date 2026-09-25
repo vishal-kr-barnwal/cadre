@@ -1,7 +1,9 @@
+import { readGitFileAtCommit } from "./git.js";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { CadreError } from "./errors.js";
+import { decodeContextCursor, encodeContextCursor, issueContextToken, retainedSources } from "./context-retention.js";
 import { inspectOnce } from "./inspection.js";
 import { contentHash, handoffSchema, inspectMemory, readSafeArtifact, seedSection, sourceFreshness, type FreshnessFinding } from "./memory.js";
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
@@ -10,14 +12,16 @@ import type { ExecutionJournal } from "./execution.js";
 import { markdownHeadings } from "./markdown-context.js";
 import { inspectExecutionBindings } from "./execution-evidence.js";
 import type { TrackState } from "./state.js";
+import { inspectDependencyContext } from "./dependency-context.js";
 
 const id = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const contextInputSchema = z.strictObject({
   projectRoot: z.string().min(1), trackId: id,
   executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).optional(),
   nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/).optional(),
-  maxBytes: z.number().int().min(4096).max(65536).default(16384),
+  maxBytes: z.number().int().min(4096).max(65536).default(49152),
   cursor: z.string().max(1024).optional(),
+  retainedContextToken: z.string().regex(/^cadre_ctx1_[A-Za-z0-9_-]{32}$/).optional(),
   knownSources: z.array(z.strictObject({ path: z.string(), sha256: z.string().regex(/^[0-9a-f]{64}$/),
     section: z.string(), contentHash: z.string().regex(/^[0-9a-f]{64}$/) })).max(256).default([])
 });
@@ -25,6 +29,8 @@ export type ContextInput = z.input<typeof contextInputSchema>;
 interface Source { path: string; sha256: string; reason: string; section: string; format: "source" | "handoff"; content: string }
 export interface ContextExcerpt extends Source { offset: number; endOffset: number; sourceComplete: boolean; contentHash: string; reused: boolean }
 export interface ContextPage {
+  dependencyContext?: { mode: "approved" | "full-source-fallback"; reason?: string };
+  retainedContextToken?: string;
   snapshot: string; complete: boolean; contextReady: boolean; nextCursor: string | null;
   totalSources: number; excerpts: ContextExcerpt[]; staleMemory: FreshnessFinding[]; errors: string[];
 }
@@ -98,7 +104,7 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
   let uncertainPatterns = false;
   const addLearning = (path: string, trackId: string, historical: boolean, selected: Set<string> | null, plan: typeof graph) => {
     const body = read(path);
-    const inspected = inspectMemory({ trackId, path, body, graph: plan, required: ["v3", "v4"].includes(project.templateSetVersion ?? ""),
+    const inspected = inspectMemory({ trackId, path, body, graph: plan, required: ["v3", "v4", "v5"].includes(project.templateSetVersion ?? ""),
       historical, readPattern: (path) => read(`.cadre/${path}`) });
     errors.push(...inspected.errors); staleMemory.push(...inspected.stale);
     if (!inspected.metadata) uncertainPatterns = true;
@@ -118,7 +124,19 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
     addLearning(`${base}/learning.md`, trackId, ["completed", "archived"].includes(dependency.status), null, plan);
     (dependency.dependencies ?? []).forEach(visitDependency);
   };
-  (state.dependencies ?? []).forEach(visitDependency);
+  let dependencyContext: ContextPage["dependencyContext"];
+  const dependencyPath = `${trackPath}/dependency-context.json`;
+  if (existsSync(join(root, dependencyPath))) {
+    try {
+      const body = read(dependencyPath);
+      const approvedReference = state.commits?.dependencyContext ?? state.commits?.plan;
+      if (!approvedReference || readGitFileAtCommit(root, approvedReference, dependencyPath) !== body) throw new Error("Dependency context is not the committed approved artifact; reassess or reconcile its receipt");
+      inspectDependencyContext(root, body, state.dependencies ?? [], graph.specRevision, graph.planRevision, read);
+      add(dependencyPath, "approved dependency contracts and inherited constraints; source fingerprints verified");
+      dependencyContext = { mode: "approved" };
+    } catch (error) { dependencyContext = { mode: "full-source-fallback", reason: String(error) }; }
+  } else if (state.dependencies?.length) dependencyContext = { mode: "full-source-fallback", reason: "Approved dependency context is missing" };
+  if (dependencyContext?.mode !== "approved") (state.dependencies ?? []).forEach(visitDependency);
   if (uncertainPatterns) for (const path of readdirSync(join(root, ".cadre/patterns")).filter((path) => /^[a-z0-9-]+\.md$/.test(path) && path !== "index.md")) {
     patternPaths.add(`patterns/${path}`);
   }
@@ -151,31 +169,34 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
     }
   }
   const identity = { projectRoot: root, trackId: input.trackId, executionId: executionId ?? null, nodeId: input.nodeId ?? null,
-    stateHash: contentHash(stateBody), inputs: [...inputHashes].sort(), sources, errors, staleMemory };
-  return { sources, errors, staleMemory, snapshot: contentHash(JSON.stringify(identity)) };
+    stateHash: contentHash(stateBody), inputs: [...inputHashes].sort(), sources, errors, staleMemory, dependencyContext };
+  return { sources, errors, staleMemory, dependencyContext, snapshot: contentHash(JSON.stringify(identity)) };
 }
 
 export function readContext(raw: ContextInput): ContextPage {
   const input = contextInputSchema.parse(raw);
   return inspectOnce(() => {
+    const scope = JSON.stringify([safeProjectRoot(input.projectRoot), input.trackId]);
+    const knownSources = [...input.knownSources, ...retainedSources(input.retainedContextToken, scope)];
     const collected = collectContext(input), { errors, staleMemory } = collected;
     const sources = collected.sources.map((source) => {
       const hash = contentHash(source.content);
-      const reused = input.knownSources.some((known) => known.path === source.path && known.sha256 === source.sha256
+      const reused = knownSources.some((known) => known.path === source.path
         && known.section === source.section && known.contentHash === hash);
       return { ...source, contentHash: hash, reused, content: reused ? "" : source.content };
     });
-    const snapshot = contentHash(JSON.stringify({ sources: collected.snapshot, knownSources: input.knownSources }));
-    const cursor = input.cursor ? cursorSchema.parse(JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8"))) : { snapshot, source: 0, offset: 0 };
+    const snapshot = contentHash(JSON.stringify({ sources: collected.snapshot, knownSources }));
+    const cursor = input.cursor ? cursorSchema.parse(decodeContextCursor(input.cursor)) : { snapshot, source: 0, offset: 0 };
     if (cursor.snapshot !== snapshot) throw new CadreError("CONTEXT_SNAPSHOT_CHANGED", "Required sources changed; restart context_read without a cursor.");
     if (cursor.source >= sources.length || cursor.offset > sources[cursor.source]!.content.length) throw new Error("invalid context cursor position");
     let source = cursor.source, offset = cursor.offset;
     const page: ContextPage = { snapshot, complete: false, contextReady: false, nextCursor: null, totalSources: sources.length, excerpts: [], errors, staleMemory };
-    const encode = () => Buffer.from(JSON.stringify({ snapshot, source, offset })).toString("base64url");
+    if (collected.dependencyContext) page.dependencyContext = collected.dependencyContext;
+    const encode = () => encodeContextCursor({ snapshot, source, offset });
     // Reserve continuation overhead; measure serialized bytes, not character or token estimates.
     while (source < sources.length) {
       const item = sources[source]!;
-      let low = 0, high = item.content.length - offset, take = 0;
+      let low = 0, high = item.content.length - offset, take = -1;
       const excerpt = (length: number): ContextExcerpt => ({ ...item, content: item.content.slice(offset, offset + length), offset,
         endOffset: offset + length, sourceComplete: offset + length === item.content.length });
       while (low <= high) {
@@ -184,8 +205,8 @@ export function readContext(raw: ContextInput): ContextPage {
         if (bytes <= input.maxBytes - 64) { take = mid; low = mid + 1; } else high = mid - 1;
       }
       // Do not split a Unicode surrogate pair.
-      if (take && /[\uD800-\uDBFF]/.test(item.content[offset + take - 1]!)) take--;
-      if (!take && item.content.length > offset) break;
+      if (take > 0 && /[\uD800-\uDBFF]/.test(item.content[offset + take - 1]!)) take--;
+      if (take < 0 || !take && item.content.length > offset) break;
       page.excerpts.push(excerpt(take)); offset += take;
       if (offset === item.content.length) { source++; offset = 0; } else break;
     }
@@ -193,6 +214,13 @@ export function readContext(raw: ContextInput): ContextPage {
     page.complete = source === sources.length;
     page.contextReady = page.complete && !errors.length && !staleMemory.length;
     page.nextCursor = page.complete ? null : encode();
+    if (page.contextReady) {
+      const inventory = new Map(knownSources.map((source) => [JSON.stringify([source.path, source.section]), source]));
+      for (const source of collected.sources) inventory.set(JSON.stringify([source.path, source.section]), {
+        path: source.path, sha256: source.sha256, section: source.section, contentHash: contentHash(source.content)
+      });
+      page.retainedContextToken = issueContextToken(scope, [...inventory.values()].slice(-2048));
+    }
     return page;
   });
 }

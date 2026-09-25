@@ -25,7 +25,7 @@ dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
 templates/v1/            # immutable published legacy templates
 templates/v2/            # immutable compact legacy templates
 templates/v3/            # immutable memory and context templates
-templates/v4/            # active approval policy and review-loop templates
+templates/v5/            # active cohesive-change and bounded-context templates
 .codex-plugin/           # Codex manifest
 .claude-plugin/          # Claude manifest
 ```
@@ -127,9 +127,9 @@ cadre(implement): ready passwordless-login
 cadre(review): complete passwordless-login
 ```
 
-Every regular implementation task has a distinct approved commit SHA. Phase
-and track verification can record existing phase-head or merge evidence instead
-of manufacturing empty commits. Revert prefers additive `git revert` commits.
+New executions commit cohesive groups of related tasks within a phase. Each task retains verification, authorization and handoff evidence; legacy executions retain their original task boundaries. Phase and track verification record existing verified HEADs. Revert uses additive `git revert` commits and requires approval for every task sharing a reversed commit.
+
+A one-task lifecycle uses six commits: initialization, combined track, product, execution completion, clean review, and archive. Stable operation references resolve through immutable receipts and verified Git trailers. Reconciliation changes only temporary recovery state.
 
 ## Learning Flow
 

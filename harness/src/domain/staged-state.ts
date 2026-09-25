@@ -35,6 +35,19 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
       && existsSync(join(root, ".cadre", journalPath))) {
       const before = readSafeArtifact(root, `.cadre/${journalPath}`);
       const previous = JSON.parse(before) as ExecutionJournal, proposed = JSON.parse(file.content) as ExecutionJournal;
+      for (const node of Object.values(previous.nodes ?? {}).filter((node) => node.kind === "task" && node.workerCommit)) {
+        const next = proposed.nodes?.[node.id];
+        if (next?.workerCommit === node.workerCommit && next.status === node.status) continue;
+        const affected = Object.values(previous.nodes).filter((sibling) => sibling.kind === "task" && sibling.workerCommit === node.workerCommit).map((sibling) => sibling.id).sort();
+        if (affected.length < 2) continue;
+        const parent = journalPath.slice(0, journalPath.indexOf("/executions/"));
+        const approval = [...overlay].some(([path, body]) => {
+          if (!path.startsWith(`${parent}/reverts/`) || !path.endsWith(".json") || path.endsWith("-execution-before.json")) return false;
+          const value = JSON.parse(body) as { sharedCommit?: string; affectedTaskIds?: string[] };
+          return value.sharedCommit === node.workerCommit && JSON.stringify([...(value.affectedTaskIds ?? [])].sort()) === JSON.stringify(affected);
+        });
+        if (!approval || affected.some((id) => !["pending", "blocked"].includes(proposed.nodes?.[id]?.status ?? ""))) throw new Error(`Shared commit ${node.workerCommit} reversal requires approval and reconciliation of the whole group: ${affected.join(", ")}`);
+      }
       const evidenceChanged = Object.entries(previous.nodes ?? {}).some(([id, node]) => {
         const next = proposed.nodes?.[id];
         return !next || ["workerCommit", "mergeCommit", "verification", "approval", "handoff", "workerHistory"].some(

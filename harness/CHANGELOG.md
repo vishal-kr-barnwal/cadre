@@ -1,5 +1,58 @@
 # Changelog
 
+## [3.9.0] - 2026-09-25
+
+Cadre 3.9.0 reduces bookkeeping commits and repeated context while preserving human approval, verification, provenance, and interruption recovery. Track remains the default approval mode and Parallel remains the default scheduling mode. Codex and Claude Code are stable integrations; native Zed Agent remains beta.
+
+### Cohesive commits and verifiable lineage
+
+- Introduce immutable template set **v5** and schema-2 project/track state. Preserve published v1–v4 templates and historical SHA-based records.
+- Replace follow-up SHA-recording commits with stable operation references and immutable receipts. Each receipt binds the approval digest, base commit, and exact artifact hashes; Git trailers identify it. Resolution verifies a unique commit reachable from HEAD and its committed contents rather than trusting a trailer alone.
+- Persist recovery intent before promotion. Pending commits block dependent delivery; reconciliation changes temporary state only. Commit execution stays with the agent's Git tools.
+- Use one initialization commit; one combined specification, plan, learning and dependency-context commit; one commit per approved revision, refresh or archive batch; and one execution-completion and clean-review commit each. Remove automatic execution-start, phase-record, final-verification-phase and clean-evidence-only commits. Explicit handoff/blocker checkpoints remain available.
+- Let related tasks in one phase share an approved commit group. Preserve individual task verification, authorization and handoffs; validate the collapsed dependency graph and schedule independent groups in parallel. A shared-commit reversal requires approval and reconciliation for every affected task.
+
+### Bounded context and MCP work
+
+- Capture approved, source-linked dependency contracts and inherited constraints on active tracks. Verify source fingerprints and approval provenance; missing or stale coverage triggers explicit reassessment or an identified full-source fallback. Required project instructions and the complete current specification/plan remain authoritative.
+- Add compact retained-context tokens after complete retrieval, section-level reuse, 48 KiB default pages and the existing 64 KiB maximum. Preserve inventory compatibility, expiry handling, context-loss resets, stale-memory checks and pagination drift detection.
+- Add atomic `complete_group` checkpoints, composite verification without separate starts, direct-main phase completion and reusable scheduler results.
+- Add constrained `candidate_apply` for track, revise, refresh, review remediation and revert reconciliation. It promotes only approved Cadre artifacts and records recovery/provenance; it cannot edit arbitrary product files or execute Git commands.
+- Cap ordinary serialized runtime errors at **8 KiB**, retaining complete diagnostics through explicit `diagnostic_read` pagination. The purpose-built MCP catalog now has 25 tools.
+
+### Integration and recovery fixes
+
+- Permit only validated, execution-bound coordinator state/journal changes during integration, and verify their contents remain unchanged. Continue rejecting unrelated dirty files and worker edits to protected Cadre state.
+- Prefer fast-forward integration; create merge commits only for divergent histories. Record integration provenance in either case.
+- Provide a narrowly ignored, ownership-checked build-cache directory and reject unowned content or symlink escapes.
+- Recover receipts whose trailers were supplied in separate Git message paragraphs, allow empty archive update manifests, and accept standard review bug artifact paths.
+- Rebase active dependency-context source paths under the approved archive batch while preserving archived learning. Batch committed artifact reads and reuse receipt resolution during an inspection.
+
+### Measured validation
+
+- **111 automated tests** cover receipts, crash recovery, grouped scheduling/reverts, dirty-state integration, bounded errors, context freshness/pagination, legacy migration and historical evidence.
+- A fresh native Codex lifecycle completed create → track → implement → clean review → archive, plus status and read-only Wisp, with **6 commits, 37 Cadre calls and zero separate verification starts**.
+- Disposable native Codex sessions exercised all ten workflows, including revision recovery, whole-group additive reversal and review remediation.
+- Controlled FRM-shaped context replay reduced combined request/response bytes by **93.4%** (743,728 → 49,033) and calls from **45 to 5**. The smaller Dhivon-shaped replay reduced bytes by **19.9%** (46,742 → 37,442), with no call-count regression.
+- A synthetic 6,113-path error serialized to **700 bytes** in the ordinary MCP response. Full diagnostics remained readable.
+
+These are synthetic regression/native-fixture results, not a same-scope rerun of the original FRM and Dhivon sessions. Token usage, elapsed time, calls and bytes are reported separately in the audit; byte reduction is not a token-savings claim.
+
+### Upgrade and compatibility
+
+```bash
+npm install -g cadre-ai@3.9.0
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, reload Claude Code plugins, and open a new Zed Agent thread. Installation updates the runtime and skills; it does not migrate project state or approve work.
+
+Use one approved refresh at a quiescent boundary to migrate an existing project to runtime 3.9.0, template set v5 and schema-2 state. Include reassessed dependency context for active tracks. Preserve approvals, findings, completed nodes, historical journals and SHA references. Existing executions retain their original contract; commit grouping applies to new executions. Cadre 3.8.0/v4 executions may continue their original contract to a safe boundary before refresh. Earlier legacy policy migrations still require their explicit authority choice.
+
+Curated dependency context requires human review for completeness. Fingerprints establish freshness and receipt verification establishes provenance; neither substitutes for assessing the actual requirements. No existing Git history is rewritten.
+
+
 ## [3.8.0] - 2026-09-08
 
 - Make Track the default approval mode, retaining Governed and Phase with independent Parallel/Sequential scheduling.

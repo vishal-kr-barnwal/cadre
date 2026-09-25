@@ -47,7 +47,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.8.0", templateSetVersion: "v4", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");
@@ -558,4 +558,55 @@ test("audit: revert cannot erase checkpoint evidence without an exact durable sn
     payload(await c.client.callTool(request));
     assert.equal(readFileSync(originalPath, "utf8"), before);
   } finally { await c.close(); }
+});
+
+test("FRM and Dhivon shaped context audit retains curated constraints with bounded requests", async (t) => {
+  const { dependencySources } = await import("../src/domain/dependency-context.js");
+  const shapes = JSON.parse(readFileSync(join(root, "test/fixtures/efficiency/baselines.json"), "utf8"));
+  for (const name of ["frm", "dhivon"]) {
+    const started = performance.now(), f = fixture(t), shape = shapes[name].shape;
+    const constraints: Array<{ id: string; text: string; sources: string[] }> = [];
+    for (const [id, dependencies] of Object.entries(shape.dependencies)) {
+      const base = archiveFixture(f, id);
+      const state = JSON.parse(readFileSync(join(base, "state.json"), "utf8")); state.dependencies = dependencies; write(join(base, "state.json"), JSON.stringify(state));
+      const sentinel = `REQUIRED_${id.replaceAll("-", "_")}: preserve inherited ${id} contract.`;
+      for (const file of ["spec.md", "learning.md"]) write(join(base, file), readFileSync(join(base, file), "utf8") + `\n${sentinel}\n` + "Historical investigation detail; this is supporting evidence, not a required constraint.\n".repeat(160));
+      constraints.push({ id, text: sentinel, sources: [`.cadre/archive/${id}/spec.md`, `.cadre/archive/${id}/learning.md`] });
+    }
+    f.state.dependencies = shape.dependencyRoots; write(join(f.base, "state.json"), JSON.stringify(f.state));
+    const measure = (optimized: boolean) => {
+      let token: string | undefined, known: Array<{ path: string; sha256: string; section: string; contentHash: string }> = [];
+      let requestBytes = 0, responseBytes = 0, calls = 0;
+      for (let run = 0; run < 5; run++) {
+        if (run === 3) { token = undefined; known = []; } // Real context loss.
+        const input = { projectRoot: f.projectRoot, trackId: "sample", nodeId: "T1.1", maxBytes: optimized ? 49152 : 16384,
+          ...(optimized ? token ? { retainedContextToken: token } : {} : { knownSources: [...known] }) };
+        let cursor: string | undefined, text = "";
+        do {
+          const request = { ...input, ...(cursor ? { cursor } : {}) }, page = readContext(request); calls++;
+          requestBytes += Buffer.byteLength(JSON.stringify(request)); responseBytes += Buffer.byteLength(JSON.stringify(page));
+          for (const excerpt of page.excerpts) { text += excerpt.content; if (!optimized && excerpt.sourceComplete) known.push({ path: excerpt.path, sha256: excerpt.sha256, section: excerpt.section, contentHash: excerpt.contentHash }); }
+          // Freeze inventory for the entire page stream; the request object retains its original array.
+          if (!optimized) known = [...known];
+          cursor = page.nextCursor ?? undefined;
+          if (page.complete) { assert.equal(page.contextReady, true); token = page.retainedContextToken; }
+        } while (cursor);
+        if (run === 0 || run === 3) for (const constraint of constraints) assert.ok(text.includes(constraint.text), `lost ${constraint.id}`);
+      }
+      return { calls, requestBytes, responseBytes, bytes: requestBytes + responseBytes };
+    };
+    const before = measure(false);
+    if (shape.dependencyRoots.length) write(join(f.base, "dependency-context.json"), JSON.stringify({ schemaVersion: 1, specRevision: 1, planRevision: 1, dependencies: shape.dependencyRoots, ...dependencySources(f.projectRoot, shape.dependencyRoots), constraints }));
+    git(f.projectRoot, "add", ".cadre"); git(f.projectRoot, "commit", "-m", "test: approved dependency context");
+    Object.assign(f.state.commits, { dependencyContext: git(f.projectRoot, "rev-parse", "HEAD") });
+    write(join(f.base, "state.json"), JSON.stringify(f.state));
+    const after = measure(true);
+    assert.ok(after.bytes <= before.bytes * (name === "frm" ? 0.5 : 1), `${name}: context regression`);
+    t.diagnostic(JSON.stringify({ fixture: name, before, after, reduction: 1 - after.bytes / before.bytes, elapsedMs: performance.now() - started, clientTokens: null }));
+    if (name === "frm") {
+      write(join(f.projectRoot, ".cadre/archive/contract-a/spec.md"), "CHANGED_REQUIRED_GUIDANCE");
+      const changed = readContext({ projectRoot: f.projectRoot, trackId: "sample", maxBytes: 65536 });
+      assert.equal(changed.dependencyContext?.mode, "full-source-fallback"); assert.ok(changed.excerpts.some((entry) => entry.content.includes("CHANGED_REQUIRED_GUIDANCE")));
+    }
+  }
 });

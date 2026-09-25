@@ -1,0 +1,512 @@
+{
+  "schemaVersion": 1,
+  "byteDefinition": "UTF-8 JSON serialization of captured MCP argument/result payloads, excluding JSON-RPC framing. Token counters are client-reported and are not inferred from bytes. Manual starts are identified by a matching composite verification checkpoint in the same log; unmatched task starts are reported separately.",
+  "runs": [
+    {
+      "run": "lifecycle",
+      "completed": true,
+      "elapsedLogWriteSeconds": 105,
+      "cadreCalls": 6,
+      "failedCadreCalls": 1,
+      "countByTool": {
+        "candidate_apply": 1,
+        "candidate_stage_prepare": 1,
+        "project_init_candidate": 2,
+        "styleguide_resolve": 1,
+        "template_get_many": 1
+      },
+      "serializedRequestBytes": 867,
+      "serializedResponseBytes": 18524,
+      "context": {
+        "calls": 0,
+        "requestBytes": 0,
+        "responseBytes": 0
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 427569,
+          "cached_input_tokens": 378496,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2273,
+          "reasoning_output_tokens": 97
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        }
+      ]
+    },
+    {
+      "run": "lifecycle-resume",
+      "completed": true,
+      "elapsedLogWriteSeconds": 279,
+      "cadreCalls": 26,
+      "failedCadreCalls": 1,
+      "countByTool": {
+        "candidate_apply": 6,
+        "candidate_stage_prepare": 2,
+        "context_read": 2,
+        "execution_checkpoint": 7,
+        "execution_finish": 1,
+        "execution_start": 1,
+        "project_status": 4,
+        "review_complete": 2,
+        "template_get_many": 1
+      },
+      "serializedRequestBytes": 6762,
+      "serializedResponseBytes": 54027,
+      "context": {
+        "calls": 2,
+        "requestBytes": 245,
+        "responseBytes": 30923
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 2302663,
+          "cached_input_tokens": 2225408,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5526,
+          "reasoning_output_tokens": 174
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete_group",
+          "node": "T1.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T1.2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T2.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P2"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        }
+      ]
+    },
+    {
+      "run": "lifecycle-finish",
+      "completed": true,
+      "elapsedLogWriteSeconds": 121,
+      "cadreCalls": 6,
+      "failedCadreCalls": 0,
+      "countByTool": {
+        "archive_batch_candidate": 2,
+        "candidate_apply": 1,
+        "candidate_stage_prepare": 1,
+        "project_status": 2
+      },
+      "serializedRequestBytes": 635,
+      "serializedResponseBytes": 5276,
+      "context": {
+        "calls": 0,
+        "requestBytes": 0,
+        "responseBytes": 0
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 505211,
+          "cached_input_tokens": 465408,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2470,
+          "reasoning_output_tokens": 42
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        }
+      ]
+    },
+    {
+      "run": "changes",
+      "completed": true,
+      "elapsedLogWriteSeconds": 531,
+      "cadreCalls": 47,
+      "failedCadreCalls": 1,
+      "countByTool": {
+        "candidate_apply": 15,
+        "candidate_inspect": 1,
+        "candidate_stage_prepare": 5,
+        "context_read": 4,
+        "execution_checkpoint": 8,
+        "execution_finish": 1,
+        "execution_start": 1,
+        "project_status": 7,
+        "template_get_many": 5
+      },
+      "serializedRequestBytes": 11905,
+      "serializedResponseBytes": 92082,
+      "context": {
+        "calls": 4,
+        "requestBytes": 754,
+        "responseBytes": 45079
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 2156330,
+          "cached_input_tokens": 2053504,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 14253,
+          "reasoning_output_tokens": 1325
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "resume"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete_group",
+          "node": "T1.1"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete_group",
+          "node": "T1.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T1.3"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T2.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P2"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        }
+      ]
+    },
+    {
+      "run": "changes-finish",
+      "completed": true,
+      "elapsedLogWriteSeconds": 220,
+      "cadreCalls": 21,
+      "failedCadreCalls": 0,
+      "countByTool": {
+        "candidate_apply": 5,
+        "candidate_inspect": 1,
+        "context_read": 1,
+        "execution_checkpoint": 7,
+        "execution_finish": 1,
+        "execution_start": 1,
+        "project_status": 3,
+        "review_complete": 2
+      },
+      "serializedRequestBytes": 7096,
+      "serializedResponseBytes": 56219,
+      "context": {
+        "calls": 1,
+        "requestBytes": 109,
+        "responseBytes": 33629
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 921217,
+          "cached_input_tokens": 861184,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 4481,
+          "reasoning_output_tokens": 24
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P3"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete_group",
+          "node": "T3.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T3.2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P3"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P4"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T4.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P4"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        }
+      ]
+    },
+    {
+      "run": "clean-lifecycle",
+      "completed": true,
+      "elapsedLogWriteSeconds": 310,
+      "cadreCalls": 37,
+      "failedCadreCalls": 0,
+      "countByTool": {
+        "archive_batch_candidate": 2,
+        "candidate_apply": 7,
+        "candidate_stage_prepare": 3,
+        "context_read": 2,
+        "execution_checkpoint": 7,
+        "execution_finish": 1,
+        "execution_start": 1,
+        "project_init_candidate": 2,
+        "project_status": 6,
+        "review_complete": 2,
+        "styleguide_resolve": 1,
+        "template_get_many": 3
+      },
+      "serializedRequestBytes": 7960,
+      "serializedResponseBytes": 78580,
+      "context": {
+        "calls": 2,
+        "requestBytes": 257,
+        "responseBytes": 32143
+      },
+      "verificationStarts": 0,
+      "unclassifiedTaskStarts": 0,
+      "clientUsage": [
+        {
+          "input_tokens": 1778175,
+          "cached_input_tokens": 1702656,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 7073,
+          "reasoning_output_tokens": 63
+        }
+      ],
+      "checkpointSequence": [
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "prepare"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "apply"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete_group",
+          "node": "T1.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T1.2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "start",
+          "node": "P2"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "record_verification",
+          "node": "T2.1"
+        },
+        {
+          "tool": "execution_checkpoint",
+          "event": "complete",
+          "node": "P2"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        },
+        {
+          "tool": "candidate_apply",
+          "mode": "reconcile"
+        }
+      ]
+    }
+  ]
+}

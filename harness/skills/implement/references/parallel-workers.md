@@ -9,3 +9,7 @@ Every worker prompt includes its absolute worktree, track/execution/node IDs, ap
 Workers must not merge, rebase, reset, clean up, force Git operations, or switch to other plan work. A phase worker must stop at a clean handoff while task workers for that phase are active.
 
 Supply workers a bounded context handoff with required source paths/hashes and exact relevant learning, not the parent's entire conversation. Workers must read required sources if they do not already have their current content. Their result includes the typed task handoff (`decisions`, `failedApproaches`, `openQuestions`, `nextAction`, `sources`) within 8 KiB; main persists it with the existing task checkpoint. Never silently trim required constraints to fit a prompt.
+
+## Cohesive execution contract
+
+For a new cohesive-v1 execution, main may assign a whole approved commit group. Execute its internal dependencies in order, verify every task, and return individual authorization, verification and handoff evidence with one shared product commit. Never split a group across workers or independently schedule a member before the group's external dependencies. Legacy executions keep their original task boundaries. Main owns atomic complete_group, Git integration, receipts and all Cadre state. Use only the owned build-cache path main supplies. Fast-forward integration is valid provenance; do not require a merge object.

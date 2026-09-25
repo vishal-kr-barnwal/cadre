@@ -1,9 +1,9 @@
-import { readGitBlobs } from "./git.js";
+import { readGitBlobs, resolveGitCommit } from "./git.js";
 import { parsePlanContent } from "./plan.js";
 
 export interface PlanEvidence { owner: string; commit: string; path: string; planRevision: number; graphDigest: string }
 export function validatePlanProvenance(root: string, evidence: PlanEvidence[]): string[] {
-  const requests = evidence.map((entry) => `${entry.commit}:${entry.path}`);
+  const requests = evidence.map((entry) => `${entry.commit.startsWith("op:") ? resolveGitCommit(root, entry.commit) : entry.commit}:${entry.path}`);
   const files = readGitBlobs(root, [...new Set(requests)]);
   return evidence.flatMap((entry, index) => {
     const body = files.get(requests[index]!);

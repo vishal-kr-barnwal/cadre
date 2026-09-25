@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
+import { resolveOperation } from "./operation-receipts.js";
 
 export function gitRoot(projectRoot: string): string {
   const root = realpathSync(safeProjectRoot(projectRoot));
@@ -15,6 +16,7 @@ export function gitRoot(projectRoot: string): string {
 }
 
 export function resolveGitCommit(projectRoot: string, revision = "HEAD"): string {
+  if (revision.startsWith("op:")) return resolveOperation(projectRoot, revision);
   const root = gitRoot(projectRoot);
   const result = spawnSync("git", ["rev-parse", "--verify", `${revision}^{commit}`], { cwd: root, encoding: "utf8" });
   if (result.status !== 0) throw new Error(`Git commit is not reachable: ${revision}`);
@@ -34,6 +36,8 @@ export function readGitFileAtCommit(projectRoot: string, revision: string, path:
 }
 
 export function isGitAncestor(projectRoot: string, ancestor: string, descendant = "HEAD"): boolean {
+  if (ancestor.startsWith("op:")) ancestor = resolveOperation(projectRoot, ancestor);
+  if (descendant.startsWith("op:")) descendant = resolveOperation(projectRoot, descendant);
   const root = gitRoot(projectRoot);
   return spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
     cwd: root,
@@ -77,7 +81,7 @@ export function reachableGitCommits(projectRoot: string, revisions: Iterable<str
   const history = new Set(listed.stdout.split(/\r?\n/).filter(Boolean));
   countGitProcess();
   const resolved = spawnSync("git", ["cat-file", "--batch-check=%(objectname) %(objecttype)"], {
-    cwd: root, encoding: "utf8", input: unique.map((revision) => `${revision}^{commit}\n`).join(""),
+    cwd: root, encoding: "utf8", input: unique.map((revision) => `${revision.startsWith("op:") ? resolveOperation(root, revision) : revision}^{commit}\n`).join(""),
     maxBuffer: 64 * 1024 * 1024
   });
   if (resolved.status !== 0) throw new Error((resolved.stderr || "cannot resolve Git provenance").trim());

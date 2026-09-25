@@ -50,6 +50,7 @@ export const TEMPLATE_IDS = [
   "styleguide/swiftui",
   "styleguide/typescript",
   "track/bug",
+  "track/dependency-context",
   "track/execution",
   "track/learning",
   "track/plan",
@@ -61,6 +62,7 @@ export const TEMPLATE_IDS = [
 ] as const;
 
 const TEMPLATE_ARTIFACT_PATHS: Partial<Record<(typeof TEMPLATE_IDS)[number], string>> = {
+  "track/dependency-context": "dependency-context.json",
   "track/revision": "revisions/revision-<id>.md",
   "project/refresh": "refreshes/refresh-<id>.md",
   "project/refresh-operation": "operations/refresh-<id>.json",

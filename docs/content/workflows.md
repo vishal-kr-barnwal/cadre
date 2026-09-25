@@ -43,9 +43,8 @@ approval covering:
 
 Cadre asks when feature versus bug, scope, interfaces, compatibility,
 acceptance, or dependencies remain materially ambiguous. A drafting track is
-resumed rather than replaced. Specification and plan still receive separate
-provenance commits, but commits, generated state, and bookkeeping inherit the
-combined approval. The human can explicitly request staged spec/plan review.
+resumed rather than replaced. V5 specification, plan, learning, state and dependency context share one
+approved commit and immutable operation receipt. The human can explicitly request staged spec/plan review.
 
 ## implement
 
@@ -126,8 +125,8 @@ Use `archive` after a clean approved review. It accepts explicit track IDs,
 
 One digest-bound batch can move multiple completed tracks, distill their
 learning with existing patterns, reseed active tracks, update lifecycle state,
-and rebuild `tracks.md`. A follow-up state commit records the archive commit as
-part of the same approved decision.
+and rebuild `tracks.md`. An immutable operation receipt records provenance in that same commit;
+reconciliation touches temporary state only.
 
 Only `archive` can mark a track archived.
 

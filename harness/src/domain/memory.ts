@@ -112,7 +112,7 @@ export function inspectMemory(input: {
 export function requireFreshTrackMemory(projectRoot: string, trackId: string): void {
   const root = safeProjectRoot(projectRoot);
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json")) as { templateSetVersion?: string };
-  if (!["v3", "v4"].includes(project.templateSetVersion ?? "")) return;
+  if (!["v3", "v4", "v5"].includes(project.templateSetVersion ?? "")) return;
   const path = `.cadre/tracks/${trackId}/learning.md`;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trackId)) throw new Error("invalid trackId");
   const plan = readSafeArtifact(root, `.cadre/tracks/${trackId}/plan.md`);

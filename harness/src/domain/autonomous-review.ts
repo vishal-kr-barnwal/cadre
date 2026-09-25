@@ -7,7 +7,7 @@ export const autonomousReviewSchema = z.strictObject({
   originExecutionId: executionId,
   authorizedAt: z.iso.datetime(),
   initialBaseCommit: commit,
-  specCommit: commit,
+  specCommit: z.string().regex(/^(?:[0-9a-f]{7,40}|op:[a-z0-9][a-z0-9-]{7,95})$/),
   checkpoint: z.enum(["implementing", "reviewing", "remediating", "awaiting_approval", "blocked", "completed"]),
   reviewedExecutionId: executionId.optional(),
   reviewedHead: commit.optional(),

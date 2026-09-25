@@ -52,9 +52,7 @@ $cadre:track Add passwordless login as a feature
 /cadre-track Add passwordless login as a feature
 ```
 
-Cadre proposes `spec.md`, `plan.md`, and `learning.md` together when the request
-is clear. One approval covers the specification, validated plan graph, pattern
-seed, lifecycle transition, generated state, and separate provenance commits.
+Cadre proposes specification, plan, learning, dependency context and state together when the request is clear. One approval covers the validated graph, commit groups, inherited constraints, pattern seed, lifecycle transition, generated state and one receipt-bearing commit.
 Ask for staged specification/plan review explicitly when desired.
 
 The plan is an acyclic dependency graph:

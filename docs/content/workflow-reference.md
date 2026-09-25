@@ -26,7 +26,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   MCP receives only their paths and metadata. Base files are staged directly as
   `product.md`, `guidelines.md`, `tech-stack.md`, `workflow.md`, and
   `styleguides/general.md`; there is no `.cadre/init/` directory.
-- **Writes:** initial `.cadre/` state and setup provenance commits.
+- **Writes:** initial `.cadre/` state and receipt in one initialization commit.
 - **Stops when:** setup is complete; an initialized project routes to refresh
   or status.
 
@@ -42,8 +42,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   validation instead of restarting it.
 - **Approvals:** one combined specification-and-plan decision by default;
   staged review only when explicitly requested.
-- **Writes:** `state.json`, `spec.md`, `plan.md`, and `learning.md` with separate
-  provenance commits inside the combined authorization envelope.
+- **Writes:** `state.json`, `spec.md`, `plan.md`, `learning.md`, dependency context and receipt in one combined commit.
 - **Stops at:** `planned` with recorded spec/plan commits.
 
 ## implement
@@ -56,7 +55,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Primary MCP:** execution start/node/status/finish, graph validation,
   worktree create/integrate/cleanup, project/worktree status, and derived index.
 - **Writes:** execution journal, task commits, plan/learning provenance, and
-  Cadre bookkeeping commits. After `execution_finish`, one final
+  one product commit per cohesive change. After `execution_finish`, one final
   `cadre(implement): complete <track-id>` commit contains only the completed
   journal, plan markers, track state, and derived index.
 - **Implementation handoff:** `ready_for_review`; never `completed`. Autonomous
@@ -99,7 +98,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Use for:** one or more tracks already completed by clean review.
 - **Primary MCP:** adaptive staged archive command and atomic provenance record.
 - **Writes:** track moves/status, consolidated patterns, relevant active-track
-  seeds, operation journal, derived index, and two provenance commits.
+  seeds, immutable receipt and derived index in one commit.
 - **Atomicity:** one ineligible selection rejects the whole batch.
 - **Stops at:** `archived`.
 
@@ -110,7 +109,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Evidence:** user input, repository changes since setup/last refresh,
   completed outcomes, and current code/manifests.
 - **Writes:** approved project context, refresh record/journal, affected seeds,
-  derived index, and provenance commits.
+  derived index and receipt in one commit.
 - **Active work:** execution-governing changes wait for a safe boundary and
   affected tracks follow revision impact analysis inside the same refresh
   approval envelope.

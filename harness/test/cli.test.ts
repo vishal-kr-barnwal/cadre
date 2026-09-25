@@ -55,11 +55,11 @@ function runCli(args: string[], env = process.env) {
 test("global CLI exposes publish identity and self-contained runtime diagnostics", () => {
   const version = runCli(["--version"]);
   assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), "3.8.0");
+  assert.equal(version.stdout.trim(), "3.9.0");
 
   const doctor = runCli(["doctor"]);
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.match(doctor.stdout, /cadre-ai@3\.8\.0/);
+  assert.match(doctor.stdout, /cadre-ai@3\.9\.0/);
   assert.match(doctor.stdout, new RegExp(`template catalog: ${TEMPLATE_IDS.length}/${TEMPLATE_IDS.length}`));
   assert.match(doctor.stdout, /self-contained runtime: ok/);
 
@@ -83,7 +83,7 @@ test("npm package carries every workflow and immutable template asset", () => {
     ".claude-plugin/plugin.json", ".mcp.codex.json", ".mcp.json",
     "CHANGELOG.md",
     "agents/cadre-phase-worker.md", "agents/cadre-task-worker.md",
-    "templates/v4/init/wisps/.gitkeep"
+    "templates/v5/init/wisps/.gitkeep"
   ]) {
     assert.ok(files.has(path), `npm package is missing ${path}`);
   }
@@ -94,7 +94,7 @@ test("npm package carries every workflow and immutable template asset", () => {
     assert.ok(files.has(`skills/${skill}/SKILL.md`), `npm package is missing the ${skill} workflow`);
   }
   for (const template of templateCatalog()) {
-    const path = `templates/v4/${template.relativePath}`;
+    const path = `templates/v5/${template.relativePath}`;
     assert.ok(files.has(path), `npm package is missing template ${template.id} at ${path}`);
   }
 });
@@ -104,7 +104,7 @@ test("doctor and installer reject an incomplete immutable template catalog", () 
   for (const entry of ["dist", ".codex-plugin", ".claude-plugin", "skills", "templates"]) {
     cpSync(join(root, entry), join(packageRoot, entry), { recursive: true });
   }
-  unlinkSync(join(packageRoot, "templates", "v4", "init", "gitignore.template"));
+  unlinkSync(join(packageRoot, "templates", "v5", "init", "gitignore.template"));
 
   const doctor = spawnSync(process.execPath, [join(packageRoot, "dist", "cadre-cli.mjs"), "doctor"], {
     cwd: packageRoot,

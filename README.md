@@ -17,7 +17,8 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-**Cadre 3.8.0** makes **Track** the default approval mode and adds continuous **Autonomous** implementation, verification, review, and remediation until clean. Parallel remains the scheduling default; Sequential works with every approval mode. The author makes the final completion decision. Template set **v4** preserves v1–v3; existing projects require an approved refresh, and legacy Autonomous executions require an explicit Track-or-Autonomous migration choice.
+**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
+
 
 ## What Cadre Provides
 

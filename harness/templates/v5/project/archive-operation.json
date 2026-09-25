@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "action": "archive",
+  "batchId": "archive-{{ARCHIVE_TS}}",
+  "status": "in_progress",
+  "checkpoint": "approved",
+  "baseCommit": "{{BASE_COMMIT}}",
+  "expectedCommit": "{{EXPECTED_COMMIT}}",
+  "selectedTracks": ["{{TRACK_ID}}"],
+  "completedTracks": [],
+  "approvedArtifacts": ["{{APPROVED_ARTIFACT}}"],
+  "approvalDigest": "{{APPROVAL_DIGEST}}",
+  "approvedArtifactHashes": [
+    { "path": "{{APPROVED_ARTIFACT}}", "sha256": "{{ARTIFACT_SHA256}}" }
+  ],
+  "artifactProgress": [],
+  "approvedAt": "{{APPROVED_AT}}",
+  "archiveCommit": null
+}

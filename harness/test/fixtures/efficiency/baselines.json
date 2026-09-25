@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "sanitization": "Aggregate counts and synthetic topology only. No project source, user prompts, logs, credentials, or private paths.",
+  "frm": {
+    "commits": { "product": 47, "cadreOnly": 71, "merge": 6 },
+    "calls": { "cadre": 1002, "context": 576, "contextContinuations": 507, "verificationStarts": 27 },
+    "bytes": { "contextRequests": 2493505, "contextResponses": 31327109 },
+    "clientTokens": { "input": 262359601, "cachedInput": 254753536, "output": 1037971, "reasoning": 248490 },
+    "shape": { "executions": 9, "tasks": 47, "phases": 27, "dependencyRoots": ["contract-a", "contract-b"], "dependencies": { "contract-a": ["foundation", "coverage", "query", "ingestion"], "contract-b": ["foundation", "parser", "store", "operations"], "coverage": ["projection"], "query": ["projection"], "projection": [], "foundation": [], "ingestion": [], "parser": [], "store": [], "operations": [] } },
+    "failures": ["dirty-owned-execution-state", "shared-task-commit-rejected", "context-page-budget", "unrelated-untracked-file"]
+  },
+  "dhivon": {
+    "commits": { "product": 13, "cadreOnly": 12, "merge": 6 },
+    "calls": { "cadre": 171, "context": 68, "contextContinuations": 39, "verificationStarts": 3 },
+    "bytes": { "contextRequests": 102039, "contextResponses": 1660579, "oversizedError": 628796 },
+    "clientTokens": { "input": 81661742, "cachedInput": 78503936, "output": 333826 },
+    "shape": { "executions": 1, "dependencyRoots": [], "dependencies": {}, "untrackedCachePaths": 6113 },
+    "failures": ["dirty-owned-execution-state", "snapshot-drift", "unowned-build-cache"]
+  }
+}

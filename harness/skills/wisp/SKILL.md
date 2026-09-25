@@ -16,3 +16,7 @@ When the exploration needs a material clarification and the Cadre MCP is availab
 5. If the result should become product work, recommend the Cadre track workflow; do not retroactively mutate Cadre state from the wisp.
 
 Wisp bypasses delivery tracking, not safety, repository instructions, or read-before-edit discipline.
+
+## Bounded reporting
+
+This workflow creates no commits. Reuse retained context and the latest mutation receipt when available; status itself is read-only. Report `commit_pending` as unresolved provenance, never as completed delivery. Clear retainedContextToken after context loss. Use diagnostic_read only for explicitly needed full diagnostics; ordinary errors are capped at 8 KiB. Never migrate or normalize historical state from this workflow.

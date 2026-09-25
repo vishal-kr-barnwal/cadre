@@ -12,6 +12,7 @@ export interface PlanTask {
   dependencies: string[];
   dependencyDeclared: boolean;
   manualVerification: boolean;
+  commitGroup?: string;
   line: number;
 }
 
@@ -53,6 +54,7 @@ function graphDigest(graph: Omit<PlanGraph, "digest">): string {
         title: task.title,
         dependencies: task.dependencies,
         manualVerification: task.manualVerification
+        ,...(task.commitGroup ? { commitGroup: task.commitGroup } : {})
       }))
     }))
   };
@@ -140,6 +142,11 @@ export function parsePlanContent(content: string, sourceLabel: string, errors: s
       continue;
     }
 
+    const group = line.match(/^  - Commit group: (.+)$/);
+    if (group) {
+      if (!currentTask || currentTask.commitGroup) errors.push(`${sourceLabel}:${lineNumber}: misplaced or duplicate commit group`);
+      else currentTask.commitGroup = group[1]!.trim();
+    }
     const taskDependencies = line.match(/^  - Task dependencies: (.+)$/);
     if (taskDependencies) {
       if (!currentTask) errors.push(`${sourceLabel}:${lineNumber}: task dependencies do not follow a task`);
@@ -228,6 +235,7 @@ export function validatePlanGraph(path: string, graph: PlanGraph, status: string
       errors.push(`${path}: final track verification phase must contain only User Manual Verification`);
     }
     phase.tasks.forEach((task, taskIndex) => {
+      if (task.commitGroup && (task.manualVerification || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(task.commitGroup))) errors.push(`${path}:${task.line}: invalid commit group; only delivery tasks may be grouped`);
       if (task.phaseId !== phase.id) errors.push(`${path}:${task.line}: ${task.id} is in the wrong phase`);
       if (task.ordinal !== taskIndex + 1) errors.push(`${path}:${task.line}: task ordinals must be sequential`);
       if (task.checked && !task.commit) errors.push(`${path}:${task.line}: completed task ${task.id} has no commit marker`);
@@ -254,6 +262,17 @@ export function validatePlanGraph(path: string, graph: PlanGraph, status: string
     if (phaseDone && !phase.completionCommit) errors.push(`${path}: completed ${phase.id} has no completion commit`);
     if (!phaseDone && phase.completionCommit) errors.push(`${path}: incomplete ${phase.id} has a completion commit`);
     findCycles(phase.tasks, `${path}:${phase.id}`, errors);
+    const groups = new Map<string, Set<string>>();
+    const groupId = (task: PlanTask) => task.commitGroup ? `group:${task.commitGroup}` : task.id;
+    for (const task of phase.tasks) {
+      const key = groupId(task), dependencies = groups.get(key) ?? new Set<string>();
+      for (const id of task.dependencies) {
+        const parent = phase.tasks.find((candidate) => candidate.id === id);
+        if (parent && groupId(parent) !== key) dependencies.add(groupId(parent));
+      }
+      groups.set(key, dependencies);
+    }
+    findCycles([...groups].map(([id, dependencies]) => ({ id, dependencies: [...dependencies] })), `${path}:${phase.id}:commit groups`, errors);
   });
   if (!finalPhase.trackVerification) errors.push(`${path}: final phase must be Track-level User Manual Verification`);
   findCycles(graph.phases, path, errors);

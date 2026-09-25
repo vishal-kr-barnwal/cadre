@@ -5,6 +5,18 @@ description: Prepare and execute a human-approved Git-aware revert of a Cadre ta
 
 # Cadre Revert
 
+## Cohesive commits and retained context
+
+For v5/schema-2 state, each approved operation produces one immutable receipt under `.cadre/receipts/` and a temporary recovery journal under `.cadre/stage/operations/`. Apply returns `receipt` (or the receipt fields directly): `operationId`, `receiptHash`, `trailers`, and `status: commit_pending`. Include the promoted files and receipt in one agent-created Git commit with both exact returned trailers. Commit execution stays with the agent. Use `candidate_apply` with `request: {mode: "reconcile", projectRoot, operationId}` after committing; reconciliation verifies a unique reachable commit and committed artifacts and changes temporary state only. Never add a follow-up record-SHA commit. An operation reference is `op:<operationId>`, not a Git revision to pass directly to shell Git. Resolve it through receipt reconciliation before Git range commands.
+
+Before any dependent delivery, resolve `commit_pending`. On interruption, inspect the persisted recovery journal and original approval; use `candidate_apply` with `request: {mode: "resume", projectRoot, operationId, approvalDigest}` to finish the already-approved promotion. Reconcile an existing commit before creating another. Any drift or ambiguous/forged receipt blocks continuation. Never replace an approved recovery journal or fabricate its approval.
+
+Use the scheduler and validation in mutation results. Do not immediately request the same status again. For `context_read`, retain `retainedContextToken` only after a complete successful read. Pass it on later reads only while that text remains in context, with the same token across continuation pages. Clear it after compaction, context loss, expiration, or a fresh task. Keep `knownSources` only for compatibility. Default pages are 48 KiB, maximum 64 KiB. Section identity/content hashes allow reuse despite unrelated file changes; source freshness is checked independently. Required project instructions, full current spec/plan, applicable constraints, and repository instructions remain authoritative. Consume every page and require `contextReady`. An explicit full-source dependency fallback must be read completely and reassessed; do not silently omit guidance.
+
+Serialized errors are bounded to 8 KiB. Use `diagnostic_read` with the returned diagnostic ID only when fuller evidence is needed; paginate it. Do not dump cache path lists into conversation. Build outputs belong in the runtime-returned owned `buildCachePath`, never an arbitrary `.cadre/.build-cache` directory.
+
+Legacy SHA records and immutable v1–v4 templates remain evidence. Migrate through one approved refresh at a quiescent boundary before creating a v5 execution. Retain each existing execution's original contract and preserve approvals, completed nodes, findings, journals, and archived learning. The v5 commit instructions here replace legacy follow-up provenance commits described below.
+
 Load `.cadre/workflow.md`, project/track state, spec, plan, learning, review/revision history, recorded task commits, Git history, working tree, and dependent tracks. Read every affected file and relevant later diff before proposing a revert.
 
 At every required clarification or approval boundary, show a concise impact summary or focused diff. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the exact revert proposal checkpoint. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
@@ -23,9 +35,15 @@ Expected human decision count is one on the clean path. The exact revert proposa
 
 If exact commit provenance is missing or commits mix unrelated work, stop with a precise manual recovery plan.
 
+## v5 group reversal and reconciliation
+
+A task sharing a product commit cannot be reverted alone. Enumerate every task using that SHA, present the whole group and downstream effects, and obtain explicit approval for all of it. Include a staged reversal record with `sharedCommit` and exact `affectedTaskIds`, reset every affected task as approved, and retain the exact original journal snapshot. Candidate validation rejects silent sibling reversal.
+
+After the authorized additive Git reversal commits, use `candidate_apply` prepare/apply with `workflow: "revert"` for the approved reconciliation manifest. Include the actual reversal receipt, original journal snapshot, restored execution bindings, plan, learning and dependency context. This replaces direct promotion and steps 6–7's two-commit bookkeeping on v5. Make one reconciliation commit with the immutable operation receipt and exact trailers; reconcile it without filling a self-referential SHA or making a record-revert commit. Never repeat recorded reversal commits on recovery.
+
 ## Memory contract
 
-Preserve phase history and existing handoffs. For active v3/v4 tracks, keep the marked `cadre:memory` JSON block inside Pattern Seed synchronized with the proposed spec/plan revisions and exact approved pattern hashes. Every applicable pattern requires its safe `patterns/<slug>.md` path, SHA-256, and human-readable relevance/constraints; never invent or silently omit guidance. When a staged plan changes revisions, include the reassessed learning file in `expectedFiles`. Inspect `candidate_inspect.learning` and `memoryInputs` as well as `plans`; resolve invalid or stale memory before approval. Immediately before direct promotion, re-inspect and compare the complete approved digest, including unchanged memory inputs; changed inputs require reassessment and a corrected approval. Archive apply performs this check in the runtime. Completed and archived learning remains historical evidence, not a claim that old hashes describe current patterns.
+Preserve phase history and existing handoffs. For active v3/v4/v5 tracks, keep the marked `cadre:memory` JSON block inside Pattern Seed synchronized with the proposed spec/plan revisions and exact approved pattern hashes. Every applicable pattern requires its safe `patterns/<slug>.md` path, SHA-256, and human-readable relevance/constraints; never invent or silently omit guidance. When a staged plan changes revisions, include the reassessed learning file in `expectedFiles`. Inspect `candidate_inspect.learning` and `memoryInputs` as well as `plans`; resolve invalid or stale memory before approval. Immediately before direct promotion, re-inspect and compare the complete approved digest, including unchanged memory inputs; changed inputs require reassessment and a corrected approval. Archive apply performs this check in the runtime. Completed and archived learning remains historical evidence, not a claim that old hashes describe current patterns.
 
 ## Preparation safety and execution binding
 
@@ -37,7 +55,7 @@ Candidate paths never include a leading `.cadre/`: use `state.json`, `plan.md`, 
 
 Stage the final post-reconciliation state, retaining the original implement operation, rather than a temporary revert operation containing unknown approval fields. After approval, materialize the temporary revert journal from the template with the actual digest/time before Git mutation, retaining the execution binding in lastExecution. The final staged state restores implement ownership. Do not put unresolved approval placeholders or a self-referential digest into approved candidate bytes.
 
-## Durable revert receipt
+## Legacy SHA durable revert receipt
 
 When resetting node evidence, stage the exact original execution journal as `reverts/revert-<id>-execution-before.json` before changing the proposed journal. Include it in the same inspected manifest and approval. This preserves original verification, authorization, commit pointers and handoffs; keeping only the old commit SHA is insufficient. Preserve all other nodes and derived dependencies. Set the proposed journal checkpoint to `reverted:<target-id>` so status does not claim the reset task remains completed.
 

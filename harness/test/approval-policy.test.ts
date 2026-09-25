@@ -36,7 +36,7 @@ function fixture(t: { after(fn: () => void): void }) {
   const state: TrackState = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", checkpoint: "ready", revision: 1,
     dependencies: [], commits: { spec: base, plan: base }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
   write(join(track, "state.json"), state);
-  write(join(root, ".cadre/project.json"), { schemaVersion: 1, runtimeVersion: "3.8.0", templateSetVersion: "v4", project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
+  write(join(root, ".cadre/project.json"), { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
   const render = () => writeTracks(root, renderTracksPreview(root).digest);
   render(); git(root, "add", ".cadre"); git(root, "commit", "-m", "test: record approved context");
   const load = () => JSON.parse(readFileSync(join(track, "state.json"), "utf8")) as TrackState;

@@ -22,3 +22,7 @@ Present:
 - staged proposal manifests, malformed stages, and canonical candidates awaiting safe cleanup.
 
 Read any file before quoting or interpreting it. Do not mutate files, run commits, or silently normalize state.
+
+## Bounded reporting
+
+This workflow creates no commits. Reuse retained context and the latest mutation receipt when available; status itself is read-only. Report `commit_pending` as unresolved provenance, never as completed delivery. Clear retainedContextToken after context loss. Use diagnostic_read only for explicitly needed full diagnostics; ordinary errors are capped at 8 KiB. Never migrate or normalize historical state from this workflow.

@@ -13,7 +13,9 @@ import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
 import { parsePlan, parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
 import { renderTracksWithState } from "./tracks-index.js";
-import { reachableGitCommits, resolveGitCommit } from "./git.js";
+import { isGitAncestor, reachableGitCommits, resolveGitCommit } from "./git.js";
+import { isCommitRef, operationRef, promoteOperation, requireCommittedOperations } from "./operation-receipts.js";
+import { executionBuildCache } from "./build-cache.js";
 
 export const EXECUTION_NODE_STATUSES = [
   "pending", "running", "awaiting_approval", "committed", "integrating",
@@ -22,6 +24,7 @@ export const EXECUTION_NODE_STATUSES = [
 export type ExecutionNodeStatus = typeof EXECUTION_NODE_STATUSES[number];
 
 export interface ExecutionNode {
+  commitGroup?: string;
   id: string;
   kind: "phase" | "task" | "manual-verification";
   phaseId: string;
@@ -40,6 +43,7 @@ export interface ExecutionNode {
 }
 
 export interface ExecutionJournal {
+  executionContract?: "cohesive-v1";
   schemaVersion: number;
   executionId: string;
   trackId: string;
@@ -130,6 +134,7 @@ export function deriveExecutionStartInput(input: ExecutionStartRequest): Executi
 }
 
 export interface ExecutionProposal {
+  buildCachePath?: string;
   journalPath: string;
   journal: ExecutionJournal;
   statePath: string;
@@ -138,6 +143,7 @@ export interface ExecutionProposal {
 }
 
 export interface ExecutionFinishProposal extends ExecutionProposal {
+  receipt?: ReturnType<typeof promoteOperation>;
   planPath: string;
   planContent: string;
   tracksPath: string;
@@ -145,6 +151,7 @@ export interface ExecutionFinishProposal extends ExecutionProposal {
 }
 
 export interface ExecutionDerivedStatus {
+  readyGroups?: Array<{ id: string; phaseId: string; tasks: string[] }>;
   readyPhases: string[];
   readyTasks: string[];
   active: string[];
@@ -168,6 +175,7 @@ export interface ExecutionTransitionReceipt {
 }
 
 export interface ExecutionSchedulerView {
+  readyGroups?: Array<{ id: string; phaseId: string; tasks: string[] }>;
   readyPhases: string[];
   readyTasks: string[];
   active: string[];
@@ -265,6 +273,7 @@ function buildNodes(graph: PlanGraph): Record<string, ExecutionNode> {
     };
     for (const task of phase.tasks) {
       nodes[task.id] = {
+        ...(task.commitGroup ? { commitGroup: task.commitGroup } : {}),
         id: task.id,
         kind: task.manualVerification ? "manual-verification" : "task",
         phaseId: phase.id,
@@ -288,6 +297,7 @@ function buildNodes(graph: PlanGraph): Record<string, ExecutionNode> {
 }
 
 export function previewExecutionStart(input: ExecutionStartInput): ExecutionProposal {
+  requireCommittedOperations(input.projectRoot);
   assertIdentifiers(input.trackId, input.executionId);
   if (input.executionId.startsWith("execution-")) {
     throw new Error("executionId must omit the execution- journal filename prefix");
@@ -310,7 +320,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   const inheritedMode = state.lastExecution ? resolveApprovalMode(state.lastExecution, state.approvalModeMigration) : undefined;
   const approvalMode = input.approvalMode ?? inheritedMode ?? "track";
   if (!EXECUTION_APPROVAL_MODES.includes(approvalMode)) throw new Error("approvalMode must be governed, phase, track, or autonomous");
-  if (approvalMode === "autonomous" && !SHA.test(state.commits?.spec ?? "")) throw new Error("Autonomous execution requires an approved specification commit");
+  if (approvalMode === "autonomous" && !isCommitRef(state.commits?.spec)) throw new Error("Autonomous execution requires an approved specification commit");
   if (state.autonomousReview && approvalMode !== "autonomous") throw new Error("Changing an active Autonomous loop requires an approved refresh that archives its authority in history");
   if (state.autonomousReview && approvalMode === "autonomous") {
     requireReviewProgress(state.autonomousReview);
@@ -320,7 +330,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   if (state.trackId !== input.trackId) throw new Error("track state does not match trackId");
   if (!["planned", "in_progress"].includes(state.status)) throw new Error(`track ${input.trackId} is not implementable from ${state.status}`);
   if (state.operation != null) throw new Error(`track ${input.trackId} already has an active operation`);
-  if (!SHA.test(state.commits?.plan ?? "")) throw new Error("track has no approved plan commit");
+  if (!isCommitRef(state.commits?.plan)) throw new Error("track has no approved plan commit");
   const planReachability = reachableGitCommits(input.projectRoot, [state.commits!.plan!]);
   if (planReachability?.get(state.commits!.plan!) === false) {
     throw new Error(`approved plan commit is not reachable: ${state.commits!.plan!}`);
@@ -337,6 +347,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   const relativeJournal = journalRelative(input.executionId);
   const journalPath = join(trackRoot, relativeJournal);
   const journal: ExecutionJournal = {
+    ...(state.schemaVersion === 2 ? { executionContract: "cohesive-v1" as const } : {}),
     schemaVersion: 1,
     executionId: input.executionId,
     trackId: input.trackId,
@@ -348,7 +359,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     approvalPolicyVersion: APPROVAL_POLICY_VERSION,
     maxWorkers: input.maxWorkers,
     planRevision,
-    planCommit: state.commits!.plan!,
+    planCommit: state.commits!.plan!.startsWith("op:") ? resolveGitCommit(input.projectRoot, state.commits!.plan!) : state.commits!.plan!,
     ...(planReachability ? { planSource } : {}),
     graphDigest: graph.digest,
     baseCommit: input.baseCommit,
@@ -412,12 +423,13 @@ export function applyExecutionStart(
 ): ExecutionProposal & { derivedStatus: ExecutionDerivedStatus } {
   const proposal = preparedProposal ?? previewExecutionStart(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution proposal is stale; preview it again");
+  if (proposal.state.schemaVersion === 2) proposal.buildCachePath = executionBuildCache(input.projectRoot, input.trackId, input.executionId);
   if (lstatSync(proposal.statePath).isSymbolicLink()) throw new Error("refusing to start execution through a state symbolic link");
   mkdirSync(dirname(proposal.journalPath), { recursive: true });
   if (!existsSync(proposal.journalPath)) {
     writeFileSync(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
   }
-  writeFileSync(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
+  writeTextAtomically(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
   return { ...proposal, derivedStatus: deriveExecutionStatus(proposal.journal) };
 }
 
@@ -490,6 +502,7 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
   if (journal.status !== "in_progress") throw new Error("execution is not in progress");
   const node = journal.nodes[input.nodeId];
   if (!node) throw new Error(`unknown execution node ${input.nodeId}`);
+  if (node.status === "completed" && input.status === "completed" && Object.keys(input).every((key) => key === "nodeId" || key === "status")) return;
   const workerAssignmentChanged = Object.hasOwn(input, "workerId")
     && (input.workerId ?? null) !== node.workerId;
   const phaseWorkerHandoff = node.kind === "phase"
@@ -516,7 +529,10 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
     Object.values(journal.nodes).filter((candidate) => candidate.status === "completed").map((candidate) => candidate.id)
   );
   if (input.status === "running") {
-    const incompleteDependencies = node.dependencies.filter((dependency) => !completed.has(dependency));
+    const group = node.commitGroup ? Object.values(journal.nodes).filter((candidate) => candidate.phaseId === node.phaseId && candidate.commitGroup === node.commitGroup) : [node];
+    const internal = new Set(group.map((candidate) => candidate.id));
+    const external = group.flatMap((candidate) => candidate.dependencies.filter((dependency) => !internal.has(dependency)));
+    const incompleteDependencies = [...new Set([...node.dependencies, ...external])].filter((dependency) => !completed.has(dependency));
     if (incompleteDependencies.length) {
       throw new Error(`${node.id} has incomplete dependencies: ${incompleteDependencies.join(", ")}`);
     }
@@ -564,6 +580,7 @@ function applyNodeTransition(journal: ExecutionJournal, input: ExecutionNodeUpda
         && candidate.kind === "task"
         && candidate.phaseId === node.phaseId
         && candidate.workerCommit === updated.workerCommit
+        && !(journal.executionContract === "cohesive-v1" && node.commitGroup && node.commitGroup === candidate.commitGroup)
     );
     if (duplicate) {
       throw new Error(`${node.id} must use a distinct worker commit from ${duplicate.id}`);
@@ -669,9 +686,14 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
   );
   const eventGuidance = Object.fromEntries(Object.values(journal.nodes).map((node) => {
     const allowed: Array<{ event: ExecutionCheckpointEvent; requiredFields: string[] }> = [];
-    if (node.status === "pending") allowed.push({ event: "start", requiredFields: [] });
+    if (node.status === "pending") allowed.push(node.kind === "manual-verification"
+      ? { event: "record_verification", requiredFields: ["commit", "verification", "authorization"] }
+      : node.commitGroup ? { event: "complete_group", requiredFields: ["commit", "tasks"] }
+      : { event: "start", requiredFields: [] });
     if (node.status === "running") {
-      allowed.push(node.kind === "manual-verification"
+      allowed.push(node.kind === "phase" && Object.values(journal.nodes).every((task) => task.phaseId !== node.id || task.kind === "phase" || task.status === "completed")
+        ? { event: "complete", requiredFields: ["commit", "verification", "authorization"] }
+        : node.kind === "manual-verification"
         ? { event: "record_verification", requiredFields: ["commit", "verification", "authorization"] }
         : { event: "record_commit", requiredFields: ["commit", "verification", "authorization"] });
     }
@@ -695,9 +717,15 @@ function deriveExecutionStatus(journal: ExecutionJournal): ExecutionDerivedStatu
     return [node.id, { currentStatus: node.status, allowed }];
   }));
   return {
+    ...(journal.executionContract === "cohesive-v1" ? { readyGroups: Object.values(journal.nodes).filter((node) => node.commitGroup
+      && node.status === "pending" && journal.nodes[node.phaseId]?.status === "running"
+      && groupTaskOrder(journal, node)[0] === node.id)
+      .map((node) => ({ id: node.commitGroup!, phaseId: node.phaseId, tasks: groupTaskOrder(journal, node) }))
+      .filter((group) => group.tasks.every((id) => journal.nodes[id]!.dependencies.every((dependency) => group.tasks.includes(dependency) || completed.has(dependency)))) } : {}),
     readyPhases: ready.filter((node) => node.kind === "phase").map((node) => node.id),
     readyTasks: ready.filter(
       (node) => node.kind !== "phase" && journal.nodes[node.phaseId]?.status === "running"
+        && (!node.commitGroup || groupTaskOrder(journal, node)[0] === node.id && groupTaskOrder(journal, node).every((id) => journal.nodes[id]!.dependencies.every((dependency) => groupTaskOrder(journal, node).includes(dependency) || completed.has(dependency))))
     ).map((node) => node.id),
     active: Object.values(journal.nodes).filter((node) => !["pending", "completed", "blocked"].includes(node.status)).map((node) => node.id),
     blocked: Object.values(journal.nodes).filter((node) => node.status === "blocked").map((node) => node.id),
@@ -718,6 +746,7 @@ export function executionSchedulerView(
     ...focusNodeIds
   ]);
   return {
+    ...(status.readyGroups ? { readyGroups: status.readyGroups } : {}),
     readyPhases: status.readyPhases,
     readyTasks: status.readyTasks,
     active: status.active,
@@ -781,11 +810,12 @@ export function executionStatus(projectRoot: string, trackId: string, executionI
 }
 
 export const EXECUTION_CHECKPOINT_EVENTS = [
-  "start", "record_commit", "record_integration", "record_verification", "complete", "block", "resume"
+  "start", "record_commit", "record_integration", "record_verification", "complete_group", "complete", "block", "resume"
 ] as const;
 export type ExecutionCheckpointEvent = typeof EXECUTION_CHECKPOINT_EVENTS[number];
 
 export interface ExecutionCheckpointInput {
+  tasks?: Array<{ nodeId: string; verification: string; authorization: string; handoff: Handoff }>;
   projectRoot: string;
   trackId: string;
   executionId: string;
@@ -799,6 +829,17 @@ export interface ExecutionCheckpointInput {
   verification?: string;
   authorization?: string;
   blocker?: string;
+}
+
+function groupTaskOrder(journal: ExecutionJournal, node: ExecutionNode): string[] {
+  const members = Object.values(journal.nodes).filter((candidate) => candidate.kind === "task" && candidate.phaseId === node.phaseId && candidate.commitGroup === node.commitGroup);
+  const pending = new Set(members.map((member) => member.id)), ordered: string[] = [];
+  while (pending.size) {
+    const next = members.find((member) => pending.has(member.id) && member.dependencies.every((id) => !pending.has(id)));
+    if (!next) throw new Error("Commit group contains a dependency cycle");
+    ordered.push(next.id); pending.delete(next.id);
+  }
+  return ordered;
 }
 
 function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpointInput): ExecutionNodeUpdate[] {
@@ -832,6 +873,35 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
   };
 
   switch (input.event) {
+    case "complete_group": {
+      if (journal.executionContract !== "cohesive-v1" || !node.commitGroup || !commit || !input.tasks) throw new Error("complete_group requires a new grouped execution, shared commit, and individual task evidence");
+      const order = groupTaskOrder(journal, node);
+      if (new Set(input.tasks.map((task) => task.nodeId)).size !== input.tasks.length
+        || input.tasks.length !== order.length || order.some((id) => !input.tasks!.some((task) => task.nodeId === id))) throw new Error("complete_group must include every task in the approved commit group exactly once");
+      const integrationHead = journal.nodes[node.phaseId]?.worktreePath ? resolveGitCommit(journal.nodes[node.phaseId]!.worktreePath!) : "HEAD";
+      if (!isGitAncestor(input.projectRoot, commit, integrationHead)) throw new Error("Shared product commit must be reachable from the integration target before group completion");
+      const trial = structuredClone(journal);
+      for (const id of order) {
+        const task = trial.nodes[id]!, evidence = input.tasks.find((candidate) => candidate.nodeId === id)!;
+        if (!evidence.verification.trim() || !evidence.authorization.trim()) throw new Error(`${id} requires individual verification and authorization`);
+        if (task.status === "completed") {
+          if (task.workerCommit !== commit || task.verification !== evidence.verification || task.approval !== evidence.authorization || JSON.stringify(task.handoff) !== JSON.stringify(handoffSchema.parse(evidence.handoff))) throw new Error(`${id}: completed group evidence differs from recovery request`);
+          continue;
+        }
+        const append = (update: ExecutionNodeUpdate) => { applyNodeTransition(trial, update); updates.push(update); };
+        if (["committed", "integrated"].includes(task.status)) {
+          if (task.workerCommit !== commit || task.worktreePath && task.status !== "integrated") throw new Error(`${id} must be integrated with the shared group commit`);
+          append({ nodeId: id, status: "completed", verification: evidence.verification, approval: evidence.authorization, handoff: handoffSchema.parse(evidence.handoff) });
+          continue;
+        }
+        if (task.status === "pending") append({ nodeId: id, status: "running" });
+        else if (task.status !== "running") throw new Error(`${id} cannot complete a group from ${task.status}`);
+        append({ nodeId: id, status: "awaiting_approval", verification: evidence.verification });
+        append({ nodeId: id, status: "committed", workerCommit: commit, approval: evidence.authorization, handoff: handoffSchema.parse(evidence.handoff) });
+        append({ nodeId: id, status: "completed" });
+      }
+      break;
+    }
     case "start":
       start();
       break;
@@ -902,6 +972,7 @@ function checkpointUpdates(journal: ExecutionJournal, input: ExecutionCheckpoint
       updates.push({ nodeId: node.id, status: "pending" });
       break;
   }
+  if (!updates.length && input.event === "complete_group") updates.push({ nodeId: groupTaskOrder(journal, node).at(-1)!, status: "completed" });
   if (!updates.length) throw new Error(`${input.event} produced no change for ${node.id}`);
   if (input.handoff !== undefined) {
     if (!["record_commit", "block"].includes(input.event)) throw new Error("handoffs require record_commit or block");
@@ -1117,6 +1188,10 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
       completedAt: input.completedAt
     }
   };
+  if (state.schemaVersion === 2 && !stateAlreadyCompleted) {
+    const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
+    completedState.history = [...(Array.isArray(state.history) ? state.history : []), { action: "implement", commit: operationRef(operationId) }];
+  }
   const { tracksPath, tracksBody, tracksContent } = renderTracksWithState(
     input.projectRoot,
     statePath,
@@ -1132,6 +1207,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
     tracksPath,
     tracksContent,
     digest: hash({
+      learningBody: readSafeArtifact(input.projectRoot, `.cadre/tracks/${input.trackId}/learning.md`),
       stateBody,
       journalBody,
       planBody,
@@ -1156,6 +1232,18 @@ export function applyExecutionFinish(
     || lstatSync(proposal.planPath).isSymbolicLink()
     || lstatSync(proposal.tracksPath).isSymbolicLink()) {
     throw new Error("refusing to complete execution through a symbolic link");
+  }
+  if (proposal.state.schemaVersion === 2) {
+    const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
+    const prefix = `.cadre/tracks/${input.trackId}`;
+    const files = [
+      { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
+      { path: `${prefix}/state.json`, content: `${JSON.stringify(proposal.state, null, 2)}\n` },
+      { path: `${prefix}/plan.md`, content: proposal.planContent },
+      { path: `${prefix}/learning.md`, content: readSafeArtifact(input.projectRoot, `${prefix}/learning.md`) },
+      { path: ".cadre/tracks.md", content: proposal.tracksContent }
+    ];
+    return { ...proposal, receipt: promoteOperation(input.projectRoot, { operationId, kind: "implement", approvalDigest: proposalDigest, baseCommit: input.headCommit }, files) };
   }
   writeTextAtomically(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
   writeTextAtomically(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
@@ -1233,7 +1321,7 @@ export function validateExecutionJournal(
       const actual = journal.nodes?.[id];
       const wanted = expected[id]!;
       if (!actual) continue;
-      if (actual.kind !== wanted.kind || actual.phaseId !== wanted.phaseId
+      if (actual.kind !== wanted.kind || actual.phaseId !== wanted.phaseId || actual.commitGroup !== wanted.commitGroup
         || JSON.stringify(actual.dependencies) !== JSON.stringify(wanted.dependencies)) {
         errors.push(`${state.trackId}: execution node ${id} structure does not match the current plan graph`);
       }

@@ -147,12 +147,11 @@ For each regular worker task:
 4. It stops with changes uncommitted and returns the diff, checks, risks,
    learning candidates, and proposed commit message.
 5. Main records `awaiting_approval` and presents the evidence.
-6. After approval, the worker commits only that task.
+6. After approval, the worker commits the assigned task or whole approved group.
 7. Main verifies the clean worktree and records the commit SHA.
 8. Main calls adaptive integration when a branch boundary exists.
 
-Every regular task receives a distinct Conventional Commit and recorded SHA,
-including tasks handled sequentially by one phase worker.
+New plans may group closely related tasks within one phase using `Commit group: <slug>`. Schedule the collapsed group graph, reject cycles, and execute internal dependencies in order. Independent groups may run in parallel. Each group produces one product commit; `complete_group` records every task’s verification, authorization and handoff atomically. Legacy executions retain distinct task commits. A shared-commit revert must identify and approve all affected tasks.
 
 ## Integration And Cleanup
 
@@ -160,7 +159,7 @@ Task branches merge without squashing into their derived parent. Delegated work
 in a multi-task or phase-verified delivery phase uses a phase integration
 worktree; direct canonical integration is reserved for an explicitly direct
 single-task phase. Phase branches merge without squashing into the canonical
-branch. Before integration the MCP verifies clean source/target worktrees,
+branch. Fast-forward when ancestry permits; create a merge commit only for divergent histories. Integration provenance records either result. Before integration the MCP verifies clean source worktrees and target worktrees except for the narrowly validated active coordinator state/journal,
 protected Cadre paths, branch tips, and changed files.
 
 If a merge conflicts:
@@ -183,7 +182,7 @@ main agent presents and records the human decision.
 The final track-level manual verification depends on every delivery phase and
 runs only in the main agent against the fully integrated canonical worktree.
 Manual-verification nodes can record current commit/merge evidence instead of
-creating empty commits.
+creating empty commits. Use the composite `record_verification` action without a separate verification start. A direct-main phase completes in one checkpoint at its verified HEAD. Durable journals remain on disk; only an explicit handoff/blocker checkpoint needs a temporary checkpoint commit.
 
 ## Host Permission Preflight
 

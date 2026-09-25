@@ -29,13 +29,13 @@ workflow packets.
 
 ## Template Resources
 
-Every file under active `templates/v4/` is registered as an immutable MCP resource:
+Every file under active `templates/v5/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v4/<logical-id>
+cadre://templates/v5/<logical-id>
 ```
 
-Published `templates/v1/` and `templates/v2/` remain byte-stable for legacy reads. The internal
+Published `templates/v1/` through `templates/v4/` remain byte-stable for legacy reads. The internal
 catalog records provider paths, but public descriptors expose logical ID, URI,
 eventual artifact path, media type, and SHA-256 hash. Template content appears once: inside structured template descriptors for
 recognized structured clients, or as embedded resources/text blocks for text
@@ -56,7 +56,8 @@ operation journal are promoted.
 | Templates | `template_get_many`, `styleguide_resolve`, MCP resources |
 | Project health | `project_status`, `state_validate` |
 | Required context | `context_read` |
-| Candidate artifacts | `candidate_stage_prepare`, `candidate_inspect` |
+| Diagnostics | `diagnostic_read` |
+| Candidate artifacts | `candidate_stage_prepare`, `candidate_inspect`, `candidate_apply` |
 | Plan graph | `execution_graph_validate` |
 | Review governance | `review_complete` |
 | Archive governance | `archive_batch_candidate`, `archive_batch_record` |
@@ -77,7 +78,7 @@ clients receive compact JSON text without a structured duplicate. Unknown or
 proxy client identities deliberately use the text fallback; MCP has no standard
 client capability for structured result consumption.
 
-All 23 tools advertise output schemas to structured clients. Text clients do not
+All 25 tools advertise output schemas to structured clients. Text clients do not
 receive output schemas, since MCP requires structured content when a schema is
 advertised. Server-side success-payload validation remains active in both modes.
 Errors retain `isError` and use one JSON text block for every client. This keeps native Claude diagnostics visible without duplicating the payload. No extra prose summary is emitted.
@@ -134,18 +135,14 @@ This makes clarification-driven scope contraction convergent: obsolete regular
 files are removed only inside the owned ignored candidate stage after a full
 symlink/non-file preflight.
 
-Not every workflow write has a dedicated MCP mutation. Track drafting,
-revision, refresh, remediation, and revert use skill-side candidate staging,
-digest-bound approval journals, direct promotion, MCP validation, and
-derived-index gates. Contributors should not add generic file-write tools to
-erase that explicit ownership boundary.
+Track, revision, refresh, review remediation and revert reconciliation use constrained `candidate_apply` promotion. It validates an exact approved manifest and required context, promotes only allowed Cadre artifacts, and updates state/indexes together. It cannot write arbitrary product files or execute Git commands. Recovery replays persisted intent; receipt reconciliation changes ignored temporary state only.
 
 ## Git Boundary
 
 MCP Git operations are limited to Cadre-derived worktrees:
 
 - create/reconcile a worker worktree and record node start;
-- non-squash merge a clean worker branch and record integration;
+- fast-forward a clean worker branch when possible, otherwise merge divergent history, and record integration;
 - report conflicts without resolving them;
 - remove a clean integrated worktree/branch and record completion.
 
@@ -172,3 +169,11 @@ Validation reuses file contents and parsed journals within one read-only inspect
 `node --import tsx --test test/memory.test.ts` from `harness/` runs recovery, freshness, client-format, and context-size scenarios. Diagnostics report bytes, file reads/reuse, Git process counts, and timings. The 100-task fixture compares the former full-read behavior with scoped reads on the same evidence corpus; it is not a claim about billed tokens or live-agent task success. Small-project overhead is reported separately, and client schema catalog growth is measured rather than hidden.
 
 Retained-source inventories are session-scoped declarations, not a server cache. The runtime rechecks hashes on each read and explicitly marks reused sections; fresh sessions must reacquire their text. Markdown fences do not define learning sections, and ambiguous structure expands the read.
+
+## Bounded context and diagnostics
+
+A successful complete context retrieval issues a process-local `retainedContextToken`, valid for 30 minutes subject to bounded eviction. Passing it asserts that the caller still retains all delivered text. Clear it after context loss; expiration requires a fresh read. Section identity and content hashes enable reuse when unrelated parts of a file change; whole-source hashes still participate in drift/freshness checks. The knownSources interface remains compatible. Signed cursors prevent skipping undelivered pages to acquire a reusable token.
+
+Active tracks may use approved dependency-context artifacts with source fingerprints and explicit inherited constraints. Missing/stale coverage produces an identified full-source fallback. Required instructions and the complete current spec/plan remain authoritative.
+
+Errors, including the serialized MCP envelope, are capped at 8 KiB. Large failures provide a code, count, representative paths and diagnostic ID. Full diagnostics require explicit paginated diagnostic_read calls; they expire after 30 minutes or bounded eviction.

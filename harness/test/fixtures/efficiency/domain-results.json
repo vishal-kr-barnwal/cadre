@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-25",
+  "tests": {
+    "total": 111,
+    "passed": 111,
+    "failed": 0,
+    "elapsedMs": 22746.484375
+  },
+  "measurements": [
+    {
+      "commits": 6,
+      "checkpointCalls": 7,
+      "verificationStartCalls": 0,
+      "elapsedMs": 5657.226458,
+      "clientTokens": null
+    },
+    {
+      "fixture": "100-node aggregate retrieval with cold resume",
+      "recordedResponseBytes": 1869620,
+      "responseBytes": 511214,
+      "requestBytes": 286093,
+      "pages": 100,
+      "actualTokens": null
+    },
+    {
+      "fixture": "frm",
+      "before": {
+        "calls": 45,
+        "requestBytes": 42781,
+        "responseBytes": 700947,
+        "bytes": 743728
+      },
+      "after": {
+        "calls": 5,
+        "requestBytes": 897,
+        "responseBytes": 48136,
+        "bytes": 49033
+      },
+      "reduction": 0.9340713271518619,
+      "elapsedMs": 636.0071250000001,
+      "clientTokens": null
+    },
+    {
+      "fixture": "dhivon",
+      "before": {
+        "calls": 5,
+        "requestBytes": 10197,
+        "responseBytes": 36545,
+        "bytes": 46742
+      },
+      "after": {
+        "calls": 5,
+        "requestBytes": 897,
+        "responseBytes": 36545,
+        "bytes": 37442
+      },
+      "reduction": 0.1989645286894014,
+      "elapsedMs": 273.1771669999998,
+      "clientTokens": null
+    }
+  ],
+  "oversizedError": {
+    "paths": 6113,
+    "serializedMcpErrorBytes": 700,
+    "limitBytes": 8192
+  }
+}

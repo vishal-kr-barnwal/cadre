@@ -84,7 +84,7 @@ export function prepareCandidateStage(projectRootInput: string, candidateIdInput
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe Cadre directory: ${cadreRoot}`);
   } else mkdirSync(cadreRoot);
   const gitignorePath = join(cadreRoot, ".gitignore");
-  let content = "# Cadre-managed temporary execution worktrees\n/.worktrees/\n\n# Disposable Wisp output\n/wisps/\n";
+  let content = getTemplates(["project/gitignore"])[0]!.content;
   if (existsSync(gitignorePath)) {
     const stat = lstatSync(gitignorePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`Unsafe Cadre ignore file: ${gitignorePath}`);
@@ -92,6 +92,8 @@ export function prepareCandidateStage(projectRootInput: string, candidateIdInput
   }
   if (!content.split(/\r?\n/).includes("/stage/")) {
     content = `${content.endsWith("\n") ? content : `${content}\n`}\n# Unapproved candidate artifacts\n/stage/\n`;
+  }
+  if (!existsSync(gitignorePath) || readFileSync(gitignorePath, "utf8") !== content) {
     const temporaryPath = `${gitignorePath}.${process.pid}.tmp`;
     try {
       writeFileSync(temporaryPath, content, { flag: "wx" });
@@ -187,3 +189,4 @@ export function listCandidatePaths(projectRootInput: string, candidateIdInput: s
   });
   return walk(root).sort();
 }
+import { getTemplates } from "./templates.js";
