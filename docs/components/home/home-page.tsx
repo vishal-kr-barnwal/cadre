@@ -114,15 +114,17 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
           <div className="flex max-w-3xl flex-col gap-8">
             <div className="flex flex-col gap-5">
               <h1 className="max-w-3xl text-5xl leading-[1.03] font-semibold tracking-normal text-cadre-ink sm:text-6xl lg:text-7xl">
-                Cadre
+                Cadre AI
               </h1>
               <p className="text-2xl leading-snug font-medium text-cadre-ink sm:text-3xl">
                 Measure twice, code once.
               </p>
               <p className="max-w-2xl text-lg leading-8 text-muted-foreground">
-                Cadre is a human-governed, Git-aware delivery harness for Codex and
-                Claude Code, combining approved project context, spec-first tracks,
-                resumable execution, review gates, and safe parallel worktrees.
+                Cadre AI is an open-source workflow harness for Codex, Claude Code,
+                and Zed Agent. Published on npm as{" "}
+                <Link className="underline underline-offset-4" href="https://www.npmjs.com/package/cadre-ai">cadre-ai</Link>,
+                it combines approved project context, spec-first plans, resumable
+                execution, review gates, and parallel Git worktrees. Zed support is beta.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -215,7 +217,8 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                 All guides
               </h2>
               <p className="text-muted-foreground">
-                Markdown-backed pages rendered by the Next.js docs shell.
+                Guides for installing cadre-ai, planning work, running coding agents,
+                and reviewing changes with human approval.
               </p>
             </div>
             <Badge variant="secondary">{docs.length} pages</Badge>

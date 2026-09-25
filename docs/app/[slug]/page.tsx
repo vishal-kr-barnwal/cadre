@@ -20,6 +20,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Separator } from "@/components/ui/separator"
+import { StructuredData } from "@/components/structured-data"
+import { pageMetadata, siteUrl } from "@/lib/seo"
 
 type PageProps = {
   params: Promise<{ slug: string }>
@@ -35,10 +37,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { slug } = await params
   try {
     const doc = getDocBySlug(slug)
-    return {
-      title: doc.title,
-      description: doc.description,
-    }
+    return pageMetadata(doc.title, doc.description, `${doc.href}/`)
   } catch {
     return {}
   }
@@ -53,16 +52,39 @@ export default async function DocPage({ params }: PageProps) {
   }
 
   const doc = getDocBySlug(slug)
+  const breadcrumbs = [
+    { name: "Home", href: "/" },
+    ...(doc.sectionHref !== doc.href ? [{ name: doc.section, href: `${doc.sectionHref}/` }] : []),
+    { name: doc.title, href: `${doc.href}/` },
+  ]
 
   return (
     <DocsShell docs={docs} headings={doc.headings}>
+      <StructuredData data={{
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: breadcrumbs.map((crumb, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          name: crumb.name,
+          item: siteUrl(crumb.href),
+        })),
+      }} />
       <div className="mx-auto flex max-w-3xl flex-col gap-8 xl:mx-0">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link href={doc.sectionHref} />}>{doc.section}</BreadcrumbLink>
+              <BreadcrumbLink render={<Link href="/" />}>Home</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
+            {doc.sectionHref !== doc.href ? (
+              <>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link href={doc.sectionHref} />}>{doc.section}</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+              </>
+            ) : null}
             <BreadcrumbItem>
               <BreadcrumbPage>{doc.title}</BreadcrumbPage>
             </BreadcrumbItem>

@@ -58,6 +58,8 @@ jobs:
       - name: Typecheck docs
         run: pnpm --filter cadre-docs typecheck
       - name: Build static export
+        env:
+          GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
         run: pnpm --filter cadre-docs build
       - name: Ensure Cloudflare Pages project
         working-directory: docs

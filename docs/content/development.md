@@ -83,6 +83,32 @@ When React components are touched, keep static data at module scope, reuse the
 existing shadcn components, and avoid adding client-side state for content-only
 changes.
 
+### Search discovery and indexing
+
+The production site is `https://cadre-docs.pages.dev/`. The static build emits
+`/sitemap.xml` from the documentation catalog and `/robots.txt` with its sitemap
+location. Each page has a distinct canonical URL, title, description and social
+metadata. The homepage includes WebSite structured data, and guides include
+breadcrumbs matching the visible navigation. These improve discovery and
+identification; they do not guarantee Google indexing or rankings.
+
+After deployment, use [Google Search Console](https://search.google.com/search-console/)
+to add the **URL-prefix property** `https://cadre-docs.pages.dev/`. For HTML-tag
+verification, copy only the supplied tag's `content` value into the GitHub
+repository Actions variable `GOOGLE_SITE_VERIFICATION`, then rerun **Deploy Docs**
+for the intended commit. The build includes the verification tag only when that
+value is configured. Keep it configured after verification to retain ownership.
+
+Submit `https://cadre-docs.pages.dev/sitemap.xml` in Search Console, inspect the
+homepage and a guide, and request indexing. Use the Page Indexing report to
+diagnose exclusions. npm's package page is outside this site's Search Console
+property. See [Google's sitemap guidance](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap).
+
+Production canonicals remain on the production origin for preview builds; an
+optional `NEXT_PUBLIC_BASE_PATH` is included consistently. Change `SITE_ORIGIN`
+in `docs/lib/seo.ts` only as part of an intentional domain migration. Do not add
+invented ratings, reviews or modification dates to search metadata.
+
 ## Release gates
 
 Run frozen-lockfile installation, harness type checking, full tests, package validation, `pnpm --filter cadre-ai pack --dry-run`, and the documentation check. Keep the changelog entry under Unreleased until publication is authorized and the candidate is verified.

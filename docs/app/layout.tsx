@@ -4,6 +4,7 @@ import type { Metadata } from "next"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { cn } from "@/lib/utils";
+import { HOME_TITLE, SITE_DESCRIPTION, SITE_ORIGIN } from "@/lib/seo"
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'})
 
@@ -13,12 +14,15 @@ const fontMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_ORIGIN),
   title: {
-    default: "Cadre Docs",
-    template: "%s | Cadre Docs",
+    default: HOME_TITLE,
+    template: "%s | Cadre AI Docs",
   },
-  description:
-    "Documentation for Cadre, the context-driven development harness for AI coding agents.",
+  description: SITE_DESCRIPTION,
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
 }
 
 export default function RootLayout({
