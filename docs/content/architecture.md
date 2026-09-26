@@ -28,8 +28,9 @@ harness/
 ├── scripts/
 ├── templates/
 │   ├── v1/                 # immutable published legacy set
-│   ├── v2/                 # immutable compact legacy set
-│   └── v3/                 # active memory/context set
+│   ├── …
+│   ├── v5/                 # immutable published legacy set
+│   └── v6/                 # active template set
 ├── test/
 ├── .codex-plugin/plugin.json
 ├── .claude-plugin/plugin.json
@@ -58,10 +59,8 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `src/domain/governance.ts` | Review completion and archive-batch governance. |
 | `src/mcp/server.ts` | MCP server instructions, resource registration, schemas, and tool adapters. |
 | `scripts/` | Build, CLI, installation, uninstall, permissions, packaging, and source validation. |
-| `templates/v1/` | Immutable published 3.3 template set. |
-| `templates/v2/` | Immutable published compact template set. |
-| `templates/v3/` | Immutable published memory and context templates. |
-| `templates/v5/` | Active cohesive-change, receipt, dependency-context, workflow, and styleguide templates. |
+| `templates/v1/` through `templates/v5/` | Immutable published legacy template payloads. |
+| `templates/v6/` | Active cohesive-change, receipt, dependency-context, workflow, and styleguide templates. |
 
 The domain directory currently includes filesystem and Git-aware behavior; it
 is not a pure dependency-free DDD layer. Preserve the real capability

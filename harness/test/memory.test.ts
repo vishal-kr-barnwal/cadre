@@ -610,3 +610,26 @@ test("FRM and Dhivon shaped context audit retains curated constraints with bound
     }
   }
 });
+
+test("legacy refresh inspection keeps terminal Pattern Seed evidence readable", (t) => {
+  const inspectTerminal = (location: "tracks" | "archive", status: "completed" | "archived") => {
+    const f = fixture(t);
+    const original = join(f.projectRoot, ".cadre/tracks/sample");
+    const terminal = join(f.projectRoot, ".cadre", location, "sample");
+    if (location === "archive") renameSync(original, terminal);
+    const statePath = join(terminal, "state.json");
+    write(statePath, JSON.stringify({ ...f.state, status }));
+    const legacyLearning = "# Learning\n<!-- cadre:pattern-seed:start -->\n## Pattern Seed\nHistorical legacy context.\n<!-- cadre:pattern-seed:end -->\n";
+    write(join(terminal, "learning.md"), legacyLearning);
+    write(join(f.projectRoot, ".cadre/project.json"), JSON.stringify({ ...f.project, templateSetVersion: "v1" }));
+    const path = `${location}/sample/learning.md`;
+    const inspected = inspectStagedMemory(f.projectRoot, "refresh-terminal", [
+      { path: "project.json", content: JSON.stringify({ ...f.project, templateSetVersion: "v6" }), absolutePath: "unused" },
+      { path, content: legacyLearning, absolutePath: "unused" }
+    ]);
+    assert.equal(inspected.learning.find((item) => item.path === path)?.valid, true);
+    assert.ok(inspected.policy.historicalPaths.includes(path));
+  };
+  inspectTerminal("tracks", "completed");
+  inspectTerminal("archive", "archived");
+});

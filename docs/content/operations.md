@@ -30,6 +30,17 @@ and current executions. It reports:
 
 Status never repairs or normalizes state.
 
+## Operation Track Versus Journal
+
+`state.type: "operation"` means a track governs a rollout, migration,
+maintenance, recovery, or infrastructure/service change. It still follows the
+ordinary track → implement → review → archive lifecycle; Cadre does not run an
+external deployment or command for it. Humans plan and perform preflight, rollout, postflight, rollback, and recovery actions. The operation specification names planned operators, evidence capture, timestamp formats, baselines, monitoring thresholds/windows, abort thresholds, recovery owner/procedure/reversibility limits, and residual-risk acceptance. Cadre does not treat the plan, host permission, or a journal as proof that an action occurred.
+
+`state.operation` is different: it is temporary Cadre journal data for a
+pending state mutation. Its presence does not classify the track, authorize an
+external action, or prove that an action occurred.
+
 ## Interrupted Workflow
 
 Rerun the same workflow. Cadre first reconciles its journal with files and Git.
@@ -48,7 +59,9 @@ learning that should influence future work.
 
 Refresh records its evidence range and exact approved diffs. It also assesses
 active tracks and reaches a safe boundary before changing execution-governing
-context.
+context. Refreshing a v1/v2 project requires an explicitly staged valid v6
+Pattern Seed `learning.md` for every nonterminal active track; completed and
+archived learning remains readable historical evidence.
 
 ## Review And Remediation
 

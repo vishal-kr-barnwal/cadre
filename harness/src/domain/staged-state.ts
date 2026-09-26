@@ -6,7 +6,7 @@ import { validateExecutionJournal, type ExecutionJournal } from "./execution.js"
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import { contentHash, readSafeArtifact } from "./memory.js";
 import { candidateArtifactPath, type CandidateFile } from "./staging.js";
-import { validateTrackOperation } from "./state.js";
+import { validateSpecContent, validateTrackOperation } from "./state.js";
 
 /** Validate relationships in the proposed state before a digest can be approved. */
 export function validateStagedState(root: string, candidateId: string, files: CandidateFile[],
@@ -74,6 +74,10 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
     const paths = new Set(existsSync(directory) ? readdirSync(directory).filter((file) => /^execution-.+\.json$/.test(file)) : []);
     for (const key of overlay.keys()) if (key.startsWith(`${parent}/executions/`)) paths.add(key.slice(`${parent}/executions/`.length));
     const errors: string[] = [];
+    const spec = `${parent}/spec.md`;
+    if (overlay.has(spec) || existsSync(join(root, ".cadre", spec))) {
+      validateSpecContent(spec, read(spec), state.type, errors);
+    }
     validateTrackOperation(state, path, errors);
     validateTrackApprovalPolicy(state, errors);
     const key = (absolute: string) => absolute.slice(join(root, ".cadre").length + 1);

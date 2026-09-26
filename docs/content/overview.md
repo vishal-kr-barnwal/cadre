@@ -14,8 +14,8 @@ order: 10
 
 Cadre is a human-governed, Git-aware delivery harness for OpenAI Codex, Claude
 Code, and the native Zed Agent. Codex and Claude Code integrations are stable;
-Zed Agent support is beta in Cadre 3.6.0. Cadre turns approved project context into
-resumable feature and bug tracks, carries learning forward between phases, and
+Zed Agent support is beta. Cadre turns approved project context into
+resumable feature, bug, and operation tracks, carries learning forward between phases, and
 records implementation provenance in Git.
 
 Cadre is installed as a user integration: stable native plugins for
@@ -30,7 +30,7 @@ installed payload.
 | Need | Cadre's approach |
 |---|---|
 | Project context | Human-approved product, engineering, stack, workflow, styleguide, and pattern artifacts. |
-| Delivery planning | Feature or bug specifications followed by a validated phase/task dependency DAG. |
+| Delivery planning | Feature, bug, or operation specifications followed by a validated phase/task dependency DAG. |
 | Implementation | Parallel by default when safe, explicitly sequential when requested, with isolated worktrees. |
 | Human control | Every artifact and lifecycle transition is presented before mutation. |
 | Recovery | Durable setup, operation, and execution journals reconcile files and Git after interruption. |
@@ -63,7 +63,7 @@ tracked lifecycle.
 | Skill | Purpose |
 |---|---|
 | `create` | Initialize or resume an approved `.cadre/` project. |
-| `track` | Specify and plan a feature or bug. |
+| `track` | Specify and plan a feature, bug, or operation. |
 | `implement` | Execute the approved dependency DAG. |
 | `review` | Record approved findings or complete a clean review. |
 | `revise` | Change active approved scope or propose a successor. |

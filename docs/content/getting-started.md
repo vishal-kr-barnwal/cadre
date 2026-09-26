@@ -7,15 +7,30 @@ order: 20
 
 # Installation
 
-Cadre installs at user scope. The OpenAI Codex and Claude Code integrations are
-stable. Native Zed Agent support is beta in Cadre 3.6.0. The published package
-and executable are named `cadre-ai`.
+Cadre installs at user scope. The published package and executable are named
+`cadre-ai`.
 
 ## Requirements
 
 - Node.js 18 or newer
 - Git
 - OpenAI Codex, Claude Code, or Zed
+
+## Capability Tiers
+
+Cadre represents four capability tiers: `full`, `managed`, `guide-only`, and
+`unverified`. Today its adapter registry contains exactly three installation
+adapters: Codex (`full`), Claude Code (`full`), and Zed Agent (`managed`, beta).
+Zed Agent support is beta. `guide-only` and `unverified` are representable for
+future capability reporting, but are not installation targets, auto-detected
+targets, or claimed integrations.
+
+`cadre-ai doctor` first verifies the local package payload, then reports local
+adapter evidence such as plugin registration, narrow MCP approval, managed skill
+links, and settings. It does not start a client or verify a running session. Use
+`cadre-ai doctor --json` when a structured report is useful. Use
+`--home PATH` or `--marketplace-root PATH` to inspect the matching custom Zed
+marketplace without changing it.
 
 ## Install The CLI And Client Integration
 

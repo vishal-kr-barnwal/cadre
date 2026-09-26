@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { templateCatalog } from "../src/domain/templates.js";
+import { assertCompleteTemplatePayloads, templateCatalog } from "../src/domain/templates.js";
 import { createZedSkillAdapters } from "./zed.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,6 +40,7 @@ export function packagePluginMarketplace(
   outputRoot: string,
   requestedCachebuster = defaultCachebuster()
 ): PackageResult {
+  assertCompleteTemplatePayloads(join(sourceRoot, "templates"));
   templateCatalog();
   const targetRoot = resolve(outputRoot);
   const cachebuster = requestedCachebuster.trim();

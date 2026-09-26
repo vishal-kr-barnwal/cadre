@@ -23,9 +23,11 @@ zed-skills/              # generated cadre-* adapters for native Zed Agent
 agents/                  # Claude phase and task worker definitions
 dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
 templates/v1/            # immutable published legacy templates
-templates/v2/            # immutable compact legacy templates
-templates/v3/            # immutable memory and context templates
-templates/v5/            # active cohesive-change and bounded-context templates
+templates/v2/            # immutable published legacy templates
+templates/v3/            # immutable published legacy templates
+templates/v4/            # immutable published legacy templates
+templates/v5/            # immutable published legacy templates
+templates/v6/            # active cohesive-change and bounded-context templates
 .codex-plugin/           # Codex manifest
 .claude-plugin/          # Claude manifest
 ```

@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
+import { isTrackType, type TrackType } from "./track-types.js";
 
 export interface TracksIndexEntry {
   id: string;
   title?: string;
-  type: string;
+  type: TrackType;
   status: string;
   revision?: number;
 }
@@ -53,9 +54,11 @@ export function renderTracksWithState(
       if (!id || id !== entry.name) throw new Error(`invalid track identity at ${path}`);
       if (ids.has(id)) throw new Error(`duplicate track state for ${id}`);
       ids.add(id);
+      const type = state.type;
+      if (!isTrackType(type)) throw new Error(`invalid track type at ${path}`);
       tracks.push({
         id,
-        type: String(state.type ?? ""),
+        type,
         status: String(state.status ?? ""),
         ...(typeof state.title === "string" ? { title: state.title } : {}),
         ...(typeof state.revision === "number" ? { revision: state.revision } : {})

@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { TEMPLATE_IDS, TEMPLATE_SET_VERSION, templateCatalog } from "../src/domain/templates.js";
+import { TEMPLATE_IDS, TEMPLATE_SET_VERSION, assertCompleteTemplatePayloads, templateCatalog } from "../src/domain/templates.js";
 import { createCadreServer } from "../src/mcp/server.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 
@@ -161,6 +161,7 @@ if (!cadreGitignore.includes("/.worktrees/") || !cadreGitignore.includes("/wisps
   errors.push("project template: .gitignore must exclude worktrees and wisps");
 }
 try {
+  assertCompleteTemplatePayloads(join(root, "templates"));
   const catalog = templateCatalog();
   if (catalog.length !== TEMPLATE_IDS.length) {
     errors.push(`template provider: expected ${TEMPLATE_IDS.length} templates, found ${catalog.length}`);

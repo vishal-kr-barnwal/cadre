@@ -13,6 +13,7 @@ import { markdownHeadings } from "./markdown-context.js";
 import { inspectExecutionBindings } from "./execution-evidence.js";
 import type { TrackState } from "./state.js";
 import { inspectDependencyContext } from "./dependency-context.js";
+import { requiresVersionedMemory } from "./version.js";
 
 const id = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const contextInputSchema = z.strictObject({
@@ -104,7 +105,7 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
   let uncertainPatterns = false;
   const addLearning = (path: string, trackId: string, historical: boolean, selected: Set<string> | null, plan: typeof graph) => {
     const body = read(path);
-    const inspected = inspectMemory({ trackId, path, body, graph: plan, required: ["v3", "v4", "v5"].includes(project.templateSetVersion ?? ""),
+    const inspected = inspectMemory({ trackId, path, body, graph: plan, required: requiresVersionedMemory(project.templateSetVersion),
       historical, readPattern: (path) => read(`.cadre/${path}`) });
     errors.push(...inspected.errors); staleMemory.push(...inspected.stale);
     if (!inspected.metadata) uncertainPatterns = true;

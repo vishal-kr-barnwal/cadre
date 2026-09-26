@@ -32,7 +32,8 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 
 ## track
 
-- **Use for:** a new/resumed feature or bug.
+- **Use for:** a new/resumed feature, bug, or operation track.
+- **Operation tracks:** governed rollouts, migrations, maintenance, recovery, and infrastructure/service changes. They use the same lifecycle and never run external commands or deployments. The approved specification requires meaningful planned fields for owner/target/window/preconditions; preflight/rollout/postflight operator, evidence capture, and timestamp format; monitoring baseline/threshold/window; abort/rollback/recovery owner, procedure, and reversibility limit; and residual risk/mitigation/acceptance owner. These fields plan human-controlled evidence capture; they never attest that an external action happened.
 - **Requires:** substantive scope, acceptance, dependencies, and plan evidence.
 - **Primary MCP:** project status, template bundles,
   `candidate_stage_prepare`, `candidate_inspect`, state validation, and
@@ -112,7 +113,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   derived index and receipt in one commit.
 - **Active work:** execution-governing changes wait for a safe boundary and
   affected tracks follow revision impact analysis inside the same refresh
-  approval envelope.
+  approval envelope. A v1/v2 project must explicitly stage a valid v6 Pattern
+  Seed `learning.md` for every nonterminal active track before promotion;
+  completed and archived learning remains readable historical evidence.
 
 ## revert
 
@@ -127,7 +130,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Stops when:** conflicts or mixed/missing provenance require manual recovery.
 - **Lifecycle routing:** staged and drafting tracks have no approved revert
   provenance. Completed/archived rollback intent becomes a linked successor
-  bug track; the terminal source stays immutable.
+  track of the appropriate type; the terminal source stays immutable.
 
 ## status
 

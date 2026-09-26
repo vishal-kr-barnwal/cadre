@@ -33,18 +33,31 @@ An existing `.cadre/project.json` is resumed, never overwritten.
 
 ## track
 
-Use `track` for a new feature or bug. A clear track defaults to one combined
-approval covering:
+Use `track` for a new feature, bug, or operation. An operation track governs a
+human-controlled rollout, migration, maintenance, recovery, or
+infrastructure/service change; it is not an external command runner. A clear
+track defaults to one combined approval covering:
 
 - Specification: scope, requirements, acceptance criteria, additional
-  information, track dependencies, and dependent-track impact.
+  information, track dependencies, dependent-track impact, and—only for an
+  operation track—structured planned fields for operational owner, target,
+  change window, and preconditions; preflight/rollout/postflight operator,
+  evidence capture, and timestamp format; monitoring baseline, success
+  threshold, and observation window; abort/rollback/recovery owner,
+  procedure, and reversibility limit; and residual risk, mitigation, and
+  acceptance owner.
 - Plan: phase/task dependency graph plus the relevant Pattern Seed in
-  `learning.md`.
+  `learning.md`. An operation plan models planned human evidence capture and
+  decision criteria; external actions remain human-controlled and Cadre does
+  not execute, infer, or attest them.
 
-Cadre asks when feature versus bug, scope, interfaces, compatibility,
-acceptance, or dependencies remain materially ambiguous. A drafting track is
-resumed rather than replaced. V5 specification, plan, learning, state and dependency context share one
-approved commit and immutable operation receipt. The human can explicitly request staged spec/plan review.
+Cadre asks when track classification, scope, interfaces, compatibility,
+rollout, acceptance, or dependencies remain materially ambiguous. For an
+operation track it also asks about operators, preflight/rollout/postflight
+evidence, monitoring, abort/rollback/recovery, and residual risk. A drafting
+track is resumed rather than replaced. V6 specification, plan, learning, state
+and dependency context share one approved commit and immutable operation
+receipt. The human can explicitly request staged spec/plan review.
 
 ## implement
 
@@ -139,7 +152,9 @@ It can update product, guidelines, workflow, technology, general styleguide,
 language/framework styleguides, patterns, and affected active-track seeds.
 Execution-governing changes wait for a safe worker boundary. Cascading track
 changes follow `revise` impact analysis but join the same refresh approval
-instead of creating separate approval cycles.
+instead of creating separate approval cycles. A v1/v2 refresh must explicitly
+stage a valid v6 `learning.md` Pattern Seed for every nonterminal active track;
+completed and archived learning remains readable historical evidence.
 
 ## revert
 
@@ -175,7 +190,7 @@ turning a wisp into Cadre state.
 | Situation | Use |
 |---|---|
 | New project context | `create` |
-| New desired feature or known bug | `track` |
+| New desired feature, known bug, or governed operation | `track` |
 | Execute approved work | `implement` |
 | Evaluate finished implementation | `review` |
 | Change approved intent | `revise` |

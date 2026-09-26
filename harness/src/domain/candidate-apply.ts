@@ -10,7 +10,8 @@ import { operationRef, promoteOperation, requireCommittedOperations, type Receip
 import { resolveGitCommit } from "./git.js";
 import { safeProjectRoot } from "./paths.js";
 import { buildTracks, type TracksIndexEntry } from "./tracks-index.js";
-import { CADRE_RUNTIME_VERSION } from "./version.js";
+import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
+import { isTrackType } from "./track-types.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -43,7 +44,9 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   if (original.size !== staged.length) throw new Error("Candidate aliases an artifact");
   for (const path of original.keys()) if (!allowed(input, path)) throw new Error(`Candidate cannot promote ${path}`);
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json"));
-  if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
+  if (project.templateSetVersion !== TEMPLATE_SET_VERSION && input.workflow !== "refresh") {
+    throw new Error(`Refresh to ${TEMPLATE_SET_VERSION} before using cohesive candidate promotion`);
+  }
   const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort()])).slice(0, 32)}`;
   const reference = operationRef(operationId), overlay = new Map(original), unchanged = new Map<string, string>();
   const read = (path: string): string => {
@@ -70,7 +73,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     }
     const next = JSON.parse(overlay.get("project.json")!);
     if (JSON.stringify(next.setup) !== JSON.stringify(project.setup) || JSON.stringify(next.history ?? []) !== JSON.stringify(project.history ?? [])) throw new Error("Refresh must preserve setup approval and project history");
-    next.schemaVersion = 2; next.runtimeVersion = CADRE_RUNTIME_VERSION; next.templateSetVersion = "v5";
+    next.schemaVersion = 2; next.runtimeVersion = CADRE_RUNTIME_VERSION; next.templateSetVersion = TEMPLATE_SET_VERSION;
     next.lastRefresh = { ...(next.lastRefresh ?? {}), commit: reference };
     next.history = [...(next.history ?? []), { action: "refresh", commit: reference }];
     overlay.set("project.json", json(next));
@@ -81,7 +84,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     const parent = `tracks/${id}`, path = `${parent}/state.json`;
     const state = JSON.parse(read(path));
     if (state.trackId !== id) throw new Error("Candidate state identity mismatch");
-    if (!state.title || typeof state.title !== "string" || !["feature", "bug"].includes(state.type)
+    if (!state.title || typeof state.title !== "string" || !isTrackType(state.type)
       || !Number.isInteger(state.revision) || state.revision < 1 || !Array.isArray(state.artifactProgress)
       || !Array.isArray(state.dependencies) || state.dependencies.includes(id)
       || new Set(state.dependencies).size !== state.dependencies.length) throw new Error("Candidate state requires a title, type, positive revision, artifact progress and unique non-self dependencies");
@@ -113,7 +116,14 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   const files: CandidateFile[] = [...overlay].map(([path, content]) => ({ path, content, absolutePath: join(root, ".cadre", path) }));
   validateStagedState(root, input.candidateId, files);
   const memory = inspectStagedMemory(root, input.candidateId, files);
-  if (memory.learning.some((item) => !item.valid)) throw new Error("Candidate contains invalid or stale learning");
+  const invalidLearning = memory.learning.filter((item) => !item.valid);
+  if (invalidLearning.length) {
+    const diagnostics = invalidLearning.flatMap((item) => [
+      ...item.errors,
+      ...item.stale.map((finding) => `${finding.path}: ${finding.reason}`)
+    ]);
+    throw new Error(`Candidate contains invalid or stale learning: ${diagnostics.join("; ")}`);
+  }
   const tracks: TracksIndexEntry[] = [];
   for (const location of ["tracks", "archive"]) {
     const ids = new Set(existsSync(join(root, ".cadre", location)) ? readdirSync(join(root, ".cadre", location), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name) : []);

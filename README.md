@@ -8,7 +8,8 @@
   A human-governed, Git-aware delivery harness for OpenAI Codex, Claude Code, and Zed Agent (beta).
 </p>
 
-Cadre turns approved project context into resumable feature and bug tracks. It
+Cadre turns approved project context into resumable feature, bug, and governed operation
+tracks. It
 combines specification, dependency-aware planning, parallel implementation,
 manual verification, review, revision, refresh, revert, archive, and Git
 provenance without asking an agent to invent workflow state.
@@ -17,7 +18,7 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
+**Current source** uses v6 projects with cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v5 templates remain supported.
 
 
 ## What Cadre Provides
@@ -26,7 +27,7 @@ provenance without asking an agent to invent workflow state.
   clean track completion always requires the author’s explicit approval.
 - **Resumable state:** setup, track, execution, review, revision, refresh,
   revert, and archive checkpoints survive interrupted sessions.
-- **Spec-first tracks:** feature and bug specifications lead to validated
+- **Spec-first tracks:** feature, bug, and governed operation specifications lead to validated
   phase/task dependency graphs with derived manual-verification barriers.
 - **Safe parallel execution:** bounded workers operate in isolated Git
   worktrees while the main agent alone schedules, integrates, resolves

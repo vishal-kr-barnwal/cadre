@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import { CadreError } from "./errors.js";
 import { safeProjectRoot } from "./paths.js";
 import type { PlanGraph } from "./plan.js";
+import { requiresVersionedMemory } from "./version.js";
 
 export const MAX_HANDOFF_BYTES = 8 * 1024;
 export const SEED_START = "<!-- cadre:pattern-seed:start -->";
@@ -112,7 +113,7 @@ export function inspectMemory(input: {
 export function requireFreshTrackMemory(projectRoot: string, trackId: string): void {
   const root = safeProjectRoot(projectRoot);
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json")) as { templateSetVersion?: string };
-  if (!["v3", "v4", "v5"].includes(project.templateSetVersion ?? "")) return;
+  if (!requiresVersionedMemory(project.templateSetVersion)) return;
   const path = `.cadre/tracks/${trackId}/learning.md`;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trackId)) throw new Error("invalid trackId");
   const plan = readSafeArtifact(root, `.cadre/tracks/${trackId}/plan.md`);

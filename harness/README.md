@@ -1,12 +1,12 @@
 # Cadre
 
-**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
+**Current source** uses v6 projects with cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v5 templates remain supported.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
-is beta. Cadre turns project context into resumable feature and bug tracks,
-carries learning forward between phases, and records implementation provenance
-in Git.
+is beta. Cadre turns project context into resumable feature, bug, and governed
+operation tracks, carries learning forward between phases, and records
+implementation provenance in Git.
 
 Cadre is installed as a user integration. Codex and Claude use native plugins;
 Zed uses global skills and a custom MCP server. The bundled TypeScript MCP
@@ -26,7 +26,7 @@ templates. A project keeps only approved, mutable delivery state under
 - Resumable create, specification, planning, implementation, review, revision, refresh, revert, and archive flows.
 - Parallel-by-default implementation of dependency DAGs, with an explicit sequential mode.
 - Isolated phase and task workers in Cadre-managed Git worktrees, coordinated and integrated only by the main agent.
-- Feature and bug tracks with functional requirements, non-functional requirements, acceptance criteria, dependencies, phased tasks, and manual-verification gates.
+- Feature, bug, and governed operation tracks with functional requirements, non-functional requirements, acceptance criteria, dependencies, phased tasks, and manual-verification gates.
 - Dependency enforcement before implementation and cascading-impact analysis after specification, workflow, stack, styleguide, or pattern changes.
 - Incremental learning in each track's `learning.md`; each phase reads its declared dependency learning and applicable constraints before work starts.
 - Review → remediation → implementation cycles until the human accepts a clean review.
@@ -202,7 +202,7 @@ Cadre will:
 6. Initialize Git when the approved project root is not already in a worktree.
 7. Validate and commit the approved setup with resumable checkpoints.
 
-### 2. Create a feature or bug track
+### 2. Create a feature, bug, or operation track
 
 ```text
 Codex:      $cadre:track Add passwordless login as a feature
@@ -263,7 +263,7 @@ Archive accepts one or more completed tracks in one resumable batch. It distills
 | Command | Purpose |
 | --- | --- |
 | `create` | Initialize or resume Cadre, classify project context, initialize Git when needed, and establish approved project artifacts. |
-| `track` | Create or resume a feature/bug specification, phased plan, dependency set, and learning seed. |
+| `track` | Create or resume a feature, bug, or operation specification, phased plan, dependency set, and learning seed. |
 | `implement` | Execute or resume the approved phase/task DAG in parallel by default or explicitly sequentially, with worktrees, tests, learning, approvals, and commit provenance. |
 | `review` | Review a ready track, record approved findings, add remediation phases, or complete an approved clean cycle. |
 | `revise` | Route a requested change by lifecycle state, revise an approved active baseline, or propose a successor for completed history. |
@@ -290,7 +290,7 @@ Only `review` can mark a track completed. Only `archive` can mark it archived. T
 - In `drafting-plan`, an approved-spec change is a revision while an unapproved-plan change remains drafting.
 - `planned`, `in_progress`, and `ready_for_review` tracks can revise their approved baseline. Active work is reconciled first, completed commits are preserved, and changed scope at review time returns the track to implementation and manual verification.
 - A revision that adds an incomplete dependency returns the track to `planned` so implementation remains blocked.
-- `completed` and `archived` tracks remain immutable; Cadre proposes a successor feature or bug track referencing the original.
+- `completed` and `archived` tracks remain immutable; Cadre proposes a successor feature, bug, or operation track referencing the original.
 
 Defects found against the already approved specification belong to `review`. Use `revise` when the desired behavior, scope, requirement, or acceptance criterion itself changes.
 
@@ -339,7 +339,7 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v4/...` and 23 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 25 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
@@ -431,7 +431,7 @@ pnpm --filter cadre-ai validate
 
 ### Memory format upgrade
 
-The current source uses template set v4 and requires an approved refresh of older projects before delivery. It preserves v1/v2/v3 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+The current source uses template set v6 and requires an approved refresh of older projects before delivery. It preserves v1–v5 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
 
 Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.
 
