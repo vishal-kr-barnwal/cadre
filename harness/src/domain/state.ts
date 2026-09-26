@@ -7,6 +7,7 @@ import {
   CADRE_RUNTIME_VERSION,
   LEGACY_RUNTIME_VERSIONS,
   LEGACY_TEMPLATE_SET_VERSIONS,
+  requiresVersionedMemory,
   TEMPLATE_SET_VERSION
 } from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
@@ -17,6 +18,7 @@ import { buildTracks } from "./tracks-index.js";
 import { reachableGitCommits, readGitBlobs } from "./git.js";
 import { validatePlanProvenance, type PlanEvidence } from "./plan-provenance.js";
 import { isCommitRef, resolveOperation, pendingOperationErrors } from "./operation-receipts.js";
+import { isTrackType, TRACK_TYPES, type TrackType } from "./track-types.js";
 export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
@@ -50,7 +52,7 @@ export interface TrackState {
   schemaVersion: number;
   trackId: string;
   title: string;
-  type: string;
+  type: TrackType;
   status: string;
   checkpoint?: string;
   revision?: number;
@@ -131,7 +133,6 @@ const TRACK_STATUSES = new Set([
   "drafting-spec", "drafting-plan", "planned", "in_progress",
   "ready_for_review", "completed", "archived"
 ]);
-const TRACK_TYPES = new Set(["feature", "bug"]);
 const REQUIRED_CONTEXT = [
   ".gitignore", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
   "styleguides/general.md", "patterns/index.md", "operations", "tracks", "archive",
@@ -325,18 +326,99 @@ function validateLearning(path: string, required: boolean, errors: string[]): vo
   }
 }
 
-function validateSpec(path: string, errors: string[]): void {
+const REQUIRED_SPEC_HEADINGS = [
+  "## Functional Requirements", "## Non-Functional Requirements", "## Acceptance Criteria",
+  "## Dependencies", "## Additional Information", "## Dependent-track impact"
+] as const;
+
+export const OPERATION_SPEC_HEADINGS = [
+  "## Operational Readiness",
+  "## Human-Controlled Preflight, Rollout, and Postflight Evidence",
+  "## Monitoring and Success Signals",
+  "## Abort, Rollback, and Recovery",
+  "## Residual Risk"
+] as const;
+
+const OPERATION_SPEC_FIELDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["## Operational Readiness", ["Owner", "Target", "Change window", "Preconditions"]],
+  ["## Monitoring and Success Signals", ["Signal", "Baseline", "Success threshold", "Observation window"]],
+  ["## Abort, Rollback, and Recovery", ["Abort threshold", "Rollback/recovery owner", "Procedure", "Reversibility limit"]],
+  ["## Residual Risk", ["Residual risk", "Mitigation", "Acceptance owner"]]
+];
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function markdownSection(body: string, heading: string): string | null {
+  const parsed = /^(#+)\s+(.+)$/.exec(heading);
+  if (!parsed) return null;
+  const marker = `${parsed[1]} ${parsed[2]}`;
+  const found = new RegExp(`^${escapeRegExp(marker)}\\s*$`, "m").exec(body);
+  if (!found || found.index === undefined) return null;
+  const start = found.index + found[0].length;
+  const remainder = body.slice(start);
+  const next = new RegExp(`^#{1,${parsed[1]!.length}}\\s+`, "m").exec(remainder);
+  return remainder.slice(0, next?.index ?? remainder.length);
+}
+
+function meaningfulOperationValue(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized || normalized.includes("{{") || normalized.includes("}}")) return false;
+  const placeholder = normalized.replace(/[.]+$/, "").toLowerCase();
+  return !["tbd", "todo", "unknown", "pending", "none", "n/a", "na", "not applicable"].includes(placeholder);
+}
+
+function requireOperationField(path: string, section: string, body: string, field: string, errors: string[]): void {
+  const found = new RegExp(`^[\\t ]*(?:[-*][\\t ]+)?${escapeRegExp(field)}[\\t ]*:[\\t ]*(.*)[\\t ]*$`, "m").exec(body);
+  const owner = section.replace(/^##\s+/, "");
+  if (!found) {
+    errors.push(`${path}: ${owner} is missing ${field}`);
+  } else if (!meaningfulOperationValue(found[1] ?? "")) {
+    errors.push(`${path}: ${owner} ${field} must be meaningful and cannot contain an unresolved placeholder`);
+  }
+}
+
+function validateOperationSpecFields(path: string, body: string, errors: string[]): void {
+  for (const [heading, fields] of OPERATION_SPEC_FIELDS) {
+    const section = markdownSection(body, heading);
+    if (section === null) continue; // The required-heading check reports this structural error.
+    for (const field of fields) requireOperationField(path, heading, section, field, errors);
+  }
+  const evidenceHeading = "## Human-Controlled Preflight, Rollout, and Postflight Evidence";
+  const evidence = markdownSection(body, evidenceHeading);
+  if (evidence === null) return;
+  for (const phase of ["Preflight", "Rollout", "Postflight"]) {
+    const subsection = markdownSection(evidence, `### ${phase}`);
+    if (subsection === null) {
+      errors.push(`${path}: ${evidenceHeading.replace(/^##\s+/, "")} is missing ### ${phase}`);
+      continue;
+    }
+    for (const field of ["Planned operator", "Evidence to capture", "Timestamp format"]) {
+      requireOperationField(path, `${evidenceHeading} ${phase}`, subsection, field, errors);
+    }
+  }
+}
+
+export function validateSpecContent(path: string, body: string, type: unknown, errors: string[]): void {
+  const required = type === "operation"
+    ? [...REQUIRED_SPEC_HEADINGS, ...OPERATION_SPEC_HEADINGS]
+    : REQUIRED_SPEC_HEADINGS;
+  for (const heading of required) {
+    const present = type === "operation" && OPERATION_SPEC_HEADINGS.includes(heading as typeof OPERATION_SPEC_HEADINGS[number])
+      ? markdownSection(body, heading) !== null
+      : body.includes(heading);
+    if (!present) errors.push(`${path}: missing ${heading}`);
+  }
+  if (type === "operation") validateOperationSpecFields(path, body, errors);
+}
+
+function validateSpec(path: string, type: unknown, errors: string[]): void {
   if (!existsSync(path)) {
     errors.push(`${path}: missing specification`);
     return;
   }
-  const body = readFileSync(path, "utf8");
-  for (const heading of [
-    "## Functional Requirements", "## Non-Functional Requirements", "## Acceptance Criteria",
-    "## Dependencies", "## Additional Information", "## Dependent-track impact"
-  ]) {
-    if (!body.includes(heading)) errors.push(`${path}: missing ${heading}`);
-  }
+  validateSpecContent(path, readFileSync(path, "utf8"), type, errors);
 }
 
 function validateProjectOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {
@@ -569,7 +651,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     validateTrackApprovalPolicy(state, errors, warnings);
     if (![1, 2].includes(state.schemaVersion)) errors.push(`${track.id}: unsupported state schemaVersion`);
     if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
-    if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
+    if (!isTrackType(track.type)) errors.push(`${track.id}: type must be one of ${TRACK_TYPES.join(", ")}`);
     if (!TRACK_STATUSES.has(track.status)) errors.push(`${track.id}: invalid status ${track.status}`);
     if (!Array.isArray(track.dependencies)) errors.push(`${track.id}: dependencies must be an array`);
     if (!Number.isInteger(track.revision) || (track.revision ?? 0) < 1) errors.push(`${track.id}: revision must be a positive integer`);
@@ -595,7 +677,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     const specPath = join(trackRoot, "spec.md");
     const planPath = join(trackRoot, "plan.md");
     const learningPath = join(trackRoot, "learning.md");
-    if (existsSync(specPath)) validateSpec(specPath, errors);
+    if (existsSync(specPath)) validateSpec(specPath, track.type, errors);
     else if (track.status !== "drafting-spec" && state?.operation?.action !== "specify") errors.push(`${track.id}: missing spec.md`);
     let planGraph: PlanGraph | null = null;
     if (existsSync(planPath)) {
@@ -622,7 +704,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     );
     if (existsSync(learningPath)) {
       const memory = inspectMemory({ trackId: track.id, path: learningPath, body: readFileSync(learningPath, "utf8"),
-        graph: planGraph, required: ["v3", "v4", "v5"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
+        graph: planGraph, required: requiresVersionedMemory(project.templateSetVersion) && !["drafting-spec", "drafting-plan"].includes(track.status),
         historical: ["completed", "archived"].includes(track.status),
         readPattern: (path) => readSafeArtifact(projectRoot, `.cadre/${path}`) });
       errors.push(...memory.errors);

@@ -29,15 +29,13 @@ workflow packets.
 
 ## Template Resources
 
-Every file under active `templates/v5/` is registered as an immutable MCP resource:
+Every file under active `templates/v6/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v5/<logical-id>
+cadre://templates/v6/<logical-id>
 ```
 
-Published `templates/v1/` through `templates/v4/` remain byte-stable for legacy reads. The internal
-catalog records provider paths, but public descriptors expose logical ID, URI,
-eventual artifact path, media type, and SHA-256 hash. Template content appears once: inside structured template descriptors for
+Published `templates/v1/` through `templates/v5/` remain immutable legacy payloads and are validated for completeness, but are not registered as live MCP resources. The internal catalog records provider paths, but public descriptors expose logical ID, URI, eventual artifact path, media type, and SHA-256 hash. Template content appears once: inside structured template descriptors for
 recognized structured clients, or as embedded resources/text blocks for text
 clients. `contentMode` selects body encoding only for text clients.
 

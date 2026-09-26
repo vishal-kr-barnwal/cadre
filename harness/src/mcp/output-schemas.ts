@@ -8,6 +8,7 @@ import {
   EXECUTION_NODE_STATUSES
 } from "../domain/execution.js";
 import { TEMPLATE_IDS } from "../domain/templates.js";
+import { TRACK_TYPES } from "../domain/track-types.js";
 import { CADRE_MCP_TOOLS, type CadreMcpToolName } from "./tool-names.js";
 
 type ObjectSchema = z.ZodObject<z.ZodRawShape>;
@@ -219,7 +220,7 @@ const projectTrackSummarySchema = z.strictObject({
 const trackSummarySchema = z.strictObject({
   id: z.string(),
   title: z.string(),
-  type: z.string(),
+  type: z.enum(TRACK_TYPES),
   status: z.string(),
   checkpoint: z.string().nullable(),
   operation: z.string().nullable(),

@@ -19,6 +19,7 @@ import { parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import { pageTracks, summarizeGraph } from "../src/domain/status-views.js";
 import { validateProject, renderTracksPreview, writeTracks } from "../src/domain/state.js";
 import { applyExecutionStart, previewExecutionStart, applyExecutionCheckpoint, previewExecutionCheckpoint, readExecution } from "../src/domain/execution.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = JSON.parse(readFileSync(join(root, "test/context-baseline.json"), "utf8")) as { recordedCatalog: { totalBytes: number }; recordedAggregate: { responseBytes: number } };
@@ -47,7 +48,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 1, runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");
@@ -609,4 +610,27 @@ test("FRM and Dhivon shaped context audit retains curated constraints with bound
       assert.equal(changed.dependencyContext?.mode, "full-source-fallback"); assert.ok(changed.excerpts.some((entry) => entry.content.includes("CHANGED_REQUIRED_GUIDANCE")));
     }
   }
+});
+
+test("legacy refresh inspection keeps terminal Pattern Seed evidence readable", (t) => {
+  const inspectTerminal = (location: "tracks" | "archive", status: "completed" | "archived") => {
+    const f = fixture(t);
+    const original = join(f.projectRoot, ".cadre/tracks/sample");
+    const terminal = join(f.projectRoot, ".cadre", location, "sample");
+    if (location === "archive") renameSync(original, terminal);
+    const statePath = join(terminal, "state.json");
+    write(statePath, JSON.stringify({ ...f.state, status }));
+    const legacyLearning = "# Learning\n<!-- cadre:pattern-seed:start -->\n## Pattern Seed\nHistorical legacy context.\n<!-- cadre:pattern-seed:end -->\n";
+    write(join(terminal, "learning.md"), legacyLearning);
+    write(join(f.projectRoot, ".cadre/project.json"), JSON.stringify({ ...f.project, templateSetVersion: "v1" }));
+    const path = `${location}/sample/learning.md`;
+    const inspected = inspectStagedMemory(f.projectRoot, "refresh-terminal", [
+      { path: "project.json", content: JSON.stringify({ ...f.project, templateSetVersion: "v6" }), absolutePath: "unused" },
+      { path, content: legacyLearning, absolutePath: "unused" }
+    ]);
+    assert.equal(inspected.learning.find((item) => item.path === path)?.valid, true);
+    assert.ok(inspected.policy.historicalPaths.includes(path));
+  };
+  inspectTerminal("tracks", "completed");
+  inspectTerminal("archive", "archived");
 });

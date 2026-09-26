@@ -1,6 +1,6 @@
 ---
 title: Capabilities
-description: What Cadre 3.5 supports today and where its boundaries are.
+description: What Cadre supports today and where its boundaries are.
 section: User Guide
 order: 40
 ---
@@ -16,9 +16,9 @@ through archived learning.
 
 | Area | Capability |
 |---|---|
-| Clients | Stable native user plugins for Codex/Claude and beta global skills plus custom MCP for Zed Agent. |
+| Clients | Stable native user plugins for Codex/Claude (`full` tier) and beta global skills plus custom MCP for Zed Agent (`managed` tier). Other agents are not integrations: `cadre-ai guide` prints read-only `guide-only` instructions with no stateful Cadre support. |
 | Project creation | Greenfield/brownfield classification, optional Git initialization, approved context, workflow, styleguides, and patterns. |
-| Tracks | Feature and bug specifications, acceptance criteria, dependencies, phased plans, and learning seeds. |
+| Tracks | Feature, bug, and operation specifications, acceptance criteria, dependencies, phased plans, and learning seeds. Operation tracks record human-controlled rollout/migration/maintenance evidence rather than running external actions. |
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |
 | Implementation | Parallel-by-default or explicitly sequential execution, with a global ready queue, phase-local task waves, clean mode handoffs, and resumable journals. |
 | Isolation | Phase and task workers in Cadre-managed sibling Git worktrees. |
@@ -61,7 +61,7 @@ before the first artifact or Git mutation.
 
 ## Not In The Current Release
 
-Cadre 3.5 does not currently provide:
+Cadre does not currently provide:
 
 - GitHub Copilot or Google Antigravity plugins;
 - project-scoped client installation;

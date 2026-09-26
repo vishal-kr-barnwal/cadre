@@ -33,7 +33,7 @@ retained across approval turns while their version/hash remains unchanged.
 
 The agent inspects repository evidence and asks only when a material choice
 cannot be safely inferred. Typical gates include root, greenfield/brownfield,
-feature/bug, scope, compatibility, dependencies, treatment of partial work,
+feature/bug/operation classification, scope, compatibility, dependencies, treatment of partial work,
 and project-context change intent.
 
 Questions occur before artifacts or state are written. A plausible guess is not

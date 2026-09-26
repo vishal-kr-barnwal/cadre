@@ -30,6 +30,23 @@ and current executions. It reports:
 
 Status never repairs or normalizes state.
 
+## Operation Track Versus Journal
+
+`state.type: "operation"` means a track governs a rollout, migration,
+maintenance, recovery, or infrastructure/service change. It still follows the
+ordinary track → implement → review → archive lifecycle; Cadre does not run an
+external deployment or command for it. Humans plan and perform preflight, rollout, postflight, rollback, and recovery actions. The operation specification names planned operators, evidence capture, timestamp formats, baselines, monitoring thresholds/windows, abort thresholds, recovery owner/procedure/reversibility limits, and residual-risk acceptance. Cadre does not treat the plan, host permission, or a journal as proof that an action occurred.
+
+During implementation, the matching manual-verification checkpoint records the
+human-supplied evidence: operator, RFC 3339 timestamp, source/location or hash,
+and observed signal against baseline and threshold. An abort-threshold breach
+blocks the phase until the human records the rollback or recovery decision.
+Review treats missing or contradictory evidence as a finding.
+
+`state.operation` is different: it is temporary Cadre journal data for a
+pending state mutation. Its presence does not classify the track, authorize an
+external action, or prove that an action occurred.
+
 ## Interrupted Workflow
 
 Rerun the same workflow. Cadre first reconciles its journal with files and Git.
@@ -48,13 +65,24 @@ learning that should influence future work.
 
 Refresh records its evidence range and exact approved diffs. It also assesses
 active tracks and reaches a safe boundary before changing execution-governing
-context.
+context. Refreshing a v1/v2 project requires an explicitly staged valid v6
+Pattern Seed `learning.md` for every nonterminal active track; completed and
+archived learning remains readable historical evidence.
+
+Changed scripts, CI configuration, or tooling are verification-profile drift.
+Refresh the profile in `tech-stack.md`; a changed profile requires renewed
+verification and review of affected work.
 
 ## Review And Remediation
 
 Run `review` after implementation reaches `ready_for_review`. Review findings do
 not mutate state until the human accepts their disposition and exact remediation
 artifacts.
+
+Classify human feedback first: a defect against approved scope is review work,
+changed intent goes to `revise`, and new work or changed intent for completed or
+archived scope becomes a successor track. Approved artifacts are never silently
+rewritten.
 
 After approved remediation, rerun `implement`, including manual verification,
 then review again. A track is completed only after an approved clean cycle.
@@ -75,6 +103,15 @@ task, task-to-phase, and phase-to-main commits, detects later overlaps, proposes
 safe reverse order, and journals each applied revert commit.
 
 Mixed or missing provenance stops with a manual recovery plan.
+
+## Hosts Without The Cadre MCP
+
+An agent that cannot call the installed Cadre MCP tools is guide-only. It can
+read `.cadre/` to explain approved scope, recorded status, and the next legal
+workflow, labeled unvalidated. It never changes `.cadre/`, never creates commits
+with Cadre operation trailers, and never claims lifecycle progress. Use a
+supported Cadre integration for stateful work, and run `cadre-ai doctor` to
+diagnose the local installation.
 
 ## Update The Plugin
 

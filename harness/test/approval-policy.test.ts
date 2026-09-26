@@ -18,6 +18,8 @@ import { deriveReviewCompleteInput, previewReviewComplete, applyReviewComplete }
 import { validateProject, validateTrackOperation, renderTracksPreview, writeTracks, type TrackState } from "../src/domain/state.js";
 import { requireFreshTrackMemory } from "../src/domain/memory.js";
 import { validateStagedState } from "../src/domain/staged-state.js";
+import { CADRE_RUNTIME_VERSION, CONTINUABLE_EXECUTION_RELEASES, LEGACY_RUNTIME_VERSIONS, LEGACY_TEMPLATE_SET_VERSIONS,
+  mayContinueExecution, TEMPLATE_SET_VERSION } from "../src/domain/version.js";
 
 const harness = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const git = (root: string, ...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -36,7 +38,7 @@ function fixture(t: { after(fn: () => void): void }) {
   const state: TrackState = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", checkpoint: "ready", revision: 1,
     dependencies: [], commits: { spec: base, plan: base }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
   write(join(track, "state.json"), state);
-  write(join(root, ".cadre/project.json"), { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
+  write(join(root, ".cadre/project.json"), { schemaVersion: 1, runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
   const render = () => writeTracks(root, renderTracksPreview(root).digest);
   render(); git(root, "add", ".cadre"); git(root, "commit", "-m", "test: record approved context");
   const load = () => JSON.parse(readFileSync(join(track, "state.json"), "utf8")) as TrackState;
@@ -355,4 +357,67 @@ test("Autonomous review journals reject native-client field drift before promoti
   state.operation.action = "review"; state.operation.approvedArtifacts = ["plan.md"];
   assert.deepEqual(check(), []);
   assert.equal(deriveNextStep(f.root, state)?.skill, "review", "correcting metadata preserves the original review handoff");
+});
+
+test("continuable executions admit only listed pre-refresh releases and never widen on a version bump", () => {
+  // The preserved 3.9.0 rule for template set v4, plus executions started by published 3.9.0 on v5.
+  for (const [runtime, templates] of [["3.8.0", "v4"], ["3.9.0", "v4"], ["3.9.0", "v5"]] as const) {
+    assert.equal(mayContinueExecution(runtime, templates), true, `${runtime}/${templates}`);
+  }
+  assert.equal(mayContinueExecution(CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION), true, "current projects need no exception");
+  // A hypothetical next runtime is neither current nor a published release, so it never inherits the exception.
+  const [major, minor] = CADRE_RUNTIME_VERSION.split(".").map(Number), bumped = `${major}.${minor! + 1}.0`;
+  for (const [runtime, templates] of [
+    [bumped, "v5"], [bumped, "v4"], [bumped, TEMPLATE_SET_VERSION], ["3.8.0", "v5"], ["3.8.0", "v3"], ["3.9.0", "v3"],
+    ["3.7.1", "v3"], ["3.4.0", "v2"], ["3.9.0 ", "v5"], ["3.9.0", "V5"], ["3.9.0", undefined], [undefined, "v5"], [null, null], [390, "v5"]
+  ] as const) {
+    assert.equal(mayContinueExecution(runtime, templates), false, `${String(runtime)}/${String(templates)}`);
+  }
+  for (const release of CONTINUABLE_EXECUTION_RELEASES) {
+    assert.ok((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(release.templateSetVersion), "only superseded template sets need the exception");
+    assert.ok([CADRE_RUNTIME_VERSION, ...LEGACY_RUNTIME_VERSIONS].includes(release.runtimeVersion), "entries name recognized releases");
+  }
+});
+
+test("MCP lets a 3.9.0/v5 execution continue while new executions and other mutations require refresh", async (t) => {
+  const f = fixture(t), projectPath = join(f.root, ".cadre/project.json"), current = JSON.parse(readFileSync(projectPath, "utf8"));
+  // The project was last written by published 3.9.0, which started this execution on template set v5.
+  write(projectPath, { ...current, runtimeVersion: "3.9.0", templateSetVersion: "v5" });
+  git(f.root, "add", ".cadre"); git(f.root, "commit", "-m", "test: project recorded by published 3.9.0");
+  f.start("inflight", "track");
+  const server = createCadreServer(), client = new Client({ name: "codex", version: "2.1.0" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await server.connect(st); await client.connect(ct);
+  t.after(async () => { await client.close(); await server.close(); });
+  const refused = async (name: string, args: Record<string, unknown>) => {
+    const response = await client.callTool({ name, arguments: args });
+    assert.equal(response.isError, true, `${name} must not proceed: ${JSON.stringify(response)}`);
+    return JSON.parse((response.content as Array<{ text: string }>)[0]!.text).error as { code: string; message: string; details?: unknown };
+  };
+  const scope = { projectRoot: f.root, trackId: "sample", executionId: "inflight" };
+  for (const nodeId of ["P1", "T1.1"]) {
+    const checkpoint = await client.callTool({ name: "execution_checkpoint", arguments: { scope: { ...scope, nodeId }, action: { event: "start" } } });
+    assert.equal(checkpoint.isError, undefined, JSON.stringify(checkpoint));
+    assert.equal((checkpoint.structuredContent as { transition?: { to?: string } }).transition?.to, "running");
+  }
+  assert.equal(readExecution(f.root, "sample", "inflight").nodes["T1.1"]!.status, "running");
+
+  const start = await refused("execution_start", { projectRoot: f.root, trackId: "sample" });
+  assert.equal(start.code, "PROJECT_REFRESH_REQUIRED");
+  assert.deepEqual(start.details, { currentRuntimeVersion: "3.9.0", currentTemplateSetVersion: "v5",
+    targetRuntimeVersion: CADRE_RUNTIME_VERSION, targetTemplateSetVersion: TEMPLATE_SET_VERSION });
+  for (const [name, request] of [
+    ["review_complete", { mode: "prepare", projectRoot: f.root, trackId: "sample", approval: "Reviewed and verified" }],
+    ["archive_batch_candidate", { mode: "prepare", projectRoot: f.root, candidateId: "archive-sample", updates: [] }]
+  ] as const) assert.equal((await refused(name, { request })).code, "PROJECT_REFRESH_REQUIRED", name);
+  assert.equal((await client.callTool({ name: "candidate_stage_prepare", arguments: { projectRoot: f.root, candidateId: "track-sample", expectedFiles: ["learning.md"] } })).isError, undefined);
+  write(join(f.root, ".cadre/stage/track-sample/learning.md"), readFileSync(join(f.track, "learning.md"), "utf8"));
+  const promotion = await refused("candidate_apply", { request: { mode: "prepare", projectRoot: f.root, candidateId: "track-sample", workflow: "track", files: ["learning.md"] } });
+  assert.match(promotion.message, new RegExp(`Refresh to ${TEMPLATE_SET_VERSION} before using cohesive candidate promotion`));
+
+  // An unlisted older release remains blocked even for an execution that already exists.
+  write(projectPath, { ...current, runtimeVersion: "3.7.1", templateSetVersion: "v3" });
+  const legacy = await refused("execution_checkpoint", { scope: { ...scope, nodeId: "T1.2" }, action: { event: "start" } });
+  assert.equal(legacy.code, "PROJECT_REFRESH_REQUIRED");
+  assert.equal(readExecution(f.root, "sample", "inflight").nodes["T1.2"]!.status, "pending");
 });

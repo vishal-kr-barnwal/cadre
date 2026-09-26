@@ -1,6 +1,6 @@
 ---
 title: MCP Reference
-description: Immutable v5 resources and the 25 Cadre MCP tools.
+description: Immutable v6 resources and the 25 Cadre MCP tools.
 section: Reference
 order: 210
 ---
@@ -22,7 +22,7 @@ The prepare token is available in the selected JSON representation; applied resu
 
 ## Template Resources
 
-The active catalog is readable at `cadre://templates/v5/<logical-id>`. Published v1, v2, v3, and v4 templates remain packaged for compatibility; new projects use v5.
+The active catalog is readable at `cadre://templates/v6/<logical-id>`. Published v1–v5 templates remain packaged immutable legacy payloads; new projects use v6.
 
 ## workflow_elicit
 
@@ -97,7 +97,7 @@ Approval-aware staged archive batch. Prepare consumes body-free update descripto
 
 ## archive_batch_record
 
-Legacy SHA-batch provenance recording. V5 batches use their one operation receipt commit and candidate_apply reconciliation, with no record commit.
+Legacy SHA-batch provenance recording. V6 batches use their one operation receipt commit and candidate_apply reconciliation, with no record commit.
 
 ## execution_start
 
@@ -133,7 +133,7 @@ Removes a verified integrated worktree/branch and records node completion. Retry
 
 ## project_init_candidate
 
-Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v5 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
+Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v6 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
 
 ## setup_record_commit
 
@@ -161,6 +161,6 @@ Validates and atomically regenerates deterministic `tracks.md`.
 
 ## Upgrade and recovery
 
-The current source uses template set v5 with schema-2 state and operation receipts. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.
+The current source uses template set v6 with schema-2 state and operation receipts. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. A v1/v2 refresh must explicitly stage a valid v6 Pattern Seed `learning.md` for every nonterminal active track; terminal learning remains historical evidence. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.
 
-V5 create, execution finish, clean review and archive return `receipt` with `operationId`, `receiptHash`, exact Git `trailers`, and commit_pending. Include it in the operation's one commit and reconcile before dependent delivery. No separate execution-start, phase-record, final-verification-phase or clean-evidence-only commits are needed. Persist journals on disk throughout execution. An explicit handoff/blocker checkpoint remains available.
+V6 create, execution finish, clean review and archive return `receipt` with `operationId`, `receiptHash`, exact Git `trailers`, and commit_pending. Include it in the operation's one commit and reconcile before dependent delivery. No separate execution-start, phase-record, final-verification-phase or clean-evidence-only commits are needed. Persist journals on disk throughout execution. An explicit handoff/blocker checkpoint remains available.

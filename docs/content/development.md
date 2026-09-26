@@ -39,7 +39,7 @@ Primary sources are:
 - `harness/agents/` worker definitions;
 - `harness/src/domain/` and `harness/src/mcp/`;
 - `harness/scripts/*.ts`;
-- `harness/templates/v1/` through `v4/` (immutable history), and active `harness/templates/v5/`;
+- `harness/templates/v1/` through `v5/` (immutable history), and active `harness/templates/v6/`;
 - tracked plugin manifests, MCP configs, and marketplace catalogs;
 - `harness/test/`;
 - `docs/content/` and the docs application.
@@ -116,3 +116,15 @@ Run frozen-lockfile installation, harness type checking, full tests, package val
 Use disposable projects for native Claude and Codex workflow tests, including dirty-worktree revert preparation and fresh-session recovery. SDK client-identity tests cover wire compatibility but do not replace native activation. Before publishing, validate the packaged installer, enabled candidate version, narrow MCP approvals, and server activation in Codex, Claude Code, and Zed; Zed must discover all ten skills. Record absent or untested clients as incomplete gates. Personal-client installation and publication require their own authorization.
 
 The 100-node aggregate benchmark compares current request/response bytes with a captured response-only baseline and resets retained context halfway through. This is a conservative retrieval comparison, not a before/after live-delivery token experiment. Report small-fixture overhead and client-reported usage separately.
+
+### Version bump and release
+
+Feature pull requests leave every version unchanged. `CADRE_RUNTIME_VERSION` in `harness/src/domain/version.ts` is the single source that package validation, tests and the documentation check compare against.
+
+1. Merge the reviewed pull request with its changelog entry under `## [Unreleased]`.
+2. Once publication is authorized, run `pnpm --filter cadre-ai release:version <version> --dry-run` from an up-to-date `main`, then again without `--dry-run`. It refuses a version that is not strict `MAJOR.MINOR.PATCH`, not greater than the current one, or already released, and requires the four manifest versions to match `CADRE_RUNTIME_VERSION` and exactly one non-empty Unreleased section. It then updates those versions, moves the previous runtime into `LEGACY_RUNTIME_VERSIONS`, dates the changelog section, adds the release notes entry, and creates `.github/releases/<version>.md`; `--date YYYY-MM-DD` overrides today's UTC date. It never stages, commits, tags or publishes.
+3. Review the generated changelog section, release notes and GitHub release body, and update the README release blurb if needed.
+4. When the release changes the active template set, add the previous release's runtime and template set to `CONTINUABLE_EXECUTION_RELEASES` in `harness/src/domain/version.ts`, so its in-flight executions can reach a safe boundary before the approved refresh.
+5. Run every release gate and the native three-client installer checks from the root `AGENTS.md`, and record the results in `docs/development/cadre-<version>-release.md`.
+6. Commit the release as `chore(release): prepare <version>`.
+7. Create the signed `release-<version>` tag and publish the GitHub release from `.github/releases/<version>.md`. Publishing runs the release workflow, which requires the tag to match `harness/package.json`, publishes npm, and then deploys the documentation.

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TEMPLATE_SET_VERSION } from "./version.js";
+import { LEGACY_TEMPLATE_SET_VERSIONS, TEMPLATE_SET_VERSION } from "./version.js";
 
 export { TEMPLATE_SET_VERSION } from "./version.js";
 
@@ -18,6 +18,8 @@ export interface TemplateRecord {
 export interface TemplateDescriptor extends Omit<TemplateRecord, "relativePath"> {
   artifactPath?: string;
 }
+
+export const TEMPLATE_SET_VERSIONS = [...LEGACY_TEMPLATE_SET_VERSIONS, TEMPLATE_SET_VERSION] as readonly string[];
 
 export const TEMPLATE_IDS = [
   "project/archive-operation",
@@ -93,6 +95,120 @@ const TEMPLATE_ARTIFACT_PATHS: Partial<Record<(typeof TEMPLATE_IDS)[number], str
   "styleguide/typescript": "styleguides/typescript.md"
 };
 
+const PROJECT_TEMPLATE_PAYLOAD_PATHS = [
+  "init/archive/.gitkeep",
+  "init/gitignore.template",
+  "init/guidelines.md",
+  "init/operations/.gitkeep",
+  "init/patterns/index.md",
+  "init/product.md",
+  "init/project.json",
+  "init/refreshes/.gitkeep",
+  "init/styleguides/general.md",
+  "init/styleguides/language.md",
+  "init/tech-stack.md",
+  "init/tracks/.gitkeep",
+  "init/tracks.md",
+  "init/wisps/.gitkeep",
+  "init/workflow.md",
+  "project/archive-operation.json",
+  "project/pattern.md",
+  "project/refresh-operation.json",
+  "project/refresh.md"
+] as const;
+
+const STYLEGUIDE_TEMPLATE_PAYLOAD_PATHS = [
+  "styleguides/dart.md",
+  "styleguides/flutter.md",
+  "styleguides/go.md",
+  "styleguides/gradle.md",
+  "styleguides/html-css.md",
+  "styleguides/index.md",
+  "styleguides/java.md",
+  "styleguides/javascript.md",
+  "styleguides/kotlin.md",
+  "styleguides/maven.md",
+  "styleguides/python.md",
+  "styleguides/react.md",
+  "styleguides/swift.md",
+  "styleguides/swiftui.md",
+  "styleguides/typescript.md"
+] as const;
+
+const LEGACY_TRACK_TEMPLATE_PAYLOAD_PATHS = [
+  "track/bug.md",
+  "track/execution.json",
+  "track/learning.md",
+  "track/plan.md",
+  "track/revert-operation.json",
+  "track/revise-operation.json",
+  "track/revision.md",
+  "track/spec.md",
+  "track/state.json"
+] as const;
+
+const DEPENDENCY_CONTEXT_TEMPLATE_PATH = "track/dependency-context.json";
+
+export interface TemplatePayloadInspection {
+  version: string;
+  found: number;
+  required: number;
+  missing: readonly string[];
+  unexpected: readonly string[];
+}
+
+/** Expected physical payload, including initialization directory markers. */
+export function expectedTemplatePayloadPaths(version: string): readonly string[] {
+  if (!TEMPLATE_SET_VERSIONS.includes(version)) throw new Error(`Unsupported Cadre template set ${version}`);
+  const tracks = ["v5", TEMPLATE_SET_VERSION].includes(version)
+    ? [...LEGACY_TRACK_TEMPLATE_PAYLOAD_PATHS, DEPENDENCY_CONTEXT_TEMPLATE_PATH]
+    : [...LEGACY_TRACK_TEMPLATE_PAYLOAD_PATHS];
+  return [...PROJECT_TEMPLATE_PAYLOAD_PATHS, ...STYLEGUIDE_TEMPLATE_PAYLOAD_PATHS, ...tracks].sort();
+}
+
+function walk(root: string, directory = root): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return walk(root, path);
+    return entry.isFile() ? [relative(root, path).split(sep).join("/")] : [];
+  });
+}
+
+/** Inspect all versioned payloads without exposing legacy templates as live resources. */
+export function inspectTemplatePayloads(templatesRoot: string): TemplatePayloadInspection[] {
+  const root = resolve(templatesRoot);
+  return TEMPLATE_SET_VERSIONS.map((version) => {
+    const expected = expectedTemplatePayloadPaths(version);
+    const versionRoot = join(root, version);
+    const actual = existsSync(versionRoot) ? walk(versionRoot).sort() : [];
+    const actualSet = new Set(actual), expectedSet = new Set(expected);
+    return {
+      version,
+      found: actual.length,
+      required: expected.length,
+      missing: expected.filter((path) => !actualSet.has(path)),
+      unexpected: actual.filter((path) => !expectedSet.has(path))
+    };
+  });
+}
+
+/** Reject missing or extra files in any immutable template payload. */
+export function assertCompleteTemplatePayloads(templatesRoot: string): TemplatePayloadInspection[] {
+  const inspections = inspectTemplatePayloads(templatesRoot);
+  const failures = inspections.filter((inspection) => inspection.missing.length || inspection.unexpected.length);
+  if (failures.length) {
+    const details = failures.map((inspection) => {
+      const findings = [
+        inspection.missing.length ? `missing ${inspection.missing.join(", ")}` : "",
+        inspection.unexpected.length ? `unexpected ${inspection.unexpected.join(", ")}` : ""
+      ].filter(Boolean).join("; ");
+      return `${inspection.version} (${findings})`;
+    }).join("; ");
+    throw new Error(`Cadre immutable template payload is incomplete: ${details}`);
+  }
+  return inspections;
+}
+
 let catalogCache: readonly TemplateRecord[] | null = null;
 
 function locateTemplateRoot(): string {
@@ -105,13 +221,6 @@ function locateTemplateRoot(): string {
   const found = candidates.find((candidate) => existsSync(candidate));
   if (!found) throw new Error(`Cadre template set ${TEMPLATE_SET_VERSION} is unavailable`);
   return found;
-}
-
-function walk(root: string, directory = root): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    return entry.isDirectory() ? walk(root, path) : [relative(root, path).split(sep).join("/")];
-  });
 }
 
 function templateId(path: string): string | null {
@@ -147,6 +256,7 @@ function assertCompleteCatalog(catalog: readonly TemplateRecord[]): void {
 export function templateCatalog(): TemplateRecord[] {
   if (!catalogCache) {
     const root = locateTemplateRoot();
+    assertCompleteTemplatePayloads(dirname(root));
     const catalog = walk(root)
       .map((relativePath): TemplateRecord | null => {
         const id = templateId(relativePath);

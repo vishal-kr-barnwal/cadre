@@ -1,5 +1,40 @@
 # Changelog
 
+## [Unreleased]
+
+Cadre re-authors selected engineering-process strengths as Cadre-native contracts and adds honest, capability-tiered host reporting. Codex and Claude Code remain stable integrations; native Zed Agent remains beta. No client integration, workflow, MCP tool, or production dependency is added.
+
+### Governed operation tracks and template set v6
+
+- Add `operation` as a third track type for governed rollouts, migrations, maintenance, recovery, and infrastructure or service changes. Operation tracks use the existing track → implement → review → archive lifecycle. Humans perform every external action; Cadre records their evidence and never executes or attests it.
+- Require structured, digest-bound operation readiness, planned preflight/rollout/postflight evidence capture, monitoring baselines and success thresholds, abort/rollback/recovery, reversibility limits, and residual-risk ownership. Blank and placeholder values fail staged and canonical validation.
+- Introduce immutable template set **v6**. Published v1–v5 payloads stay byte-for-byte unchanged, remain readable, and are verified complete at package, doctor, and install boundaries. Refreshing an active v1 or v2 project requires explicitly reseeded Pattern Seed memory before promotion.
+
+### Evidence and verification discipline
+
+- Apply grounding, evidence records with explicit time zones, baseline-and-delta verification, reversibility classification with irreversible steps approved as separate named plan tasks (then run under the persisted approval mode, and revised first if their target or consequences change), change of theory after two failed attempts, non-inferred approval, feedback classification, a defined clarification gate, and untrusted external-content rules to every track.
+- Add an approved verification profile to `tech-stack.md`. Create proposes it from repository evidence without running discovered commands, refresh treats its drift as execution-governing, and implement and review bind verification evidence to it.
+
+### Capability tiers, diagnostics, and guide-only fallback
+
+- Add a declarative adapter registry with `full`, `managed`, `guide-only`, and `unverified` tiers plus a verified capability profile for Codex (`full`), Claude Code (`full`), and Zed Agent (`managed`). Only these three adapters are install targets.
+- Extend `cadre-ai doctor` with read-only local adapter evidence, profiles, `--json`, `--home`, and `--marketplace-root`. It never repairs configuration.
+- Add read-only `cadre-ai guide`, an `AGENTS.md`-compatible block for agents without the Cadre MCP. Such agents may explain `.cadre/` content as unvalidated, but never mutate Cadre state or claim lifecycle outcomes.
+- Validate canonical skills and generated Zed adapters against the Agent Skills specification.
+
+### Upgrade and compatibility
+
+- Executions started by 3.9.0 on template set v5 may continue their original contract to a safe boundary before the approved refresh. Starting a new execution, candidate promotion, review completion, archive, and every other mutation still require that refresh.
+
+### Release maintenance
+
+- Add `pnpm --filter cadre-ai release:version <version> [--dry-run]` to preview and apply post-merge version bumps. Package validation and tests derive the current version from `CADRE_RUNTIME_VERSION` instead of release literals.
+
+### Design provenance
+
+- Evidence provenance, baseline-and-delta gates, reversibility, feedback classification, governed operational work, host load-mode degradation, and installation conformance probes were independently re-authored as Cadre-native contracts from the maintainer's Generic-GenAI-Setup process kit at revision `3e37de1`. No files, text, templates, `.ai/` state, adapters, or activation mechanisms were copied.
+- Rejected alternatives: a copied project-local rule payload, prompt-only stateful work in uncertified agents, and a hosted workflow service. Each would weaken Cadre's approval, receipt, and recovery guarantees.
+
 ## [3.9.0] - 2026-09-25
 
 Cadre 3.9.0 reduces bookkeeping commits and repeated context while preserving human approval, verification, provenance, and interruption recovery. Track remains the default approval mode and Parallel remains the default scheduling mode. Codex and Claude Code are stable integrations; native Zed Agent remains beta.

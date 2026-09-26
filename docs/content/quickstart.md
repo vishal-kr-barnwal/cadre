@@ -11,7 +11,7 @@ This walkthrough assumes Cadre is installed and the client has been reloaded.
 Cadre commands are agent skills, not `cadre-ai` shell subcommands.
 
 Codex and Claude Code support is stable. The Zed Agent commands shown here are
-available as a beta integration in Cadre 3.6.0.
+available as a beta integration.
 
 ## 1. Create Project Context
 
@@ -39,7 +39,7 @@ and asks separately only when a material choice is unresolved. After approval,
 it creates `.cadre/`, validates it, and records setup commits without more
 approval prompts.
 
-## 2. Create A Feature Or Bug Track
+## 2. Create A Feature, Bug, Or Operation Track
 
 ```text
 # Codex
@@ -52,7 +52,7 @@ $cadre:track Add passwordless login as a feature
 /cadre-track Add passwordless login as a feature
 ```
 
-Cadre proposes specification, plan, learning, dependency context and state together when the request is clear. One approval covers the validated graph, commit groups, inherited constraints, pattern seed, lifecycle transition, generated state and one receipt-bearing commit.
+Cadre proposes specification, plan, learning, dependency context and state together when the request is clear. For an operation track, the specification requires meaningful planned fields for operational owner, target, change window, and preconditions; preflight/rollout/postflight operator, evidence capture, and timestamp format; monitoring baseline, success threshold, and observation window; abort/rollback/recovery owner, procedure, and reversibility limit; and residual risk, mitigation, and acceptance owner. Cadre validates this plan for human-supplied evidence capture but never runs, infers, or attests external actions or approvals. One approval covers the validated graph, commit groups, inherited constraints, pattern seed, lifecycle transition, generated state and one receipt-bearing commit.
 Ask for staged specification/plan review explicitly when desired.
 
 The plan is an acyclic dependency graph:

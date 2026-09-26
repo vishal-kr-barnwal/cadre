@@ -20,6 +20,7 @@ import { CadreError, readDiagnostic, serializeCadreError } from "../src/domain/e
 import { createResultFormatter } from "../src/mcp/results.js";
 import { readContext } from "../src/domain/context.js";
 import { parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
+import { TEMPLATE_SET_VERSION } from "../src/domain/version.js";
 
 const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
 function write(root: string, path: string, body: string) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); }
@@ -246,7 +247,7 @@ test("legacy refresh migrates once at quiescence and preserves execution and his
   const input = { projectRoot: root, candidateId: "refresh-migration", workflow: "refresh" as const, files };
   const preview = previewCandidateApply(input); commitReceipt(root, applyCandidate(input, preview.digest));
   const migrated = JSON.parse(readFileSync(join(root, projectPath), "utf8"));
-  assert.equal(migrated.templateSetVersion, "v5"); assert.equal(migrated.schemaVersion, 2); assert.deepEqual(migrated.setup, project.setup);
+  assert.equal(migrated.templateSetVersion, TEMPLATE_SET_VERSION); assert.equal(migrated.schemaVersion, 2); assert.deepEqual(migrated.setup, project.setup);
   assert.deepEqual(migrated.history.slice(0, -1), project.history); assert.equal(readFileSync(join(root, journalPath), "utf8"), journalBefore);
   assert.deepEqual(validateProject(root).errors, []);
 });

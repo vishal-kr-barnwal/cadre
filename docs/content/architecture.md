@@ -28,8 +28,9 @@ harness/
 ├── scripts/
 ├── templates/
 │   ├── v1/                 # immutable published legacy set
-│   ├── v2/                 # immutable compact legacy set
-│   └── v3/                 # active memory/context set
+│   ├── …
+│   ├── v5/                 # immutable published legacy set
+│   └── v6/                 # active template set
 ├── test/
 ├── .codex-plugin/plugin.json
 ├── .claude-plugin/plugin.json
@@ -57,11 +58,14 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `src/domain/worktrees.ts` | Constrained worktree creation, integration, status, and cleanup. |
 | `src/domain/governance.ts` | Review completion and archive-batch governance. |
 | `src/mcp/server.ts` | MCP server instructions, resource registration, schemas, and tool adapters. |
+| `src/domain/track-types.ts` | Shared `feature`, `bug`, and `operation` track-type contract. |
+| `scripts/client-adapters.ts` | Registered adapters, capability tiers, and verified capability profiles. |
+| `scripts/doctor.ts`, `scripts/permission-inspection.ts` | Read-only package, adapter, and narrow-approval diagnostics. |
+| `scripts/guide.ts` | Static guide-only instruction block for agents without the Cadre MCP. |
+| `scripts/agent-skills.ts` | Agent Skills specification conformance for canonical and generated skills. |
 | `scripts/` | Build, CLI, installation, uninstall, permissions, packaging, and source validation. |
-| `templates/v1/` | Immutable published 3.3 template set. |
-| `templates/v2/` | Immutable published compact template set. |
-| `templates/v3/` | Immutable published memory and context templates. |
-| `templates/v5/` | Active cohesive-change, receipt, dependency-context, workflow, and styleguide templates. |
+| `templates/v1/` through `templates/v5/` | Immutable published legacy template payloads. |
+| `templates/v6/` | Active cohesive-change, receipt, dependency-context, workflow, and styleguide templates. |
 
 The domain directory currently includes filesystem and Git-aware behavior; it
 is not a pure dependency-free DDD layer. Preserve the real capability
@@ -71,7 +75,7 @@ boundaries rather than imposing an architecture the source does not have.
 
 `pnpm --filter cadre-ai build` uses esbuild to create two ignored bundles:
 
-- `dist/cadre-cli.mjs` — executable installer/doctor/uninstaller;
+- `dist/cadre-cli.mjs` — executable installer, doctor, guide, and uninstaller;
 - `dist/cadre-mcp.mjs` — self-contained stdio MCP server.
 
 Both target Node.js 18 and bundle their runtime dependencies. The published
@@ -107,8 +111,18 @@ Its adapters request text-mode template bundles because Zed does not expose
 embedded MCP resource bodies to the agent, and unsupported form elicitation
 falls back to one concise chat question.
 
-Both clients operate the same workflow and state contracts. Client-specific
+All three clients operate the same workflow and state contracts. Client-specific
 metadata does not create different lifecycle semantics.
+
+## Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| One control plane | `.cadre/` and the installed MCP runtime remain the only Cadre authority. Copied rule payloads and prompt-only state changes are rejected because they cannot enforce approvals, receipts, or recovery. |
+| Capability tiers | `full` and `managed` adapters are certified by conformance tests and native checks. `guide-only` agents may only read and explain Cadre state as unvalidated. `unverified` hosts receive no support claim. |
+| Adapter ownership | Cadre installs and diagnoses only registered adapters at user scope. Profiles describe packaged integrations; per-connection MCP negotiation still selects result format and form elicitation. |
+| Evidence discipline | Verification, handoff, and review evidence lives in existing specifications, plans, journals, and review records rather than a parallel ledger. |
+| Operational work | Operation tracks reuse the delivery lifecycle. Investigation, evaluation, and documentation stay `wisp`-first until their persistence and acceptance semantics are defined. |
 
 ## Safety Architecture
 

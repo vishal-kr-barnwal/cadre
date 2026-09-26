@@ -1,14 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { CLIENTS, type ClientName } from "./client-adapters.js";
 
-export const CLIENTS = ["codex", "claude", "zed"] as const;
-export type ClientName = typeof CLIENTS[number];
+export { CLIENTS, type ClientName } from "./client-adapters.js";
 
-export function commandExists(command: string): boolean {
+export function commandExists(command: ClientName): boolean {
   const lookup = process.platform === "win32" ? "where" : "which";
   return spawnSync(lookup, [command], { stdio: "ignore" }).status === 0;
 }
 
-export function runCommand(command: string, args: string[], capture = false): string {
+export function runCommand(command: ClientName, args: readonly string[], capture = false): string {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: capture ? "pipe" : "inherit"
@@ -23,7 +23,7 @@ export function runCommand(command: string, args: string[], capture = false): st
   return capture ? (result.stdout ?? "") : "";
 }
 
-export function runJson<T>(command: string, args: string[]): T {
+export function runJson<T>(command: ClientName, args: readonly string[]): T {
   const output = runCommand(command, args, true);
   try {
     return JSON.parse(output) as T;
