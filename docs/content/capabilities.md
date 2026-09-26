@@ -16,7 +16,7 @@ through archived learning.
 
 | Area | Capability |
 |---|---|
-| Clients | Stable native user plugins for Codex/Claude and beta global skills plus custom MCP for Zed Agent. |
+| Clients | Stable native user plugins for Codex/Claude (`full` tier) and beta global skills plus custom MCP for Zed Agent (`managed` tier). Other agents are not integrations: `cadre-ai guide` prints read-only `guide-only` instructions with no stateful Cadre support. |
 | Project creation | Greenfield/brownfield classification, optional Git initialization, approved context, workflow, styleguides, and patterns. |
 | Tracks | Feature, bug, and operation specifications, acceptance criteria, dependencies, phased plans, and learning seeds. Operation tracks record human-controlled rollout/migration/maintenance evidence rather than running external actions. |
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |

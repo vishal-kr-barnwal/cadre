@@ -75,15 +75,32 @@ Skills and MCP Server pages and run `/cadre-status` in a native Zed Agent thread
 
 ## Release Sequence
 
-1. Update runtime, package, and both plugin manifest versions together; Zed
-   adapters inherit the package version from the shared payload.
-2. Update docs package version and release notes.
+Feature pull requests keep every version unchanged and add their changelog
+entry under `## [Unreleased]`. After the reviewed pull request merges, prepare
+the release from an up-to-date `main`:
+
+```bash
+pnpm --filter cadre-ai release:version <version> --dry-run
+pnpm --filter cadre-ai release:version <version>
+```
+
+1. Preview, then apply, the version bump. `release:version` updates the
+   runtime, package, docs package, and both plugin manifest versions together;
+   Zed adapters inherit the package version from the shared payload. It also
+   dates the changelog section, adds the release notes entry, and creates
+   `.github/releases/<version>.md`. It never stages, commits, tags, or
+   publishes.
+2. Review the generated changelog section, release notes, and GitHub release
+   body.
 3. Install with the locked workspace dependencies.
 4. Run harness check, tests, validation, and package inspection.
 5. Run the complete docs check.
-6. Validate local-build installation against Codex, Claude, and Zed.
+6. Validate local-build installation against Codex, Claude, and Zed, and record
+   the results in `docs/development/cadre-<version>-release.md`.
 7. Stop and fix any installer, listing, discovery, MCP, permission, or version
    mismatch before creating or publishing the release.
 
-Publishing, tagging, pushing, and external release creation require explicit
-user authorization; local validation does not imply it.
+[Development](development.md#version-bump-and-release) covers the command's
+refusal rules, continuation of in-flight executions, and the tag and publish
+steps. Publishing, tagging, pushing, and external release creation require
+explicit user authorization; local validation does not imply it.

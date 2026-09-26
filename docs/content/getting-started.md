@@ -22,8 +22,9 @@ Cadre represents four capability tiers: `full`, `managed`, `guide-only`, and
 `unverified`. Today its adapter registry contains exactly three installation
 adapters: Codex (`full`), Claude Code (`full`), and Zed Agent (`managed`, beta).
 Zed Agent support is beta. `guide-only` and `unverified` are representable for
-future capability reporting, but are not installation targets, auto-detected
-targets, or claimed integrations.
+capability reporting, but are not installation targets, auto-detected targets,
+or claimed integrations. Other agents receive only the read-only guide-only
+fallback described below.
 
 `cadre-ai doctor` first verifies the local package payload, then reports local
 adapter evidence such as plugin registration, narrow MCP approval, managed skill
@@ -31,6 +32,54 @@ links, and settings. It does not start a client or verify a running session. Use
 `cadre-ai doctor --json` when a structured report is useful. Use
 `--home PATH` or `--marketplace-root PATH` to inspect the matching custom Zed
 marketplace without changing it.
+
+### Capability Profiles
+
+Each registered adapter also declares a fixed capability profile. The human
+`cadre-ai doctor` report prints it as one `profile:` line per client, and
+`cadre-ai doctor --json` reports it as `clients[].capabilities`. A profile
+describes the packaged integration, not the state of a running session.
+
+| Field | Codex | Claude Code | Zed Agent |
+|---|---|---|---|
+| `status` | `stable` | `stable` | `beta` |
+| `skills` | `native-plugin` | `native-plugin` | `global-skill-links` |
+| `invocation` | `$cadre:<workflow>` | `/cadre:<workflow>` | `/cadre-<workflow>` |
+| `mcpLaunch` | `plugin-manifest-stdio` | `plugin-manifest-stdio` | `settings-context-server-stdio` |
+| `results` | `structured` | `structured-from-2.0.21` | `text` |
+| `templateContentMode` | `embedded_resource` | `embedded_resource` | `text` |
+| `decisions` | `form-elicitation-with-chat-fallback` | `form-elicitation-with-chat-fallback` | `chat-fallback` |
+| `workers` | `host-subagents` | `packaged-worker-agents` | `host-dependent` |
+| `approvals` | `plugin-default-tool-approval` | `server-enable-and-tool-allowlist` | `exact-tool-allow-entries` |
+
+Claude Code receives structured MCP results from version 2.0.21; earlier
+versions receive the same payload as compact text. Zed ships no worker
+definitions, so delegation depends on the host. Every client can run work
+directly in the main agent.
+
+### Guide-Only Fallback
+
+Other agents are not Cadre integrations. `cadre-ai guide` prints a read-only,
+`AGENTS.md`-compatible Markdown block delimited by
+`<!-- cadre:guide-only:start -->` and `<!-- cadre:guide-only:end -->`:
+
+```bash
+cadre-ai guide
+```
+
+The block tells an agent that cannot call the installed Cadre MCP tools that it
+is not a supported integration. Such an agent must read `.cadre/workflow.md`
+and relevant `.cadre/` artifacts before explaining Cadre scope or status, and
+label that explanation unvalidated. It must not change anything under
+`.cadre/`, create commits with Cadre operation trailers, claim that a track was
+planned, implemented, reviewed, completed, or archived, or reconstruct Cadre
+runtime behavior. Stateful Cadre work requires a supported integration and
+`cadre-ai doctor`.
+
+The command takes no options, writes only to standard output, and never detects
+clients or changes settings. The human `doctor` report ends with a pointer to
+it, and `doctor --json` includes
+`guideOnly: { "command": "cadre-ai guide", "stateful": false }`.
 
 ## Install The CLI And Client Integration
 

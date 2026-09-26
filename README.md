@@ -8,11 +8,10 @@
   A human-governed, Git-aware delivery harness for OpenAI Codex, Claude Code, and Zed Agent (beta).
 </p>
 
-Cadre turns approved project context into resumable feature, bug, and governed operation
-tracks. It
-combines specification, dependency-aware planning, parallel implementation,
-manual verification, review, revision, refresh, revert, archive, and Git
-provenance without asking an agent to invent workflow state.
+Cadre turns approved project context into resumable feature, bug, and governed
+operation tracks. It combines specification, dependency-aware planning, parallel
+implementation, manual verification, review, revision, refresh, revert, archive,
+and Git provenance without asking an agent to invent workflow state.
 
 **Documentation:** [cadre-docs.pages.dev](https://cadre-docs.pages.dev/) ·
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
@@ -29,6 +28,12 @@ provenance without asking an agent to invent workflow state.
   revert, and archive checkpoints survive interrupted sessions.
 - **Spec-first tracks:** feature, bug, and governed operation specifications lead to validated
   phase/task dependency graphs with derived manual-verification barriers.
+- **Governed operations:** rollouts, migrations, maintenance, recovery, and
+  infrastructure or service changes use the ordinary track lifecycle; humans
+  perform every external action and Cadre records their evidence.
+- **Evidence discipline:** on every track, claims rest on sources that were
+  read, evidence records use explicit time zones, and verification records
+  baseline and delta against an approved verification profile.
 - **Safe parallel execution:** bounded workers operate in isolated Git
   worktrees while the main agent alone schedules, integrates, resolves
   conflicts, updates Cadre state, and records approval.
@@ -37,6 +42,53 @@ provenance without asking an agent to invent workflow state.
 - **Typed runtime:** a bundled MCP server provides immutable templates,
   validation, digest-gated state transitions, and constrained worktree
   operations.
+- **Capability reporting:** `cadre-ai doctor` reports each client's capability
+  tier, profile, and local setup evidence without changing anything; other
+  agents receive only a read-only guide-only block.
+
+## What's new since 3.9.0
+
+The current source adds no workflow skill, client, or MCP tool. The ten
+workflows, the 25 MCP tools, and the Codex, Claude Code, and Zed Agent (beta)
+integrations are unchanged. The `track` skill now also creates `operation`
+tracks, and the `cadre-ai` CLI gains `guide` and a richer `doctor`.
+
+- **Operation tracks** govern rollouts, migrations, maintenance, recovery, and
+  infrastructure or service changes through the same track → implement →
+  review → archive lifecycle. Humans perform every external action; Cadre
+  records structured evidence and never executes or attests an external
+  action. The specification needs meaningful values for operational
+  readiness, planned preflight/rollout/postflight evidence capture,
+  monitoring, abort/rollback/recovery, and residual risk. Blank or placeholder
+  values fail validation. See [Workflows](https://cadre-docs.pages.dev/workflows/)
+  and [Operations](https://cadre-docs.pages.dev/operations/).
+- **Evidence and verification discipline** applies to every track: grounding
+  before claims, evidence records with explicit time zones, and
+  baseline-and-delta verification against an approved verification profile in
+  `.cadre/tech-stack.md`. Plans classify reversibility and keep each
+  irreversible or destructive step as its own named task; the plan approval
+  covers it, it runs under the persisted approval mode, and a changed target or
+  consequence goes through `revise` first. Cadre also changes theory after two
+  failed attempts, never infers approval, classifies feedback, applies a
+  clarification gate, and treats external content, including host web search
+  results, as untrusted. See
+  [How Cadre Works](https://cadre-docs.pages.dev/how-cadre-works/).
+- **Capability tiers:** Codex and Claude Code are `full`; Zed Agent is
+  `managed` (beta). `guide-only` and `unverified` exist only for reporting and
+  are never install targets. The read-only `cadre-ai doctor` reports package
+  health and each client's tier, capability profile, and local setup evidence.
+  See [Installation](https://cadre-docs.pages.dev/getting-started/).
+- **Guide-only fallback:** `cadre-ai guide` prints a read-only,
+  `AGENTS.md`-compatible block. Added to a project's `AGENTS.md`, it instructs
+  an agent without the Cadre MCP to only read and explain `.cadre/` content as
+  unvalidated, never to mutate Cadre state, and never to claim lifecycle
+  outcomes. It is not a Cadre integration.
+- **Template set v6:** new projects use v6, and published v1–v5 templates
+  remain readable and unchanged. Existing projects migrate through one approved
+  refresh at a quiescent boundary; refreshing a v1 or v2 project with active
+  tracks also requires explicitly reseeded Pattern Seed learning.
+- **Agent Skills conformance:** canonical skills and generated Zed adapters are
+  validated against the Agent Skills specification.
 
 ## Install
 
@@ -53,6 +105,11 @@ cadre-ai install
 `--target claude`, `--target zed`, or `--target all` to choose explicitly.
 Start a new client conversation after installation; in Claude Code, run
 `/reload-plugins` first.
+
+`cadre-ai doctor` reports each client's capability tier, capability profile, and
+local setup evidence without changing anything. Other agents are not Cadre
+integrations: `cadre-ai guide` prints a read-only guide-only block for a
+project's `AGENTS.md`, with no stateful Cadre support.
 
 ## Use Cadre
 
@@ -80,6 +137,23 @@ $cadre:archive passwordless-login
 /cadre-review passwordless-login
 /cadre-archive passwordless-login
 ```
+
+Operation tracks start from the same `track` skill and then use the same
+`implement`, `review`, and `archive` commands:
+
+```text
+# Codex
+$cadre:track Roll out the orders database migration as an operation
+
+# Claude Code
+/cadre:track Roll out the orders database migration as an operation
+
+# Zed Agent (beta)
+/cadre-track Roll out the orders database migration as an operation
+```
+
+Humans perform every external action in an operation track; Cadre records the
+evidence they supply and never executes or attests it.
 
 The complete workflow set is `create`, `track`, `implement`, `review`,
 `revise`, `archive`, `refresh`, `revert`, `status`, and `wisp`.

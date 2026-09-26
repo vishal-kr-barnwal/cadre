@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TEMPLATE_IDS, TEMPLATE_SET_VERSION, assertCompleteTemplatePayloads, templateCatalog } from "../src/domain/templates.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 import { createCadreServer } from "../src/mcp/server.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
+import { validateAgentSkill } from "./agent-skills.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skills = [
@@ -44,8 +46,11 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.9.0") {
-  errors.push("package: expected publish identity cadre-ai@3.9.0");
+// The runtime identity is the single source of truth; the package must publish exactly that version.
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== CADRE_RUNTIME_VERSION) {
+  errors.push(
+    `package: expected publish identity cadre-ai@${CADRE_RUNTIME_VERSION}, found ${String(packageManifest.name)}@${String(packageManifest.version)}`
+  );
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
@@ -85,6 +90,7 @@ for (const skill of skills) {
   if (existsSync(skillPath)) {
     const body = readFileSync(skillPath, "utf8");
     if (!body.startsWith(`---\nname: ${skill}\n`)) errors.push(`${skill}: invalid frontmatter name`);
+    for (const issue of validateAgentSkill(body, skill)) errors.push(`${skill}: Agent Skills ${issue}`);
     if (body.includes("TODO")) errors.push(`${skill}: unresolved TODO`);
     if (body.includes(".cadre/bin/") || body.includes(".cadre/templates/")) {
       errors.push(`${skill}: references removed project-local runtime or templates`);

@@ -19,6 +19,7 @@ import { parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
 import { pageTracks, summarizeGraph } from "../src/domain/status-views.js";
 import { validateProject, renderTracksPreview, writeTracks } from "../src/domain/state.js";
 import { applyExecutionStart, previewExecutionStart, applyExecutionCheckpoint, previewExecutionCheckpoint, readExecution } from "../src/domain/execution.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = JSON.parse(readFileSync(join(root, "test/context-baseline.json"), "utf8")) as { recordedCatalog: { totalBytes: number }; recordedAggregate: { responseBytes: number } };
@@ -47,7 +48,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 1, runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");

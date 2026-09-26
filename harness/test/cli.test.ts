@@ -1,19 +1,28 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync
+  chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync,
+  writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
+import { CAPABILITY_PROFILE_FIELDS, CLIENT_ADAPTERS, type ClientName } from "../scripts/client-adapters.js";
+import {
+  CLAUDE_APPROVAL, CLAUDE_SERVER_APPROVAL, ZED_MCP_PERMISSION_KEYS, configureCodexMcpApproval
+} from "../scripts/permissions.js";
+import { CADRE_WORKFLOWS, createZedSkillAdapters } from "../scripts/zed.js";
 import { TEMPLATE_IDS, TEMPLATE_SET_VERSIONS, expectedTemplatePayloadPaths, templateCatalog } from "../src/domain/templates.js";
-import { TEMPLATE_SET_VERSION } from "../src/domain/version.js";
+import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "../src/domain/version.js";
+import { clientResultFormat } from "../src/mcp/results.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "dist", "cadre-cli.mjs");
+/** Doctor's package identity, derived from the runtime version rather than a release literal. */
+const RUNTIME_IDENTITY = new RegExp(`cadre-ai@${CADRE_RUNTIME_VERSION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 
 function installFakeClient(bin: string, name: "codex" | "claude" | "zed", log: string): void {
   const file = join(bin, name);
@@ -56,11 +65,11 @@ function runCli(args: string[], env = process.env) {
 test("global CLI exposes publish identity and self-contained runtime diagnostics", () => {
   const version = runCli(["--version"]);
   assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), "3.9.0");
+  assert.equal(version.stdout.trim(), CADRE_RUNTIME_VERSION);
 
   const doctor = runCli(["doctor"]);
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.match(doctor.stdout, /cadre-ai@3\.9\.0/);
+  assert.match(doctor.stdout, RUNTIME_IDENTITY);
   assert.match(doctor.stdout, new RegExp(`template catalog: ${TEMPLATE_IDS.length}/${TEMPLATE_IDS.length}`));
   assert.match(doctor.stdout, /self-contained runtime: ok/);
 
@@ -341,7 +350,7 @@ test("doctor keeps package health stable and reports absent adapters as advisory
   const environment = doctorEnv(home);
   const human = runSourceCli(["doctor"], environment);
   assert.equal(human.status, 0, human.stderr || human.stdout);
-  assert.match(human.stdout, /cadre-ai@3\.9\.0/);
+  assert.match(human.stdout, RUNTIME_IDENTITY);
   assert.match(human.stdout, new RegExp(`template catalog: ${TEMPLATE_IDS.length}/${TEMPLATE_IDS.length}`));
   assert.match(human.stdout, /self-contained runtime: ok/);
   assert.match(human.stdout, /capability report:/);
@@ -480,4 +489,176 @@ test("doctor rejects invalid option combinations before inspection", () => {
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.match(result.stderr, expected);
   }
+});
+
+function capabilityProfile(id: ClientName) {
+  const adapter = CLIENT_ADAPTERS.find((candidate) => candidate.id === id);
+  assert.ok(adapter, `missing ${id} adapter`);
+  return adapter.capabilities;
+}
+
+test("capability profiles declare every field with the verified host values", () => {
+  assert.deepEqual(
+    Object.fromEntries(CLIENT_ADAPTERS.map(({ id, capabilities }) => [id, capabilities])),
+    {
+      codex: {
+        status: "stable",
+        skills: "native-plugin",
+        invocation: "$cadre:<workflow>",
+        mcpLaunch: "plugin-manifest-stdio",
+        results: "structured",
+        templateContentMode: "embedded_resource",
+        decisions: "form-elicitation-with-chat-fallback",
+        workers: "host-subagents",
+        approvals: "plugin-default-tool-approval"
+      },
+      claude: {
+        status: "stable",
+        skills: "native-plugin",
+        invocation: "/cadre:<workflow>",
+        mcpLaunch: "plugin-manifest-stdio",
+        results: "structured-from-2.0.21",
+        templateContentMode: "embedded_resource",
+        decisions: "form-elicitation-with-chat-fallback",
+        workers: "packaged-worker-agents",
+        approvals: "server-enable-and-tool-allowlist"
+      },
+      zed: {
+        status: "beta",
+        skills: "global-skill-links",
+        invocation: "/cadre-<workflow>",
+        mcpLaunch: "settings-context-server-stdio",
+        results: "text",
+        templateContentMode: "text",
+        decisions: "chat-fallback",
+        workers: "host-dependent",
+        approvals: "exact-tool-allow-entries"
+      }
+    }
+  );
+  for (const adapter of CLIENT_ADAPTERS) {
+    assert.deepEqual(Object.keys(adapter.capabilities), [...CAPABILITY_PROFILE_FIELDS], adapter.id);
+  }
+});
+
+test("capability profiles match runtime result, template, approval, and worker facts", () => {
+  const codex = capabilityProfile("codex");
+  const claude = capabilityProfile("claude");
+  const zed = capabilityProfile("zed");
+
+  // results mirrors clientResultFormat for each host identity.
+  assert.equal(codex.results, "structured");
+  assert.equal(clientResultFormat({ name: "codex_cli_rs", version: "0.148.0" }), "structured");
+  assert.equal(claude.results, "structured-from-2.0.21");
+  assert.equal(clientResultFormat({ name: "claude-code", version: "2.0.21" }), "structured");
+  assert.equal(clientResultFormat({ name: "claude-code", version: "2.0.20" }), "text");
+  assert.equal(zed.results, "text");
+  assert.equal(clientResultFormat({ name: "zed", version: "0.200.0" }), "text");
+
+  // Codex and Claude run the canonical skills, which keep the embedded_resource
+  // default; Zed runs generated adapters that request text bundles.
+  assert.deepEqual([codex.templateContentMode, claude.templateContentMode], ["embedded_resource", "embedded_resource"]);
+  assert.equal(zed.templateContentMode, "text");
+  assert.equal(zed.invocation, "/cadre-<workflow>");
+  assert.equal(zed.workers, "host-dependent");
+  const pluginRoot = mkdtempSync(join(tmpdir(), "cadre-capability-facts-"));
+  try {
+    cpSync(join(root, "skills"), join(pluginRoot, "skills"), { recursive: true });
+    createZedSkillAdapters(pluginRoot);
+    for (const workflow of CADRE_WORKFLOWS) {
+      assert.doesNotMatch(readFileSync(join(root, "skills", workflow, "SKILL.md"), "utf8"), /contentMode: "text"/);
+      const adapterRoot = join(pluginRoot, "zed-skills", `cadre-${workflow}`);
+      const adapter = readFileSync(join(adapterRoot, "SKILL.md"), "utf8");
+      assert.match(adapter, /contentMode: "text"/);
+      assert.ok(adapter.includes(zed.invocation), `cadre-${workflow} lacks the Zed command form`);
+      // Zed adapters carry no worker or host-specific agent definitions.
+      assert.equal(existsSync(join(adapterRoot, "agents")), false);
+    }
+
+    assert.equal(codex.approvals, "plugin-default-tool-approval");
+    const codexConfig = join(pluginRoot, "config.toml");
+    configureCodexMcpApproval(codexConfig);
+    assert.match(
+      readFileSync(codexConfig, "utf8"),
+      /^\[plugins\."cadre@cadre"\.mcp_servers\.cadre\]\ndefault_tools_approval_mode = "approve"$/m
+    );
+  } finally {
+    rmSync(pluginRoot, { recursive: true, force: true });
+  }
+
+  assert.equal(claude.approvals, "server-enable-and-tool-allowlist");
+  assert.deepEqual([CLAUDE_SERVER_APPROVAL, CLAUDE_APPROVAL], ["cadre", "mcp__cadre__*"]);
+  assert.equal(zed.approvals, "exact-tool-allow-entries");
+  assert.equal(ZED_MCP_PERMISSION_KEYS.length, CADRE_MCP_TOOL_NAMES.length);
+  for (const tool of CADRE_MCP_TOOL_NAMES) {
+    assert.ok(ZED_MCP_PERMISSION_KEYS.includes(`mcp:cadre:${tool}`), `Zed approvals miss ${tool}`);
+  }
+
+  assert.equal(claude.workers, "packaged-worker-agents");
+  for (const agent of ["cadre-phase-worker", "cadre-task-worker"]) {
+    const path = join(root, "agents", `${agent}.md`);
+    assert.ok(existsSync(path), `missing packaged Claude worker ${agent}`);
+    assert.match(readFileSync(path, "utf8"), new RegExp(`^---\\nname: ${agent}\\n`));
+  }
+});
+
+test("doctor reports one capability profile per client and points other agents to the guide", () => {
+  const home = mkdtempSync(join(tmpdir(), "cadre-doctor-profiles-"));
+  const environment = doctorEnv(home);
+  const human = runSourceCli(["doctor"], environment);
+  assert.equal(human.status, 0, human.stderr || human.stdout);
+  const lines = human.stdout.trimEnd().split("\n");
+  assert.equal(lines.filter((line) => line.trimStart().startsWith("profile:")).length, CLIENT_ADAPTERS.length);
+  for (const adapter of CLIENT_ADAPTERS) {
+    const header = lines.findIndex((line) => line.startsWith(`  ${adapter.id} [${adapter.tier}]: `));
+    assert.notEqual(header, -1, `missing ${adapter.id} diagnostic`);
+    const summary = CAPABILITY_PROFILE_FIELDS.map((field) => `${field}=${adapter.capabilities[field]}`).join(" ");
+    assert.equal(lines[header + 1], `    profile: ${summary}`);
+  }
+  assert.equal(lines.at(-1), "guide-only for other agents: cadre-ai guide (read-only, no stateful Cadre support)");
+
+  const json = runSourceCli(["doctor", "--json"], environment);
+  assert.equal(json.status, 0, json.stderr || json.stdout);
+  const report = JSON.parse(json.stdout) as {
+    clients: Array<{ id: string; capabilities: Record<string, string> }>;
+    guideOnly: unknown;
+  };
+  assert.deepEqual(
+    report.clients.map(({ id, capabilities }) => ({ id, capabilities })),
+    CLIENT_ADAPTERS.map(({ id, capabilities }) => ({ id, capabilities }))
+  );
+  assert.deepEqual(report.guideOnly, { command: "cadre-ai guide", stateful: false });
+});
+
+test("guide prints only the read-only guide-only block and leaves HOME untouched", () => {
+  const home = mkdtempSync(join(tmpdir(), "cadre-guide-"));
+  const environment = doctorEnv(home);
+  const guide = runSourceCli(["guide"], environment);
+  assert.equal(guide.status, 0, guide.stderr || guide.stdout);
+  assert.equal(guide.stderr, "");
+  assert.ok(guide.stdout.startsWith("<!-- cadre:guide-only:start -->\n"), guide.stdout);
+  assert.ok(guide.stdout.endsWith("<!-- cadre:guide-only:end -->\n"), guide.stdout);
+  for (const text of [
+    "This agent is not a supported Cadre integration unless it can call the installed Cadre MCP tools.",
+    "Read `.cadre/workflow.md` and the relevant `.cadre/` artifacts before explaining Cadre scope or status",
+    "label that explanation unvalidated",
+    "Do not create, edit, stage, promote, or delete anything under `.cadre/`.",
+    "Do not create commits with Cadre operation trailers",
+    "Do not claim that a Cadre track was planned, implemented, reviewed, completed, or archived.",
+    "Do not reconstruct Cadre runtime behavior",
+    "For stateful Cadre work, use a supported Cadre integration and run `cadre-ai doctor`."
+  ]) {
+    assert.ok(guide.stdout.includes(text), `guide is missing: ${text}`);
+  }
+  const packaged = runCli(["guide"], environment);
+  assert.equal(packaged.status, 0, packaged.stderr || packaged.stdout);
+  assert.equal(packaged.stdout, guide.stdout);
+
+  for (const args of [["guide", "extra"], ["guide", "--json"]]) {
+    const rejected = runSourceCli(args, environment);
+    assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
+    assert.equal(rejected.stdout, "");
+    assert.match(rejected.stderr, new RegExp(`Unknown guide option: ${args[1]}`));
+  }
+  assert.deepEqual(readdirSync(home), []);
 });

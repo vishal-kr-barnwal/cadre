@@ -5,7 +5,7 @@ description: Validate and summarize current Cadre project, track, dependency, ph
 
 # Cadre Status
 
-Read `.cadre/workflow.md` and use structured status for routine reporting. Do not open every active or archived spec/plan. Request `detail: "full"` or read a specific source only when diagnosing, quoting, or interpreting its contents. This command is read-only. If the Cadre MCP is unavailable, stop and report it; do not use a copied or reconstructed runtime.
+Read `.cadre/workflow.md` and use structured status for routine reporting. Do not open every active or archived spec/plan. Request `detail: "full"` or read a specific source only when diagnosing, quoting, or interpreting its contents. This command is read-only. If the Cadre MCP is unavailable, stop, report it, and suggest running `cadre-ai doctor`; do not use a copied or reconstructed runtime.
 
 Call `project_status` once with the narrowest view and use its embedded structured validation; do not repeat `state_validate` at command entry. Treat `errors` as the complete explanation for `valid` and `focusedErrors` as the selected-track subset. Project view reports staged candidates; focused view distinguishes candidate-only, canonical-with-stage, malformed canonical, and unknown IDs. Never silently treat a stage as canonical or omit a shadowed candidate.
 

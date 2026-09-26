@@ -36,7 +36,7 @@ import {
   TEMPLATE_SET_VERSION,
   templateCatalog
 } from "../domain/templates.js";
-import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
+import { CADRE_RUNTIME_VERSION, mayContinueExecution } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_APPROVAL_MODES,
@@ -130,7 +130,9 @@ function requireCurrentProject(projectRoot: string, continuingExecution = false)
     runtimeVersion?: string;
     templateSetVersion?: string;
   };
-  if (continuingExecution && [CADRE_RUNTIME_VERSION, "3.8.0"].includes(project.runtimeVersion ?? "") && project.templateSetVersion === "v4") return root;
+  // Only execution_checkpoint, execution_finish, worktree_create, and integration continue an existing
+  // execution; every other mutation requires the approved refresh (see CONTINUABLE_EXECUTION_RELEASES).
+  if (continuingExecution && mayContinueExecution(project.runtimeVersion, project.templateSetVersion)) return root;
   if (
     project.runtimeVersion !== CADRE_RUNTIME_VERSION
     || project.templateSetVersion !== TEMPLATE_SET_VERSION

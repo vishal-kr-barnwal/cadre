@@ -46,6 +46,7 @@
     "check": "tsc --noEmit",
     "install:plugin": "pnpm build && node dist/cadre-cli.mjs install --target all",
     "prepack": "pnpm build && node --import tsx scripts/validate.ts",
+    "release:version": "node --import tsx scripts/release-version.ts",
     "test": "pnpm build && node --import tsx --test test/*.test.ts",
     "validate": "pnpm build && node --import tsx scripts/validate.ts"
   },

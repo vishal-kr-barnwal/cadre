@@ -2,12 +2,15 @@ import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
+  CAPABILITY_PROFILE_FIELDS,
   INSTALL_TARGET_ADAPTERS,
+  type ClientCapabilityProfile,
   type ClientDiagnostic,
   type ClientDiagnosticState,
   type ClientName
 } from "./client-adapters.js";
 import { defaultMarketplaceRoot, marketplaceFromHome } from "./cli-options.js";
+import { GUIDE_ONLY_POINTER, type GuideOnlyPointer } from "./guide.js";
 import { commandExists, runJson } from "./native-clients.js";
 import {
   inspectClaudeMcpApproval,
@@ -67,6 +70,8 @@ export interface DoctorPackageHealth {
 export interface DoctorReport {
   package: DoctorPackageHealth;
   clients: readonly ClientDiagnostic[];
+  /** Other agents receive only the read-only guide; it never implies stateful support. */
+  guideOnly: GuideOnlyPointer;
 }
 
 type RegisteredAdapter = typeof INSTALL_TARGET_ADAPTERS[number];
@@ -300,6 +305,7 @@ function aggregate(adapter: RegisteredAdapter, checks: readonly DiagnosticCheck[
   return {
     id: adapter.id,
     tier: adapter.tier,
+    capabilities: { ...adapter.capabilities },
     state,
     evidence: [...new Set(checks.flatMap((check) => check.evidence))],
     remediation: [...new Set(checks.flatMap((check) => check.remediation))]
@@ -348,6 +354,7 @@ export function collectClientDiagnostics(marketplaceRoot = defaultMarketplaceRoo
       return {
         id: adapter.id,
         tier: adapter.tier,
+        capabilities: { ...adapter.capabilities },
         state: "unavailable",
         evidence: ["Local Cadre setup evidence could not be inspected."],
         remediation: ["Review the local client configuration, then rerun cadre-ai doctor."]
@@ -418,8 +425,13 @@ export function doctorReport(root: string, marketplaceRoot = defaultMarketplaceR
   const packageHealth = inspectPackageHealth(root);
   return {
     package: packageHealth,
-    clients: packageHealth.state === "healthy" ? collectClientDiagnostics(marketplaceRoot) : []
+    clients: packageHealth.state === "healthy" ? collectClientDiagnostics(marketplaceRoot) : [],
+    guideOnly: { ...GUIDE_ONLY_POINTER }
   };
+}
+
+function profileSummary(profile: ClientCapabilityProfile): string {
+  return CAPABILITY_PROFILE_FIELDS.map((field) => `${field}=${profile[field]}`).join(" ");
 }
 
 function writeHumanReport(report: DoctorReport): void {
@@ -435,9 +447,13 @@ function writeHumanReport(report: DoctorReport): void {
   process.stdout.write("capability report:\n");
   for (const client of report.clients) {
     process.stdout.write(`  ${client.id} [${client.tier}]: ${client.state}\n`);
+    process.stdout.write(`    profile: ${profileSummary(client.capabilities)}\n`);
     for (const evidence of client.evidence) process.stdout.write(`    evidence: ${evidence}\n`);
     for (const remediation of client.remediation) process.stdout.write(`    remediation: ${remediation}\n`);
   }
+  process.stdout.write(
+    `guide-only for other agents: ${report.guideOnly.command} (read-only, no stateful Cadre support)\n`
+  );
 }
 
 export function runDoctor(args: readonly string[], root: string): number {

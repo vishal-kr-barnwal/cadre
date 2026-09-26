@@ -40,4 +40,5 @@ The human verifies the complete track against the approved specification and acc
 <!-- For a completed task, append a commit marker containing the full hexadecimal SHA. -->
 
 <!-- Commit groups stay within one phase; preserve task evidence and reject cycles after collapsing groups. -->
+<!-- Verification tasks use the approved verification profile and record baseline, delta, and blocked checks. Irreversible steps are separate named tasks, approved with the plan, that state their target, reversibility limit, and recovery path. -->
 <!-- Operation tracks model planned, human-controlled preflight, rollout, postflight, monitoring, abort, rollback, and recovery verification. Record planned evidence capture and decision criteria; Cadre never runs those actions, infers their completion, or attests that they occurred. -->

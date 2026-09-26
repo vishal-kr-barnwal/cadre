@@ -40,6 +40,7 @@ import {
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 import { CADRE_MCP_OUTPUT_SCHEMAS } from "../src/mcp/output-schemas.js";
 import { TEMPLATE_IDS, TEMPLATE_SET_VERSION } from "../src/domain/templates.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 import {
   buildWorkflowElicitation,
   normalizeWorkflowElicitation,
@@ -98,7 +99,7 @@ function fixture(templateSetVersion = TEMPLATE_SET_VERSION) {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.9.0";
+  project.runtimeVersion = CADRE_RUNTIME_VERSION;
   project.templateSetVersion = templateSetVersion;
   project.project.name = "Fixture";
   project.project.context = "brownfield";
@@ -427,7 +428,7 @@ function gitFixture(): { projectRoot: string; head: string } {
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
-    runtimeVersion: "3.9.0",
+    runtimeVersion: CADRE_RUNTIME_VERSION,
     templateSetVersion: TEMPLATE_SET_VERSION
   }, null, 2)}\n`);
   writeFileSync(join(projectRoot, ".cadre", "workflow.md"), "# Workflow\n");
@@ -1678,8 +1679,8 @@ test("installer prepares a shared three-client payload", async () => {
   }
   const codexManifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   const claudeManifest = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(codexManifest.version, "3.9.0+codex.test-build");
-  assert.equal(claudeManifest.version, "3.9.0+claude.test-build");
+  assert.equal(codexManifest.version, `${CADRE_RUNTIME_VERSION}+codex.test-build`);
+  assert.equal(claudeManifest.version, `${CADRE_RUNTIME_VERSION}+claude.test-build`);
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
   assert.ok(existsSync(join(pluginRoot, "templates", TEMPLATE_SET_VERSION, "track", "spec.md")));
   assert.ok(existsSync(join(pluginRoot, "templates", TEMPLATE_SET_VERSION, "init", "gitignore.template")));
@@ -1737,9 +1738,9 @@ test("installer prepares a shared three-client payload", async () => {
   const previousManifest = JSON.parse(readFileSync(
     join(parent, backups[0]!, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"
   ));
-  assert.equal(previousManifest.version, "3.9.0+codex.test-build");
+  assert.equal(previousManifest.version, `${CADRE_RUNTIME_VERSION}+codex.test-build`);
   const updatedManifest = JSON.parse(readFileSync(join(target, "plugins", "cadre", ".codex-plugin", "plugin.json"), "utf8"));
-  assert.equal(updatedManifest.version, "3.9.0+codex.second-build");
+  assert.equal(updatedManifest.version, `${CADRE_RUNTIME_VERSION}+codex.second-build`);
 });
 
 test("installer permission helpers narrowly pre-approve the Cadre MCP server and tools", () => {
@@ -2522,7 +2523,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.9.0"
+      CADRE_RUNTIME_VERSION
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "execution_start",
@@ -2532,7 +2533,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.9.0");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, CADRE_RUNTIME_VERSION);
     assert.equal(
       (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"
@@ -2543,7 +2544,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     });
     assert.equal(legacyStage.isError, undefined);
     agentVisibleResult(legacyStage);
-    legacyProject.runtimeVersion = "3.9.0";
+    legacyProject.runtimeVersion = CADRE_RUNTIME_VERSION;
     legacyProject.templateSetVersion = TEMPLATE_SET_VERSION;
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
     writeFileSync(

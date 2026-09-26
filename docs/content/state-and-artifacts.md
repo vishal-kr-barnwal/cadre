@@ -8,7 +8,9 @@ order: 160
 # State And Artifacts
 
 An initialized repository keeps approved mutable Cadre state under `.cadre/`.
-The installed plugin owns the runtime and immutable template catalog.
+The installed plugin owns the runtime and immutable template catalog. An agent
+without the Cadre MCP may read these artifacts only as unvalidated guidance and
+never creates, edits, stages, promotes, or deletes them.
 
 ## Project Layout
 
@@ -61,6 +63,10 @@ The installed plugin owns the runtime and immutable template catalog.
   historical worker identity, worktree/branch data, verification, approval,
   commits, merges, and blockers.
 - `learning.md` owns the marked Pattern Seed plus phase/task learning.
+- `tech-stack.md` owns the approved verification profile: format/lint, static
+  analysis/types, build, test, and other required commands, when each is
+  required, and their side effects and prerequisites. A changed profile changes
+  verification policy, so affected work needs renewed verification and review.
 - `tracks.md` is a generated index derived from track-local state. Never edit
   it by hand.
 
@@ -122,6 +128,18 @@ artifact or Git state. Common fields include:
 
 The journal is part of recovery correctness, not temporary metadata. Do not
 delete or replace it to make a blocked workflow appear fresh.
+
+## Evidence Records
+
+Verification, handoff, and review records name what was checked (command, test,
+file, or inspection), the observed result, and the commit or source hash. They
+separate observation from inference, use explicit time zones (RFC 3339 UTC is
+recommended), and record pre-existing failures as the baseline, the change's
+delta, and any blocked check with its reason. A handoff's `failedApproaches`
+lists abandoned approaches, including both attempts when the same approach fails
+verification twice. Operation-track evidence is human-supplied: operator,
+RFC 3339 timestamp, source/location or hash, and the observed signal against
+baseline and threshold. No evidence record is approval.
 
 ## Derived State
 
