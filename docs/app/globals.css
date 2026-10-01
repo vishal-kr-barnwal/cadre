@@ -126,6 +126,7 @@
     --sidebar-ring: oklch(0.556 0 0);
     --cadre-teal: oklch(0.72 0.105 190);
     --cadre-teal-soft: oklch(0.25 0.035 190);
+    --cadre-amber-soft: oklch(0.25 0.035 75);
     --cadre-ink: oklch(0.96 0.01 210);
 }
 
