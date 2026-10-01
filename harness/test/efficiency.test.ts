@@ -5,14 +5,14 @@ import { applyWorktreeCreate, previewWorktreeCreate, applyWorktreeIntegration, p
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { promoteOperation, reconcileOperation, resolveOperation, resumeOperation } from "../src/domain/operation-receipts.js";
+import { promoteOperation, receiptHash, reconcileOperation, resolveOperation, resumeOperation } from "../src/domain/operation-receipts.js";
 import { prepareCandidateStage } from "../src/domain/staging.js";
 import { previewProjectInitCandidate, applyProjectInitCandidate } from "../src/domain/init.js";
 import { previewCandidateApply, applyCandidate } from "../src/domain/candidate-apply.js";
-import { dependencySources } from "../src/domain/dependency-context.js";
+import { dependencySources, inspectDependencyContext } from "../src/domain/dependency-context.js";
 import { readExecution, executionSchedulerView, applyExecutionStart, previewExecutionStart, previewExecutionCheckpoint, applyExecutionCheckpoint, previewExecutionFinish, applyExecutionFinish } from "../src/domain/execution.js";
 import { deriveReviewCompleteInput, previewReviewComplete, applyReviewComplete, deriveArchiveBatchCandidateInput, previewArchiveBatchCandidate, applyArchiveBatchCandidate } from "../src/domain/governance.js";
 import { validateProject } from "../src/domain/state.js";
@@ -20,6 +20,11 @@ import { CadreError, readDiagnostic, serializeCadreError } from "../src/domain/e
 import { createResultFormatter } from "../src/mcp/results.js";
 import { readContext } from "../src/domain/context.js";
 import { parsePlanContent, validatePlanGraph } from "../src/domain/plan.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createCadreServer } from "../src/mcp/server.js";
+import { describeTemplate, getTemplate } from "../src/domain/templates.js";
+import { renderTracksWithState } from "../src/domain/tracks-index.js";
 
 const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
 function write(root: string, path: string, body: string) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); }
@@ -59,9 +64,55 @@ function track(root: string, grouped = false, planBody = plan(grouped)) {
   prepareCandidateStage(root, "track-sample", Object.keys(files));
   for (const [path, content] of Object.entries(files)) write(root, `.cadre/stage/track-sample/${path}`, content);
   const input = { projectRoot: root, candidateId: "track-sample", workflow: "track" as const, files: Object.keys(files) };
-  commitReceipt(root, applyCandidate(input, previewCandidateApply(input).digest)); assert.deepEqual(validateProject(root).errors, []);
+  const preview = previewCandidateApply(input), derived = JSON.parse(files["state.json"]);
+  for (const change of preview.stateChanges.find((item) => item.path === ".cadre/tracks/sample/state.json")!.changes) {
+    if (change.action === "append") derived[change.field].push(...change.value as unknown[]);
+    else derived[change.field] = change.value;
+  }
+  assert.equal(receiptHash(json(derived)), preview.manifest.find((file) => file.path === ".cadre/tracks/sample/state.json")!.sha256);
+  commitReceipt(root, applyCandidate(input, preview.digest)); assert.deepEqual(validateProject(root).errors, []);
 }
 const handoff = { decisions: ["Preserve required constraints"], failedApproaches: [], openQuestions: [], nextAction: "Verify", sources: [] };
+test("stale dependency errors expose the exact repairable source fingerprint", (t) => {
+  const root = fixture(t); initialize(root); track(root);
+  const expected = dependencySources(root, ["sample"]);
+  const body = json({ schemaVersion: 1, specRevision: 1, planRevision: 1, dependencies: ["sample"],
+    graphHash: "0".repeat(64), sources: [], constraints: [] });
+  assert.throws(() => inspectDependencyContext(root, body, ["sample"], 1, 1), (error: unknown) => {
+    assert.ok(error instanceof CadreError); assert.equal(error.code, "DEPENDENCY_CONTEXT_STALE");
+    assert.equal(error.details?.expectedGraphHash, expected.graphHash);
+    assert.deepEqual(error.details?.expectedSources, expected.sources);
+    const corrected = { ...JSON.parse(body), ...expected,
+      constraints: expected.sources.map((source, index) => ({ id: `source-${index}`, text: "Preserve behavior and evidence", sources: [source.path] })) };
+    assert.doesNotThrow(() => inspectDependencyContext(root, json(corrected), ["sample"], 1, 1));
+    return true;
+  });
+});
+test("committed candidate approvals replay after stage removal without changing history", (t) => {
+  const root = fixture(t); initialize(root); track(root);
+  const receiptFile = readdirSync(join(root, ".cadre/receipts")).find((file) => file.startsWith("track-"))!;
+  const receipt = JSON.parse(readFileSync(join(root, ".cadre/receipts", receiptFile), "utf8"));
+  const input = { projectRoot: root, candidateId: "track-sample", workflow: "track" as const,
+    files: ["spec.md", "plan.md", "learning.md", "dependency-context.json", "state.json"] };
+  rmSync(join(root, ".cadre/stage/track-sample"), { recursive: true });
+  const head = git(root, "rev-parse", "HEAD"), state = readFileSync(join(root, ".cadre/tracks/sample/state.json"), "utf8");
+  const replay = applyCandidate(input, receipt.approvalDigest);
+  assert.equal(replay.status, "committed"); assert.equal(replay.operationId, receipt.operationId);
+  assert.deepEqual(replay.changedPaths, []); assert.equal(replay.changedCount, 0);
+  assert.equal(git(root, "rev-parse", "HEAD"), head);
+  assert.equal(readFileSync(join(root, ".cadre/tracks/sample/state.json"), "utf8"), state);
+});
+test("candidate promotion rejects incomplete specifications before approval or canonical mutation", (t) => {
+  const root = fixture(t); initialize(root); track(root);
+  const before = readFileSync(join(root, ".cadre/tracks/sample/spec.md"), "utf8"), head = git(root, "rev-parse", "HEAD");
+  prepareCandidateStage(root, "revise-sample", ["spec.md"]);
+  write(root, ".cadre/stage/revise-sample/spec.md", before.replace("## Additional Information", "## Notes"));
+  const input = { projectRoot: root, candidateId: "revise-sample", workflow: "revise" as const, files: ["spec.md"] };
+  assert.throws(() => previewCandidateApply(input), /missing ## Additional Information/);
+  assert.throws(() => validateStagedState(root, "revise-sample", [{ path: "spec.md", absolutePath: "unused", content: "# Specification\n" }]), /missing ## Functional Requirements/);
+  assert.equal(readFileSync(join(root, ".cadre/tracks/sample/spec.md"), "utf8"), before);
+  assert.equal(git(root, "rev-parse", "HEAD"), head);
+});
 test("v5 one-task lifecycle has six commits and zero verification-start calls", (t) => {
   const started = performance.now(), root = fixture(t); initialize(root); track(root);
   const scope = { projectRoot: root, trackId: "sample", executionId: "fixture-run" };
@@ -84,7 +135,24 @@ test("v5 one-task lifecycle has six commits and zero verification-start calls", 
   const candidateId = "archive-fixture"; prepareCandidateStage(root, candidateId, ["patterns/index.md"]);
   write(root, `.cadre/stage/${candidateId}/patterns/index.md`, readFileSync(join(root, ".cadre/patterns/index.md"), "utf8"));
   const archive = deriveArchiveBatchCandidateInput({ projectRoot: root, candidateId, selectedTracks: ["sample"], updates: [{ kind: "pattern_index" }] });
-  const archived = applyArchiveBatchCandidate(archive, previewArchiveBatchCandidate(archive).digest); assert.ok("receipt" in archived); commitReceipt(root, archived.receipt);
+  const archivePreview = previewArchiveBatchCandidate(archive), archiveDigest = archivePreview.digest;
+  const archiveExpected = archivePreview.stateChanges.map((item) => {
+    const derived = JSON.parse(readFileSync(item.sourcePath, "utf8"));
+    for (const change of item.changes) {
+      if (change.action === "append") derived[change.field].push(...change.value as unknown[]);
+      else derived[change.field] = change.value;
+    }
+    const body = json(derived); assert.equal(receiptHash(body), item.sha256);
+    return { path: item.path, body };
+  });
+  assert.equal(archiveExpected.length, 2);
+  const archived = applyArchiveBatchCandidate(archive, archiveDigest); assert.ok("receipt" in archived); commitReceipt(root, archived.receipt);
+  for (const item of archiveExpected) assert.equal(readFileSync(item.path, "utf8"), item.body);
+  rmSync(join(root, ".cadre/stage", candidateId), { recursive: true });
+  const replayed = applyArchiveBatchCandidate(archive, archiveDigest);
+  assert.ok("receipt" in replayed); assert.equal(replayed.receipt.status, "committed");
+  assert.deepEqual(replayed.writes, []); assert.equal(replayed.receipt.operationId, archived.receipt.operationId);
+  assert.throws(() => applyArchiveBatchCandidate(archive, "0".repeat(64)), /approval digest differs/);
   assert.deepEqual(validateProject(root).errors, []); assert.equal(Number(git(root, "rev-list", "--count", "HEAD")), 6); assert.equal(git(root, "status", "--porcelain"), "");
   t.diagnostic(JSON.stringify({ commits: 6, checkpointCalls: calls, verificationStartCalls: 0, elapsedMs: performance.now() - started, clientTokens: null }));
 });
@@ -192,10 +260,18 @@ test("FRM and Dhivon owned journal changes integrate by fast-forward while unrel
   checkpoint("T1.1", { event: "record_commit", commit, verification: "verified", authorization: "fixture approved" });
   const state = readFileSync(join(root, ".cadre/tracks/sample/state.json"), "utf8"), path = `.cadre/tracks/sample/executions/execution-${scope.executionId}.json`, journal = readFileSync(join(root, path), "utf8");
   write(root, "unrelated.txt", "must not be adopted"); assert.throws(() => previewWorktreeIntegration(input), /not clean/); rmSync(join(root, "unrelated.txt"));
+  const indexPath = ".cadre/tracks.md", index = renderTracksWithState(root, join(root, ".cadre/tracks/sample/state.json"), JSON.parse(state)).tracksContent;
+  write(root, indexPath, index + "Unapproved edit\n"); assert.throws(() => previewWorktreeIntegration(input), /not clean/);
+  write(root, indexPath, index);
+  const approved = previewWorktreeIntegration(input);
+  write(root, indexPath, index + "Changed after preview\n");
+  assert.throws(() => applyWorktreeIntegration(input, approved.digest, approved), /not clean|changed|stale|ownership/i);
+  write(root, indexPath, index);
   const cache = executionBuildCache(root, "sample", "integration-run"); write(root, `${cache.slice(root.length + 1)}/build.txt`, "ignored owned output");
   const result = applyWorktreeIntegration(input, previewWorktreeIntegration(input).digest);
   assert.equal(result.integrationKind, "fast-forward"); assert.equal(git(root, "rev-parse", "HEAD"), commit);
   assert.equal(readFileSync(join(root, path), "utf8"), journal); assert.equal(readFileSync(join(root, ".cadre/tracks/sample/state.json"), "utf8"), state);
+  assert.equal(readFileSync(join(root, indexPath), "utf8"), index);
   assert.equal(Number(git(root, "rev-list", "--count", "--merges", "HEAD")), 0);
 });
 
@@ -244,7 +320,13 @@ test("legacy refresh migrates once at quiescence and preserves execution and his
   prepareCandidateStage(root, "refresh-migration", files);
   for (const path of files) write(root, `.cadre/stage/refresh-migration/${path}`, readFileSync(join(root, ".cadre", path), "utf8"));
   const input = { projectRoot: root, candidateId: "refresh-migration", workflow: "refresh" as const, files };
-  const preview = previewCandidateApply(input); commitReceipt(root, applyCandidate(input, preview.digest));
+  const preview = previewCandidateApply(input), explained = structuredClone(project);
+  for (const change of preview.stateChanges.find((item) => item.path === projectPath)!.changes) {
+    if (change.action === "append") explained[change.field].push(...change.value as unknown[]);
+    else explained[change.field] = change.value;
+  }
+  assert.equal(receiptHash(json(explained)), preview.manifest.find((file) => file.path === projectPath)!.sha256);
+  commitReceipt(root, applyCandidate(input, preview.digest));
   const migrated = JSON.parse(readFileSync(join(root, projectPath), "utf8"));
   assert.equal(migrated.templateSetVersion, "v5"); assert.equal(migrated.schemaVersion, 2); assert.deepEqual(migrated.setup, project.setup);
   assert.deepEqual(migrated.history.slice(0, -1), project.history); assert.equal(readFileSync(join(root, journalPath), "utf8"), journalBefore);
@@ -307,3 +389,148 @@ test("independent groups remain schedulable while group dependencies block deliv
   checkpoint("T1.1", { event: "complete_group", commit: git(root, "rev-parse", "HEAD"), tasks: [evidence("T1.2"), evidence("T1.1")] });
   assert.deepEqual(ready(), ["downstream"]);
 });
+
+function completeAutonomousNodes(root: string, executionId: string) {
+  const scope = { projectRoot: root, trackId: "sample", executionId };
+  const start = { ...scope, approvalMode: "autonomous" as const, requestedMode: "sequential" as const,
+    effectiveMode: "sequential" as const, maxWorkers: 1, baseCommit: git(root, "rev-parse", "HEAD"), approvedAt: new Date().toISOString() };
+  applyExecutionStart(start, previewExecutionStart(start).digest);
+  const checkpoint = (nodeId: string, action: Omit<Parameters<typeof previewExecutionCheckpoint>[0], keyof typeof scope | "nodeId">) => {
+    const input = { ...scope, nodeId, ...action }; return applyExecutionCheckpoint(input, previewExecutionCheckpoint(input).digest);
+  };
+  const journal = readExecution(root, "sample", executionId);
+  for (const phase of Object.values(journal.nodes).filter((node) => node.kind === "phase" && node.status !== "completed")) {
+    checkpoint(phase.id, { event: "start" });
+    for (const node of Object.values(journal.nodes).filter((node) => node.phaseId === phase.id && node.kind !== "phase" && node.status !== "completed")) {
+      if (node.kind === "task") {
+        write(root, "behavior.txt", `${executionId}/${node.id}\n`); git(root, "add", "behavior.txt");
+        git(root, "commit", "-m", `feat: ${executionId} ${node.id}`);
+        checkpoint(node.id, { event: "complete_group", commit: git(root, "rev-parse", "HEAD"), tasks: [{ nodeId: node.id,
+          verification: "Focused regression passed", authorization: "persisted Autonomous mode", handoff }] });
+      } else checkpoint(node.id, { event: "record_verification", commit: git(root, "rev-parse", "HEAD"),
+        verification: "Verification passed", authorization: "persisted Autonomous mode" });
+    }
+    checkpoint(phase.id, { event: "complete", commit: git(root, "rev-parse", "HEAD"),
+      verification: "Integrated verification passed", authorization: "persisted Autonomous mode" });
+  }
+  return scope;
+}
+
+for (const name of ["codex", "claude-code", "zed"]) {
+  test(`v5 ${name} Autonomous promotes its snapshot and resumes without bookkeeping commit loops`, async (t) => {
+    const root = fixture(t); initialize(root); track(root);
+    const server = createCadreServer(), client = new Client({ name, version: "2.1.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair(); await server.connect(st); await client.connect(ct);
+    t.after(async () => { await client.close(); await server.close(); });
+    const call = async (tool: string, args: Record<string, unknown>) => {
+      const result = await client.callTool({ name: tool, arguments: args });
+      assert.equal(result.isError, undefined, JSON.stringify(result));
+      return (result.structuredContent ?? JSON.parse((result.content as Array<{ text: string }>).at(-1)!.text)) as Record<string, any>;
+    };
+    const scope = completeAutonomousNodes(root, "original");
+    const finished = await call("execution_finish", scope);
+    assert.equal(finished.receipt.status, "commit_pending");
+    assert.equal(finished.nextStep.skill, "review", JSON.stringify(finished.nextStep));
+    assert.equal(finished.nextStep.prerequisite, "implementation_bookkeeping_commit");
+    commitReceipt(root, finished.receipt);
+    const count = git(root, "rev-list", "--count", "HEAD"), head = git(root, "rev-parse", "HEAD");
+    const retried = await call("execution_finish", scope);
+    assert.equal(retried.receipt.status, "committed");
+    assert.equal(retried.receipt.receiptHash, finished.receipt.receiptHash);
+    assert.deepEqual(retried.changedPaths, []); assert.equal(retried.changedCount, 0);
+    assert.equal(retried.nextStep.skill, "review"); assert.equal(retried.nextStep.prerequisite, null);
+    assert.notEqual(retried.headCommit, head, "retain verified product HEAD across bookkeeping commits");
+    assert.equal(git(root, "rev-list", "--count", "HEAD"), count); assert.equal(git(root, "status", "--porcelain"), "");
+    const parent = ".cadre/tracks/sample", load = () => JSON.parse(readFileSync(join(root, parent, "state.json"), "utf8"));
+    const state = load(), originalLoop = structuredClone(state.autonomousReview), originalJournal = readExecution(root, "sample", "original");
+    const originalPlan = readFileSync(join(root, parent, "plan.md"), "utf8");
+    const planBody = originalPlan.replace("Plan revision: 1", "Plan revision: 2")
+      + "\n## Phase 3: Repair precision\n- Phase dependencies: P2\n- [ ] T3.1 Repair numeric precision\n  - Task dependencies: none\n  - Commit group: precision\n- [ ] T3.2 User Manual Verification\n- Phase completion commit: pending\n\n## Phase 4: Track-level User Manual Verification\n- [ ] T4.1 User Manual Verification\n- Phase completion commit: pending\n";
+    const loop = { ...originalLoop, checkpoint: "remediating", reviewedExecutionId: "original", reviewedHead: state.lastExecution.headCommit,
+      findings: [{ id: "numeric-precision", summary: "Large search values lose precision", status: "open", attemptExecutionIds: [] }] };
+    const files = { "plan.md": planBody,
+      "learning.md": readFileSync(join(root, parent, "learning.md"), "utf8").replace('"planRevision":1', '"planRevision":2'),
+      "dependency-context.json": json({ ...JSON.parse(readFileSync(join(root, parent, "dependency-context.json"), "utf8")), planRevision: 2 }),
+      "bugs/review-1.md": "# Numeric precision\n- Evidence: reproduced large-value rounding.\n- Acceptance: preserve exact integers.\n- Authorization: originating Autonomous mode.\n",
+      "reviews/loop-1.json": json(loop) };
+    const candidate = { projectRoot: root, candidateId: "review-sample", workflow: "review" as const, files: Object.keys(files) };
+    prepareCandidateStage(root, candidate.candidateId, candidate.files);
+    for (const [path, body] of Object.entries(files)) write(root, `.cadre/stage/review-sample/${path}`, body);
+    const inspect = await call("candidate_inspect", { projectRoot: root, candidateId: candidate.candidateId, files: candidate.files,
+      planValidations: [{ path: "plan.md", targetStatus: "in_progress" }] });
+    assert.equal(inspect.plans[0].valid, true);
+    assert.equal(describeTemplate(getTemplate("track/bug")).artifactPath, "bugs/review-<cycle>.md");
+    const stage = join(root, ".cadre/stage/review-sample");
+    renameSync(join(stage, "bugs/review-1.md"), join(stage, "bugs.md"));
+    assert.throws(() => previewCandidateApply({ ...candidate, files: candidate.files.map((file) => file === "bugs/review-1.md" ? "bugs.md" : file) }), /review bug artifacts must use bugs\/review-<cycle>\.md/);
+    renameSync(join(stage, "bugs.md"), join(stage, "bugs/review-1.md"));
+    // This manifest intentionally omits state.json, matching the installed skill's procedure.
+    const prepared = await call("candidate_apply", { request: { mode: "prepare", ...candidate } });
+    assert.equal(load().status, "ready_for_review"); assert.equal(load().operation, null);
+    assert.ok(prepared.files.some((file: { path: string }) => file.path === `${parent}/state.json`));
+    const explainedState = structuredClone(state);
+    for (const change of prepared.stateChanges.find((item: { path: string }) => item.path === `${parent}/state.json`).changes) {
+      if (change.action === "append") explainedState[change.field].push(...change.value);
+      else explainedState[change.field] = change.value;
+    }
+    assert.equal(receiptHash(json(explainedState)), prepared.files.find((file: { path: string }) => file.path === `${parent}/state.json`).sha256);
+    write(root, "behavior.txt", "Unreviewed product drift\n");
+    assert.throws(() => previewCandidateApply(candidate), /Product content changed/);
+    write(root, "behavior.txt", "original/T1.1\n");
+    write(root, ".cadre/stage/review-sample/plan.md", planBody.replace("- [x] T2.1", "- [ ] T2.1"));
+    assert.throws(() => previewCandidateApply(candidate), /preserve every completed phase|pending task T2.1|incomplete P2/);
+    write(root, ".cadre/stage/review-sample/plan.md", files["plan.md"]);
+    write(root, ".cadre/stage/review-sample/learning.md", files["learning.md"] + "\nChanged candidate evidence.\n");
+    assert.throws(() => applyCandidate(candidate, prepared.digest), /changed after approval/);
+    write(root, ".cadre/stage/review-sample/learning.md", files["learning.md"]);
+    // The apply token binds the exact snapshot and canonical authority.
+    write(root, ".cadre/stage/review-sample/reviews/loop-1.json", json({ ...loop, originExecutionId: "forged" }));
+    const rejected = await client.callTool({ name: "candidate_apply", arguments: { request: { mode: "apply", proposalToken: prepared.proposalToken } } });
+    assert.equal(rejected.isError, true); assert.match(JSON.stringify(rejected), /cannot change originExecutionId/);
+    write(root, ".cadre/stage/review-sample/reviews/loop-1.json", files["reviews/loop-1.json"]);
+    const applied = await call("candidate_apply", { request: { mode: "apply", proposalToken: prepared.proposalToken } });
+    assert.equal(applied.status, "commit_pending");
+    assert.throws(() => completeAutonomousNodes(root, "premature"), /pending operations/);
+    // Recovery uses the original receipt and authority, without another promotion or state-clearing commit.
+    const resumed = await call("candidate_apply", { request: { mode: "resume", projectRoot: root,
+      operationId: applied.operationId, approvalDigest: prepared.digest } });
+    assert.equal(resumed.receiptHash, applied.receiptHash);
+    commitReceipt(root, { operationId: resumed.operationId, trailers: resumed.trailers });
+    const promotedHead = git(root, "rev-parse", "HEAD"), promotedState = readFileSync(join(root, parent, "state.json"), "utf8");
+    const candidateReplay = await call("candidate_apply", { request: { mode: "apply", proposalToken: prepared.proposalToken } });
+    assert.equal(candidateReplay.operationId, applied.operationId); assert.equal(candidateReplay.status, "committed");
+    assert.deepEqual(candidateReplay.changedPaths, []); assert.equal(candidateReplay.changedCount, 0);
+    assert.equal(git(root, "rev-parse", "HEAD"), promotedHead);
+    assert.equal(readFileSync(join(root, parent, "state.json"), "utf8"), promotedState);
+    const promoted = load();
+    assert.equal(promoted.status, "in_progress"); assert.equal(promoted.operation, null);
+    assert.equal(promoted.autonomousReview.originExecutionId, originalLoop.originExecutionId);
+    assert.deepEqual(promoted.lastExecution, state.lastExecution);
+    assert.equal(promoted.reviewCycles.length, 1); assert.deepEqual(promoted.reviewCycles[0].attemptedFindingIds, ["numeric-precision"]);
+    assert.equal(promoted.reviewCycles[0].approvalConfirmation, undefined);
+    const status = await call("project_status", { projectRoot: root, trackId: "sample", view: "implementation" });
+    assert.equal(status.nextStep.skill, "implement"); assert.equal(status.nextStep.prerequisite, null);
+    const remediation = completeAutonomousNodes(root, "fix-1");
+    const inherited = readExecution(root, "sample", "fix-1");
+    assert.equal(inherited.nodes["T2.1"]!.workerCommit, originalJournal.nodes["T2.1"]!.workerCommit);
+    commitReceipt(root, (await call("execution_finish", remediation)).receipt);
+    assert.deepEqual(validateProject(root).errors, []);
+    const clean = load();
+    clean.autonomousReview = { ...clean.autonomousReview, checkpoint: "awaiting_approval", reviewedExecutionId: "fix-1",
+      reviewedHead: clean.lastExecution.headCommit, findings: [{ ...loop.findings[0], status: "resolved", attemptExecutionIds: ["fix-1"] }] };
+    write(root, `${parent}/state.json`, json(clean));
+    const review = await call("review_complete", { request: { mode: "prepare", projectRoot: root, trackId: "sample", approval: "Precision regression and cumulative review passed" } });
+    assert.equal(review.commitRange, `${originalLoop.initialBaseCommit}..${clean.lastExecution.headCommit}`);
+    assert.equal(load().status, "ready_for_review", "clean proposal still needs explicit final approval");
+    const completed = await call("review_complete", { request: { mode: "apply", proposalToken: review.proposalToken } });
+    commitReceipt(root, completed.receipt);
+    const completionCount = git(root, "rev-list", "--count", "HEAD");
+    const completionRetry = await call("review_complete", { request: { mode: "apply", proposalToken: review.proposalToken } });
+    assert.equal(completionRetry.receipt.status, "committed");
+    assert.equal(completionRetry.receipt.receiptHash, completed.receipt.receiptHash);
+    assert.deepEqual(completionRetry.changedPaths, []);
+    assert.equal(git(root, "rev-list", "--count", "HEAD"), completionCount);
+    assert.equal(load().reviewCycles.length, 2); assert.deepEqual(validateProject(root).errors, []);
+    assert.equal(git(root, "status", "--porcelain"), "");
+  });
+}

@@ -171,6 +171,45 @@ export function reconcileOperation(root: string, id: string): string {
   return commit;
 }
 
+/** Retry a completed operation using its immutable receipt, never a new approval. */
+export function committedOperationReceipt(root: string, id: string, kind: OperationReceipt["kind"],
+  baseCommit?: string, expectedArtifacts: ReceiptFile[] = []) {
+  const commit = reconcileOperation(root, id);
+  const body = readFileSync(target(safeProjectRoot(root), receiptPath(id)), "utf8");
+  const receipt = receiptSchema.parse(JSON.parse(body));
+  if (receipt.kind !== kind || baseCommit !== undefined && receipt.baseCommit !== baseCommit) throw new Error("Completed operation does not match the requested identity");
+  for (const file of expectedArtifacts) {
+    const expected = file.content === null ? null : receiptHash(file.content);
+    if (!receipt.artifacts.some((artifact) => artifact.path === file.path && artifact.sha256 === expected)) {
+      throw new Error(`Completed operation evidence changed: ${file.path}`);
+    }
+  }
+  return { status: "committed" as const, commit, operationId: id, receiptHash: receiptHash(body), trailers: trailers(receipt) };
+}
+
+/** Match the original approval before replaying a completed operation. */
+export function committedReceiptForApproval(rootInput: string, id: string, kind: OperationReceipt["kind"],
+  approvalDigest: string, baseCommit: string) {
+  const root = safeProjectRoot(rootInput), path = target(root, receiptPath(id));
+  if (!existsSync(path)) return null;
+  const receipt = receiptSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  if (receipt.approvalDigest !== approvalDigest) throw new Error("Completed operation approval digest differs from the requested approval");
+  return committedOperationReceipt(root, id, kind, baseCommit);
+}
+
+/** An opaque cached candidate approval identifies the original receipt even after stage cleanup. */
+export function committedReceiptForDigest(rootInput: string, kind: OperationReceipt["kind"], approvalDigest: string) {
+  const root = safeProjectRoot(rootInput), directory = target(root, ".cadre/receipts");
+  if (!existsSync(directory)) return null;
+  const matches = readdirSync(directory).filter((file) => file.endsWith(".json")).map((file) => {
+    const receipt = receiptSchema.parse(JSON.parse(readFileSync(target(root, `.cadre/receipts/${file}`), "utf8")));
+    if (file !== `${receipt.operationId}.json`) throw new Error("Immutable operation receipt filename does not match its identity");
+    return receipt;
+  }).filter((receipt) => receipt.kind === kind && receipt.approvalDigest === approvalDigest);
+  if (matches.length > 1) throw new Error("Multiple operation receipts claim the same approved candidate");
+  return matches[0] ? committedOperationReceipt(root, matches[0].operationId, kind) : null;
+}
+
 export function resumeOperation(root: string, id: string, approvalDigest: string) {
   const recovery = parseRecovery(readFileSync(target(safeProjectRoot(root), recoveryPath(id)), "utf8"));
   const receipt = receiptSchema.parse(recovery.receipt);

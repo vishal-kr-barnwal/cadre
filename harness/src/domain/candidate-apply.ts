@@ -6,11 +6,13 @@ import { inspectStagedMemory } from "./staged-memory.js";
 import { contentHash, readSafeArtifact } from "./memory.js";
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import { inspectDependencyContext } from "./dependency-context.js";
-import { operationRef, promoteOperation, requireCommittedOperations, type ReceiptFile } from "./operation-receipts.js";
+import { committedReceiptForDigest, operationRef, promoteOperation, requireCommittedOperations, type ReceiptFile } from "./operation-receipts.js";
 import { resolveGitCommit } from "./git.js";
 import { safeProjectRoot } from "./paths.js";
 import { buildTracks, type TracksIndexEntry } from "./tracks-index.js";
 import { CADRE_RUNTIME_VERSION } from "./version.js";
+import { deriveAutonomousReviewCandidate } from "./review-candidate.js";
+import { candidateStateChanges } from "./candidate-state-changes.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -41,7 +43,12 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   if (JSON.stringify(listCandidatePaths(root, input.candidateId)) !== JSON.stringify(staged.map((file) => file.path).sort())) throw new Error("Candidate stage must contain exactly the approved manifest");
   const original = new Map(staged.map((file) => [candidateArtifactPath(input.candidateId, file.path), file.content]));
   if (original.size !== staged.length) throw new Error("Candidate aliases an artifact");
-  for (const path of original.keys()) if (!allowed(input, path)) throw new Error(`Candidate cannot promote ${path}`);
+  for (const path of original.keys()) if (!allowed(input, path)) {
+    const hint = input.workflow === "review" ? "; review bug artifacts must use bugs/review-<cycle>.md or bugs/bug-<number>.md with numeric suffixes"
+      : input.workflow === "revert" ? "; revert artifact IDs use lowercase letters, digits and hyphens, e.g. reverts/revert-t1-1-execution-before.json for target T1.1"
+      : input.workflow === "revise" ? "; revision artifact IDs use lowercase letters, digits and hyphens, e.g. revisions/revision-2.md" : "";
+    throw new Error(`Candidate cannot promote ${path}${hint}`);
+  }
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json"));
   if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
   const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort()])).slice(0, 32)}`;
@@ -79,13 +86,18 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   }
   for (const id of trackIds) {
     const parent = `tracks/${id}`, path = `${parent}/state.json`;
-    const state = JSON.parse(read(path));
+    let state = JSON.parse(read(path));
     if (state.trackId !== id) throw new Error("Candidate state identity mismatch");
     if (!state.title || typeof state.title !== "string" || !["feature", "bug"].includes(state.type)
       || !Number.isInteger(state.revision) || state.revision < 1 || !Array.isArray(state.artifactProgress)
       || !Array.isArray(state.dependencies) || state.dependencies.includes(id)
       || new Set(state.dependencies).size !== state.dependencies.length) throw new Error("Candidate state requires a title, type, positive revision, artifact progress and unique non-self dependencies");
     const previous = existsSync(join(root, ".cadre", path)) ? JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) : null;
+    if (input.workflow === "review" && previous?.autonomousReview) {
+      state = deriveAutonomousReviewCandidate(root, previous, original, reference);
+      // Bind canonical authority and execution evidence to the promotion digest.
+      unchanged.set(path, contentHash(readSafeArtifact(root, `.cadre/${path}`)));
+    }
     if (previous && ["completed", "archived"].includes(previous.status)) throw new Error("Terminal tracks are immutable; create a successor");
     if (previous && JSON.stringify(state.history ?? []) !== JSON.stringify(previous.history ?? [])) throw new Error("Preserve historical state evidence; promotion appends its receipt reference");
     if (previous && input.workflow === "refresh") {
@@ -103,7 +115,10 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       for (const file of ["spec.md", "plan.md", "learning.md", "state.json", "dependency-context.json"]) if (!original.has(`${parent}/${file}`)) throw new Error(`Combined track approval requires ${file}`);
       state.status = "planned"; state.checkpoint = "ready"; state.operation = null;
     }
-    if (input.workflow === "review" && (previous?.status !== "ready_for_review" || state.status !== "in_progress")) throw new Error("Review candidate promotion is only for approved remediation");
+    if (input.workflow === "review") {
+      if (previous?.status !== "ready_for_review") throw new Error("Review remediation requires canonical ready_for_review state; reconcile an interrupted promotion first");
+      if (state.status !== "in_progress") throw new Error("Review remediation requires proposed in_progress state; Autonomous derives it from the next-cycle loop snapshot, other modes must stage state.json");
+    }
     const graph = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`), errors: string[] = [];
     validatePlanGraph(`${parent}/plan.md`, graph, state.status, errors);
     if (errors.length) throw new Error(errors.join("; "));
@@ -128,11 +143,18 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   const before = promoted.map((file) => ({ path: file.path, sha256: existsSync(join(root, file.path)) ? contentHash(readSafeArtifact(root, file.path)) : null }));
   const manifest = promoted.map((file) => ({ path: file.path, sha256: contentHash(file.content!) }));
   const digest = contentHash(JSON.stringify({ operationId, baseCommit, manifest, before, memoryInputs: memory.inputs, unchanged: [...unchanged].sort() }));
-  return { operationId, baseCommit, files: promoted, manifest, digest, memory, validation: { valid: true as const, errors: [] as string[] } };
+  const stateChanges = [...overlay].filter(([path]) => path === "project.json" || /^tracks\/[^/]+\/state\.json$/.test(path)).map(([path, content]) => ({
+    path: `.cadre/${path}`,
+    changes: candidateStateChanges(JSON.parse(original.get(path) ?? readSafeArtifact(root, `.cadre/${path}`)), JSON.parse(content))
+  })).filter((item) => item.changes.length);
+  return { operationId, baseCommit, files: promoted, manifest, digest, memory, stateChanges, validation: { valid: true as const, errors: [] as string[] } };
 }
 
 export function applyCandidate(input: CandidateApplyInput, digest: string) {
+  const committed = committedReceiptForDigest(input.projectRoot, input.workflow, digest);
+  if (committed) return { ...committed, changedPaths: [], changedCount: 0, validation: { valid: true, errors: [] } };
   const preview = previewCandidateApply(input);
   if (preview.digest !== digest) throw new Error("Candidate or required context changed after approval; reassess and preview again");
-  return { ...promoteOperation(input.projectRoot, { operationId: preview.operationId, kind: input.workflow, approvalDigest: digest, baseCommit: preview.baseCommit }, preview.files), validation: preview.validation };
+  return { ...promoteOperation(input.projectRoot, { operationId: preview.operationId, kind: input.workflow, approvalDigest: digest, baseCommit: preview.baseCommit }, preview.files),
+    changedPaths: preview.files.map((file) => file.path), changedCount: preview.files.length, validation: preview.validation };
 }

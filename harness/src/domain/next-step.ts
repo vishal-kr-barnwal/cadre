@@ -2,6 +2,8 @@ import { z } from "zod/v4";
 import { resolveApprovalMode, type ApprovalPolicyReference } from "./approval-policy.js";
 import { requireCleanAutonomousReview, requireReviewProgress } from "./autonomous-review.js";
 import type { TrackState } from "./state.js";
+import { resolveOperation } from "./operation-receipts.js";
+import { CadreError } from "./errors.js";
 
 // Logical skill identities are resolved by the host, never by sibling file paths.
 // A next step is routing guidance, not dispatch or additional mutation authority.
@@ -28,6 +30,19 @@ export function deriveNextStep(projectRoot: string, state: TrackState | undefine
     executionId: reference?.executionId ?? null, prerequisite, reason
   });
   const blocked = (reason: string) => step("blocked", null, reason);
+  const prerequisite = (kind: "implement" | "review", pending: NextStep["prerequisite"]): NextStep["prerequisite"] => {
+    const history = Array.isArray(state.history) ? state.history : [];
+    const entry = history.filter((item): item is { action: string; commit: string } => Boolean(item)
+      && typeof item === "object" && "action" in item && item.action === kind
+      && "commit" in item && typeof item.commit === "string").at(-1);
+    if (!entry?.commit.startsWith("op:")) return pending; // Legacy provenance is agent-reconciled.
+    try { resolveOperation(projectRoot, entry.commit); }
+    catch (error) {
+      if (error instanceof CadreError && error.code === "COMMIT_PENDING") return pending;
+      throw error;
+    }
+    return null;
+  };
   try {
     const mode = resolveApprovalMode(reference, active ? undefined : state.approvalModeMigration);
     if (mode !== "autonomous" && !state.autonomousReview) return null;
@@ -46,7 +61,7 @@ export function deriveNextStep(projectRoot: string, state: TrackState | undefine
     }
     if (!state.operation && state.status === "ready_for_review") {
       if (loop.checkpoint === "reviewing") {
-        return step("invoke_skill", "review", "Review the complete accumulated implementation in the same task.", "implementation_bookkeeping_commit");
+        return step("invoke_skill", "review", "Review the complete accumulated implementation in the same task.", prerequisite("implement", "implementation_bookkeeping_commit"));
       }
       if (loop.checkpoint === "awaiting_approval") {
         requireCleanAutonomousReview(loop, state.lastExecution ?? {}, []);
@@ -54,7 +69,7 @@ export function deriveNextStep(projectRoot: string, state: TrackState | undefine
       }
     }
     if (!state.operation && state.status === "in_progress" && loop.checkpoint === "remediating") {
-      return step("invoke_skill", "implement", "Start a new execution for the approved remediation graph, preserving prior executions.", "review_bookkeeping_commit");
+      return step("invoke_skill", "implement", "Start a new execution for the approved remediation graph, preserving prior executions.", prerequisite("review", "review_bookkeeping_commit"));
     }
     return blocked("Reconcile the Autonomous checkpoint, lifecycle, and operation before continuing.");
   } catch (error) {

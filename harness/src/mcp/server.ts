@@ -737,7 +737,8 @@ export function createCadreServer(): McpServer {
       }
       const { mode: _mode, ...input } = request;
       const preview = previewCandidateApply(input);
-      return proposalResult("candidate_apply", input, { operationId: preview.operationId, files: preview.manifest, digest: preview.digest, validation: preview.validation });
+      return proposalResult("candidate_apply", input, { operationId: preview.operationId, files: preview.manifest,
+        stateChanges: preview.stateChanges, digest: preview.digest, validation: preview.validation });
     } catch (error) { return failure(error); }
   });
 
@@ -786,14 +787,15 @@ export function createCadreServer(): McpServer {
         const proposal = proposalTokens.resolve<ReviewCompleteInput>("review_complete", adaptive.proposalToken);
         requireCurrentProject(proposal.input.projectRoot);
         const applied = applyReviewComplete(proposal.input, proposal.digest);
+        const committed = "receipt" in applied && applied.receipt.status === "committed";
         return result({
           commandStatus: "applied" as const,
           trackId: proposal.input.trackId,
           status: applied.state.status,
           checkpoint: applied.state.checkpoint,
           digest: proposal.digest,
-          changedPaths: [applied.statePath, applied.tracksPath],
-          changedCount: 2,
+          changedPaths: committed ? [] : [applied.statePath, applied.tracksPath],
+          changedCount: committed ? 0 : 2,
           valid: applied.valid,
           derivedStateCurrent: applied.derivedStateCurrent
           ,...("receipt" in applied ? { receipt: applied.receipt } : {})
@@ -853,6 +855,7 @@ export function createCadreServer(): McpServer {
         );
         requireCurrentProject(proposal.input.projectRoot);
         const applied = applyArchiveBatchCandidate(proposal.input, proposal.digest);
+        const committed = "receipt" in applied && applied.receipt.status === "committed";
         return result({
           commandStatus: "applied" as const,
           batchId: proposal.input.batchId,
@@ -862,8 +865,8 @@ export function createCadreServer(): McpServer {
           checkpoint: applied.operation.checkpoint,
           digest: proposal.digest,
           moves: applied.moves.map(({ trackId, targetPath }) => ({ trackId, targetPath })),
-          changedPaths: [...applied.writes.map((write) => write.path), applied.tracksPath],
-          changedCount: applied.writes.length + 1,
+          changedPaths: committed ? [] : [...applied.writes.map((write) => write.path), applied.tracksPath],
+          changedCount: committed ? 0 : applied.writes.length + 1,
           valid: applied.valid,
           derivedStateCurrent: applied.derivedStateCurrent
         });
@@ -878,6 +881,7 @@ export function createCadreServer(): McpServer {
         operationPath: preview.operationPath,
         checkpoint: preview.operation.checkpoint,
         resuming: preview.resuming,
+        stateChanges: preview.stateChanges,
         moves: preview.moves.map(({ trackId, sourcePath, targetPath, needsMove }) => ({
           trackId, sourcePath, targetPath, needsMove
         })),
@@ -1088,6 +1092,7 @@ export function createCadreServer(): McpServer {
       const preview = previewExecutionFinish(derived);
       const applied = applyExecutionFinish(derived, preview.digest, preview);
       const validation = validateProject(input.projectRoot);
+      const committed = applied.receipt?.status === "committed";
       return result({
         commandStatus: "applied" as const,
         executionId: derived.executionId,
@@ -1096,10 +1101,11 @@ export function createCadreServer(): McpServer {
         headCommit: applied.journal.headCommit,
         ...(applied.receipt ? { receipt: applied.receipt } : {}),
         digest: preview.digest,
-        changedPaths: [applied.journalPath, applied.statePath, applied.planPath, applied.tracksPath],
-        changedCount: 4,
+        changedPaths: committed ? [] : [applied.journalPath, applied.statePath, applied.planPath, applied.tracksPath],
+        changedCount: committed ? 0 : 4,
         nextStep: deriveNextStep(safeProjectRoot(input.projectRoot), validation.states.get(input.trackId), {
-          errors: validation.errors,
+          errors: validation.errors.filter((error) => !(applied.receipt?.status === "commit_pending"
+            && error.endsWith(`commit_pending: no reachable commit contains operation ${applied.receipt.operationId}`))),
           staleMemory: validation.staleMemory.some((finding) => [input.trackId,
             ...(validation.states.get(input.trackId)?.dependencies ?? [])].includes(finding.trackId))
         })

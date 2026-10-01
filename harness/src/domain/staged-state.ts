@@ -6,7 +6,7 @@ import { validateExecutionJournal, type ExecutionJournal } from "./execution.js"
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import { contentHash, readSafeArtifact } from "./memory.js";
 import { candidateArtifactPath, type CandidateFile } from "./staging.js";
-import { validateTrackOperation } from "./state.js";
+import { validateSpecContent, validateTrackOperation } from "./state.js";
 
 /** Validate relationships in the proposed state before a digest can be approved. */
 export function validateStagedState(root: string, candidateId: string, files: CandidateFile[],
@@ -18,6 +18,11 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
   const read = (path: string) => overlay.get(path) ?? readSafeArtifact(root, `.cadre/${path}`);
   const parents = new Set<string>();
   for (const file of files) {
+    if (/^tracks\/[^/]+\/spec\.md$/.test(canonical(file.path))) {
+      const errors: string[] = [];
+      validateSpecContent(file.content, file.path, errors);
+      if (errors.length) throw new Error(errors.join("; "));
+    }
     const loopMatch = canonical(file.path).match(/^tracks\/([^/]+)\/reviews\/loop-\d+\.json$/);
     if (loopMatch && candidateId.startsWith("review-")) {
       const state = JSON.parse(readSafeArtifact(root, `.cadre/tracks/${loopMatch[1]}/state.json`));

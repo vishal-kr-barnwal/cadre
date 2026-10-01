@@ -18,7 +18,8 @@ const id = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const contextInputSchema = z.strictObject({
   projectRoot: z.string().min(1), trackId: id,
   executionId: z.string().regex(/^[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/).optional(),
-  nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/).optional(),
+  nodeId: z.string().regex(/^(?:P\d+|T\d+\.\d+)$/, "Use an exact graph node ID such as P1 or T1.1, not a track ID, phase slug, or commit-group name")
+    .describe("Exact node ID from the plan graph or scheduler (P1 or T1.1); omit for full track context").optional(),
   maxBytes: z.number().int().min(4096).max(65536).default(49152),
   cursor: z.string().max(1024).optional(),
   retainedContextToken: z.string().regex(/^cadre_ctx1_[A-Za-z0-9_-]{32}$/).optional(),

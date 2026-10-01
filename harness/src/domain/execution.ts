@@ -14,7 +14,7 @@ import { safeProjectRoot } from "./paths.js";
 import { parsePlan, parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
 import { renderTracksWithState } from "./tracks-index.js";
 import { isGitAncestor, reachableGitCommits, resolveGitCommit } from "./git.js";
-import { isCommitRef, operationRef, promoteOperation, requireCommittedOperations } from "./operation-receipts.js";
+import { committedOperationReceipt, isCommitRef, operationRef, promoteOperation, requireCommittedOperations } from "./operation-receipts.js";
 import { executionBuildCache } from "./build-cache.js";
 
 export const EXECUTION_NODE_STATUSES = [
@@ -1236,6 +1236,12 @@ export function applyExecutionFinish(
   if (proposal.state.schemaVersion === 2) {
     const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
     const prefix = `.cadre/tracks/${input.trackId}`;
+    if (existsSync(join(safeProjectRoot(input.projectRoot), ".cadre/receipts", `${operationId}.json`))) {
+      return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "implement", input.headCommit, [
+        { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
+        { path: `${prefix}/plan.md`, content: proposal.planContent }
+      ]) };
+    }
     const files = [
       { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
       { path: `${prefix}/state.json`, content: `${JSON.stringify(proposal.state, null, 2)}\n` },

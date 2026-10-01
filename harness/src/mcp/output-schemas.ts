@@ -28,7 +28,9 @@ const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const commitSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
 const proposalTokenSchema = z.string().regex(/^cadre_pt1_[A-Za-z0-9_-]{32}$/);
 const commandStatusSchema = z.enum(["approval_required", "applied"]);
-const receiptResultSchema = z.strictObject({ status: z.enum(["commit_pending", "committed"]), operationId: z.string(), commit: z.string().nullable(), receiptHash: z.string().optional(), trailers: z.array(z.string()).optional(), validation: z.strictObject({ valid: z.boolean(), errors: z.array(z.string()) }).optional() });
+const receiptResultSchema = z.strictObject({ status: z.enum(["commit_pending", "committed"]), operationId: z.string(), commit: z.string().nullable(), receiptHash: z.string().optional(), trailers: z.array(z.string()).optional(),
+  changedPaths: z.array(z.string()).optional(), changedCount: z.number().int().nonnegative().optional(),
+  validation: z.strictObject({ valid: z.boolean(), errors: z.array(z.string()) }).optional() });
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 // Detail views share the standalone graph/execution contracts. Validate those
 // strictly at runtime without duplicating their large schemas in the catalog.
@@ -375,6 +377,8 @@ const archivePrepareSchema = z.strictObject({
   checkpoint: z.string(),
   resuming: z.boolean(),
   moves: z.array(archiveMovePrepareSchema),
+  stateChanges: z.array(z.strictObject({ sourcePath: pathSchema, path: pathSchema, sha256: digestSchema,
+    changes: z.array(z.strictObject({ field: z.string(), action: z.enum(["set", "append"]), value: z.unknown() })) })),
   writes: z.array(artifactSchema),
   tracks: artifactSchema
 });
@@ -509,7 +513,9 @@ const workflowOutcomeSchema = z.strictObject({
 
 export const CADRE_MCP_OUTPUT_SCHEMAS = {
   [CADRE_MCP_TOOLS.contextRead]: compatibleOutputSchema(contextPageSchema),
-  [CADRE_MCP_TOOLS.candidateApply]: compatibleOutputSchema(receiptResultSchema, z.strictObject({ commandStatus: z.literal("approval_required"), proposalToken: proposalTokenSchema, operationId: z.string(), files: z.array(artifactSchema), digest: digestSchema, validation: z.strictObject({ valid: z.boolean(), errors: stringArray }) })),
+  [CADRE_MCP_TOOLS.candidateApply]: compatibleOutputSchema(receiptResultSchema, z.strictObject({ commandStatus: z.literal("approval_required"), proposalToken: proposalTokenSchema, operationId: z.string(), files: z.array(artifactSchema),
+    stateChanges: z.array(z.strictObject({ path: pathSchema, changes: z.array(z.strictObject({ field: z.string(), action: z.enum(["set", "append"]), value: z.unknown() })) })),
+    digest: digestSchema, validation: z.strictObject({ valid: z.boolean(), errors: stringArray }) })),
   [CADRE_MCP_TOOLS.diagnosticRead]: compatibleOutputSchema(z.strictObject({ diagnosticId: z.string(), content: z.string(), offset: z.number().int(), nextOffset: z.number().int().nullable(), totalBytes: z.number().int() })),
   [CADRE_MCP_TOOLS.workflowElicit]: compatibleOutputSchema(workflowOutcomeSchema),
   [CADRE_MCP_TOOLS.templateGetMany]: compatibleOutputSchema(templateSetSchema),

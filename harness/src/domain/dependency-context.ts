@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { contentHash, readSafeArtifact } from "./memory.js";
+import { CadreError } from "./errors.js";
 
 const id = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const dependencyContextSchema = z.strictObject({ schemaVersion: z.literal(1), specRevision: z.number().int().positive(), planRevision: z.number().int().positive(),
@@ -41,7 +42,12 @@ export function inspectDependencyContext(root: string, body: string, dependencie
   const context = dependencyContextSchema.parse(JSON.parse(body));
   if (context.specRevision !== specRevision || context.planRevision !== planRevision || JSON.stringify(context.dependencies) !== JSON.stringify(dependencies)) throw new Error("Dependency context does not match the approved specification/plan/dependencies");
   const expected = dependencySources(root, dependencies, read);
-  if (context.graphHash !== expected.graphHash || JSON.stringify([...context.sources].sort((a, b) => a.path.localeCompare(b.path))) !== JSON.stringify(expected.sources)) throw new Error("Dependency source coverage is missing or stale; reassess inherited constraints");
+  if (context.graphHash !== expected.graphHash || JSON.stringify([...context.sources].sort((a, b) => a.path.localeCompare(b.path))) !== JSON.stringify(expected.sources)) {
+    throw new CadreError("DEPENDENCY_CONTEXT_STALE", "Dependency source coverage is missing or stale; reassess inherited constraints", {
+      expectedGraphHash: expected.graphHash, expectedSources: expected.sources,
+      instruction: "Read these exact sources completely, reassess source-linked constraints, and prepare the corrected candidate before approval."
+    });
+  }
   if (new Set(context.constraints.map((item) => item.id)).size !== context.constraints.length) throw new Error("Dependency constraint IDs must be unique");
   const paths = new Set(context.sources.map((source) => source.path));
   for (const constraint of context.constraints) if (constraint.sources.some((path) => !paths.has(path))) throw new Error(`Unknown source for constraint ${constraint.id}`);

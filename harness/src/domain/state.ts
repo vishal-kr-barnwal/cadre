@@ -325,18 +325,21 @@ function validateLearning(path: string, required: boolean, errors: string[]): vo
   }
 }
 
-function validateSpec(path: string, errors: string[]): void {
-  if (!existsSync(path)) {
-    errors.push(`${path}: missing specification`);
-    return;
-  }
-  const body = readFileSync(path, "utf8");
+export function validateSpecContent(body: string, path: string, errors: string[]): void {
   for (const heading of [
     "## Functional Requirements", "## Non-Functional Requirements", "## Acceptance Criteria",
     "## Dependencies", "## Additional Information", "## Dependent-track impact"
   ]) {
     if (!body.includes(heading)) errors.push(`${path}: missing ${heading}`);
   }
+}
+
+function validateSpec(path: string, errors: string[]): void {
+  if (!existsSync(path)) {
+    errors.push(`${path}: missing specification`);
+    return;
+  }
+  validateSpecContent(readFileSync(path, "utf8"), path, errors);
 }
 
 function validateProjectOperations(root: string, byId: Map<string, DiscoveredTrack>, errors: string[]): void {

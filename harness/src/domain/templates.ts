@@ -62,6 +62,7 @@ export const TEMPLATE_IDS = [
 ] as const;
 
 const TEMPLATE_ARTIFACT_PATHS: Partial<Record<(typeof TEMPLATE_IDS)[number], string>> = {
+  "track/bug": "bugs/review-<cycle>.md",
   "track/dependency-context": "dependency-context.json",
   "track/revision": "revisions/revision-<id>.md",
   "project/refresh": "refreshes/refresh-<id>.md",

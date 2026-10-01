@@ -8,6 +8,7 @@ import { readExecution, validateExecutionJournal, type ExecutionNode } from "./e
 import { contentHash, readSafeArtifact } from "./memory.js";
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import { CadreError } from "./errors.js";
+import { renderTracksWithState } from "./tracks-index.js";
 
 const SHA = /^[0-9a-f]{7,40}$/;
 const TRACK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -157,7 +158,7 @@ function cleanWorktree(path: string, allowedPaths: ReadonlySet<string> = new Set
   if (unexpected.length) throw new CadreError("WORKTREE_DIRTY", `worktree is not clean: ${path}; ${unexpected.length} unexpected changes`, { pathCount: unexpected.length, paths: unexpected });
 }
 
-/** Only the bound coordinator journal/state may remain dirty in the canonical worktree. */
+/** Bound coordinator evidence and an exact generated index may remain dirty. */
 function ownedExecutionState(root: string, input: WorktreeIntegrationInput): Record<string, string> {
   const parent = `.cadre/tracks/${input.trackId}`;
   const statePath = `${parent}/state.json`, journalPath = `${parent}/executions/execution-${input.executionId}.json`;
@@ -182,7 +183,14 @@ function ownedExecutionState(root: string, input: WorktreeIntegrationInput): Rec
   validatePlanGraph(`${parent}/plan.md`, graph, state.status, errors);
   validateExecutionJournal(join(root, parent), state, graph, errors);
   if (errors.length) throw new CadreError("INTEGRATION_STATE_INVALID", `Active execution state failed validation: ${errors.slice(0, 3).join("; ")}`, { errors });
-  return { [statePath]: contentHash(body), [journalPath]: contentHash(readSafeArtifact(root, journalPath)) };
+  const owned = { [statePath]: contentHash(body), [journalPath]: contentHash(readSafeArtifact(root, journalPath)) };
+  if (existsSync(join(root, ".cadre/tracks.md"))) {
+    const index = readSafeArtifact(root, ".cadre/tracks.md");
+    if (index === renderTracksWithState(root, join(root, statePath), state).tracksContent) {
+      owned[".cadre/tracks.md"] = contentHash(index);
+    }
+  }
+  return owned;
 }
 
 function targetIdentity(root: string, input: { trackId: string; executionId: string; nodeId: string }): {

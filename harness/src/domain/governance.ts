@@ -1,7 +1,9 @@
 import { parsePlanContent } from "./plan.js";
 import { inspectDependencyContext } from "./dependency-context.js";
 import { resolveApprovalMode } from "./approval-policy.js";
-import { operationRef, promoteOperation, type ReceiptFile } from "./operation-receipts.js";
+import { committedOperationReceipt, operationRef, promoteOperation, type ReceiptFile } from "./operation-receipts.js";
+import { archiveReceiptPath, replayCommittedArchive } from "./archive-replay.js";
+import { deriveArchivePromotion, explainArchiveState, type ArchiveStateChanges } from "./archive-promotion.js";
 import { requireCleanAutonomousReview } from "./autonomous-review.js";
 import { inspectStagedMemory } from "./staged-memory.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -213,6 +215,9 @@ export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: 
   }
   if (proposal.state.schemaVersion === 2) {
     const operationId = `review-${hash([input.trackId, input.reviewedHead, proposal.state.reviewCycles?.at(-1)?.cycle]).slice(0, 32)}`;
+    if (proposal.resuming) return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "review", undefined, [
+      { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) }
+    ]), valid: true, derivedStateCurrent: true };
     const receipt = promoteOperation(input.projectRoot, { operationId, kind: "review", approvalDigest: proposalDigest, baseCommit: resolveGitCommit(input.projectRoot) }, [
       { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) },
       { path: ".cadre/tracks.md", content: proposal.tracksContent }
@@ -428,7 +433,10 @@ export function previewArchiveBatchCandidate(input: ArchiveBatchCandidateInput) 
 }
 
 export function applyArchiveBatchCandidate(input: ArchiveBatchCandidateInput, proposalDigest: string) {
-  return applyMaterializedArchiveBatch(loadArchiveBatchCandidate(input), proposalDigest);
+  const replay = replayCommittedArchive(input, proposalDigest);
+  if (replay) return replay;
+  const applied = applyMaterializedArchiveBatch(loadArchiveBatchCandidate(input), proposalDigest);
+  return "receipt" in applied ? { ...applied, operationPath: archiveReceiptPath(input) } : applied;
 }
 
 function assertArchiveUpdate(path: string, selected: Set<string>): void {
@@ -463,6 +471,8 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
   tracksContent: string;
   resuming: boolean;
   digest: string;
+  stateChanges: ArchiveStateChanges[];
+  promotion: ReturnType<typeof deriveArchivePromotion> | null;
 } {
   if (!BATCH_ID.test(input.batchId)) throw new Error("invalid archive batchId");
   if (!SHA.test(input.baseCommit)) throw new Error("baseCommit must be a Git commit SHA");
@@ -602,6 +612,13 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
         : null
     }))
   };
+  const project = JSON.parse(current.project) as ProjectState;
+  const promotion = project.schemaVersion === 2 ? deriveArchivePromotion(project, input.batchId, input.selectedTracks, moves) : null;
+  const stateChanges = promotion ? [
+    explainArchiveState(join(cadreRoot(root), "project.json"), join(cadreRoot(root), "project.json"), project, promotion.project),
+    ...moves.map((move) => explainArchiveState(join(move.sourcePath, "state.json"), join(move.targetPath, "state.json"),
+      JSON.parse(current.sources.find((source) => source.trackId === move.trackId)!.files.find((file) => file.path === "state.json")!.content), promotion.states.get(move.trackId)!))
+  ] : [];
   return {
     operationPath,
     initialOperation,
@@ -611,6 +628,7 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     tracksPath: join(cadreRoot(root), "tracks.md"),
     tracksContent,
     resuming: existingOperation != null,
+    stateChanges, promotion,
     digest: hash({ current, input, initialOperation, operation, moves: moves.map(({ trackId, state, needsMove }) => ({ trackId, state, needsMove })), updates, tracksContent })
   };
 }
@@ -628,18 +646,17 @@ function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposal
   const projectPath = join(cadreRoot(input.projectRoot), "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
   if (project.schemaVersion === 2) {
-    const operationId = `archive-${hash(input.batchId).slice(0, 32)}`, reference = operationRef(operationId);
+    const { operationId, states, project: archivedProject } = proposal.promotion!;
     const files: ReceiptFile[] = [];
     for (const move of proposal.moves) {
       for (const file of directorySnapshot(move.sourcePath)) {
         files.push({ path: `.cadre/archive/${move.trackId}/${file.path}`, content: file.path === "state.json"
-          ? json({ ...move.state, checkpoint: "archived", history: [...(Array.isArray(move.state.history) ? move.state.history : []), { action: "archive", commit: reference }] }) : file.content });
+          ? json(states.get(move.trackId)!) : file.content });
         files.push({ path: `.cadre/tracks/${move.trackId}/${file.path}`, content: null });
       }
     }
     for (const update of proposal.writes) files.push({ path: `.cadre/${update.path}`, content: update.content });
-    project.history = [...(project.history ?? []), { action: "archive", selectedTracks: input.selectedTracks, commit: reference }];
-    files.push({ path: ".cadre/project.json", content: json(project) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
+    files.push({ path: ".cadre/project.json", content: json(archivedProject) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
     const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit }, files);
     return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
   }
