@@ -49,6 +49,8 @@ Preserve phase history and existing handoffs. For active v3/v4/v5 tracks, keep t
 
 ## Evidence quality and proposal identity
 
+V5 archive prepare returns `stateChanges` for each moved track state and project history. Read its `sourcePath`, apply the exact `set`/array `append` changes, and serialize with two-space indentation and a trailing newline; verify the returned SHA-256 for the final `path`. Include these automatic status, checkpoint, history and operation-reference changes in the same archive approval envelope. Preserve all other source fields and historical artifacts.
+
 Before promoting an observation into a pattern, verify it against actual imports, source and relevant tests; distinguish observed facts, hypotheses and scope decisions. Hashes establish freshness, not truth. Do not infer that an assertion is loose from its method name without checking the imported module, or that no I/O implies no trust boundary. Correct mistaken historical claims explicitly in new guidance with evidence, preserving completed history.
 
 Prepare results describe prospective operation paths; check disk before claiming that a journal exists or is duplicated. Apply alone persists the archive journal. The public proposal digest binds the complete preview; the persisted approvalDigest binds the batch inputs/updates. They serve different purposes. Resume using the persisted batch identity, approved file hashes and actual artifact commit; do not interpret the differing digests alone as source drift.
