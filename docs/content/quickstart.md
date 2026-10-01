@@ -10,8 +10,8 @@ order: 30
 This walkthrough assumes Cadre is installed and the client has been reloaded.
 Cadre commands are agent skills, not `cadre-ai` shell subcommands.
 
-Codex and Claude Code support is stable. The Zed Agent commands shown here are
-available as a beta integration in Cadre 3.6.0.
+Codex, Claude Code, and native Zed Agent support is stable. The commands below
+use each client's native skill integration.
 
 ## 1. Create Project Context
 

@@ -15,7 +15,7 @@ export function ClientCommandSwitcher({ commands }: { commands: ClientCommands }
       <TabsList aria-label="Choose coding client">
         <TabsTrigger value="codex">Codex</TabsTrigger>
         <TabsTrigger value="claude">Claude Code</TabsTrigger>
-        {commands.zed ? <TabsTrigger value="zed">Zed Agent (Beta)</TabsTrigger> : null}
+        {commands.zed ? <TabsTrigger value="zed">Zed Agent</TabsTrigger> : null}
       </TabsList>
       <TabsContent value="codex">
         <CodeBlock

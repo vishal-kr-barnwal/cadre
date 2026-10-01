@@ -1,10 +1,10 @@
 # Cadre
 
-**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
+**Cadre 3.9.1** fixes implementation/review bookkeeping loops, makes committed operation retries idempotent, and improves approval previews and recovery guidance. Codex, Claude Code, and native Zed Agent are stable integrations. Existing 3.9.0/v5 projects continue without a project refresh or state migration. Track remains the default approval mode; Parallel remains the default scheduling mode. Older project formats retain their approved refresh path and historical evidence.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
-and Zed Agent. Codex and Claude Code support is stable; native Zed Agent support
-is beta. Cadre turns project context into resumable feature and bug tracks,
+and Zed Agent. All three integrations are stable as of Cadre 3.9.1.
+Cadre turns project context into resumable feature and bug tracks,
 carries learning forward between phases, and records implementation provenance
 in Git.
 
@@ -90,7 +90,7 @@ cadre-ai install --target codex
 # Claude Code only
 cadre-ai install --target claude
 
-# Zed Agent only (beta)
+# Zed Agent only
 cadre-ai install --target zed
 ```
 
@@ -113,7 +113,7 @@ By default, installation applies these narrowly scoped rules:
 - Codex: `default_tools_approval_mode = "approve"` under `plugins."cadre@cadre".mcp_servers.cadre` in the user Codex configuration.
 - Claude Code: `cadre` in `enabledMcpjsonServers` and `mcp__cadre__*` in the
   user permission allowlist.
-- Zed Agent (beta): one exact `mcp:cadre:<tool>` allow entry for each Cadre MCP tool
+- Zed Agent: one exact `mcp:cadre:<tool>` allow entry for each Cadre MCP tool
   under `agent.tool_permissions.tools`.
 
 Existing configuration, comments, and unrelated permission rules are preserved. A Claude deny rule is never removed or overridden. These rules suppress the host application's per-tool prompt; they do not bypass Cadre's requirement to present artifacts and lifecycle mutations to the human for approval.

@@ -1,14 +1,14 @@
 ---
 title: Installation
-description: Install, update, verify, and remove stable Codex/Claude integrations and the Zed Agent beta.
+description: Install, update, verify, and remove stable Codex, Claude Code, and Zed Agent integrations.
 section: Start Here
 order: 20
 ---
 
 # Installation
 
-Cadre installs at user scope. The OpenAI Codex and Claude Code integrations are
-stable. Native Zed Agent support is beta in Cadre 3.6.0. The published package
+Cadre installs at user scope. The OpenAI Codex, Claude Code, and native Zed Agent integrations are
+stable. Zed Agent support is stable as of Cadre 3.9.1. The published package
 and executable are named `cadre-ai`.
 
 ## Requirements
@@ -57,7 +57,7 @@ After installing or updating:
 
 - Start a new Codex conversation.
 - In Claude Code, run `/reload-plugins` or start a new session.
-- In Zed (beta), open a new Agent thread and confirm Cadre is active under AI → MCP
+- In Zed, open a new Agent thread and confirm Cadre is active under AI → MCP
   Servers. Zed reloads global skills live.
 
 Confirm installation with the native clients:
@@ -79,7 +79,7 @@ The default installer changes only Cadre-specific client settings:
   `plugins."cadre@cadre".mcp_servers.cadre`.
 - Claude receives `cadre` in `enabledMcpjsonServers` and `mcp__cadre__*` in
   `permissions.allow`.
-- Zed (beta) receives one exact `mcp:cadre:<tool>` entry with `default: "allow"` for
+- Zed receives one exact `mcp:cadre:<tool>` entry with `default: "allow"` for
   every Cadre MCP tool.
 
 Existing comments and unrelated settings are preserved. The installer never
@@ -131,6 +131,11 @@ cadre-ai install
 
 Use `--replace-marketplace` only when a marketplace already named `cadre`
 points at a different location that you have reviewed and intend to replace.
+
+Cadre 3.9.1 accepts existing 3.9.0/v5 projects without a refresh or state
+migration. Start a new client session after installation. An interrupted track
+may still need its existing receipt reconciled before continuation. Older
+runtime/template contracts retain their approved refresh requirements.
 
 ## Uninstall
 

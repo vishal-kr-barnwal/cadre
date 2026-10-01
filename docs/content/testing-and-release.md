@@ -64,7 +64,7 @@ Verify:
 - Claude launches `${CLAUDE_PLUGIN_ROOT}/dist/cadre-mcp.mjs`;
 - Codex has the plugin-scoped MCP approval mode;
 - Claude has both the `cadre` enabled server and `mcp__cadre__*` allow rule;
-- The Zed beta has ten global `cadre-*` skills, an active Cadre context server, and exact
+- Zed Agent has ten global `cadre-*` skills, an active Cadre context server, and exact
   `mcp:cadre:<tool>` allow entries;
 - new Codex and Zed sessions plus a reloaded Claude session discover all ten
   workflows.

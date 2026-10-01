@@ -36,7 +36,7 @@ import {
   TEMPLATE_SET_VERSION,
   templateCatalog
 } from "../domain/templates.js";
-import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
+import { CADRE_RUNTIME_VERSION, isCompatibleRuntimeVersion } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_APPROVAL_MODES,
@@ -130,9 +130,9 @@ function requireCurrentProject(projectRoot: string, continuingExecution = false)
     runtimeVersion?: string;
     templateSetVersion?: string;
   };
-  if (continuingExecution && [CADRE_RUNTIME_VERSION, "3.8.0"].includes(project.runtimeVersion ?? "") && project.templateSetVersion === "v4") return root;
+  if (continuingExecution && (isCompatibleRuntimeVersion(project.runtimeVersion) || project.runtimeVersion === "3.8.0") && project.templateSetVersion === "v4") return root;
   if (
-    project.runtimeVersion !== CADRE_RUNTIME_VERSION
+    !isCompatibleRuntimeVersion(project.runtimeVersion)
     || project.templateSetVersion !== TEMPLATE_SET_VERSION
   ) {
     throw new CadreError(
@@ -235,7 +235,7 @@ function projectStatusView(validation: ReturnType<typeof validateProject>) {
       lastRefresh: validation.project.lastRefresh ?? null
     } : null,
     upgradeRequired: validation.project
-      ? validation.project.runtimeVersion !== CADRE_RUNTIME_VERSION
+      ? !isCompatibleRuntimeVersion(validation.project.runtimeVersion)
         || validation.project.templateSetVersion !== TEMPLATE_SET_VERSION
       : false,
     targetRuntimeVersion: CADRE_RUNTIME_VERSION,
@@ -536,7 +536,7 @@ export function createCadreServer(): McpServer {
           kind: "staged_track_candidate" as const,
           valid: validation.errors.length === 0 && stagedCandidate.valid,
           derivedStateCurrent: validation.warnings.length === 0,
-          upgradeRequired: validation.project?.runtimeVersion !== CADRE_RUNTIME_VERSION
+          upgradeRequired: !isCompatibleRuntimeVersion(validation.project?.runtimeVersion)
             || validation.project?.templateSetVersion !== TEMPLATE_SET_VERSION,
           targetRuntimeVersion: CADRE_RUNTIME_VERSION,
           targetTemplateSetVersion: TEMPLATE_SET_VERSION,
@@ -556,7 +556,7 @@ export function createCadreServer(): McpServer {
         kind: "canonical_track" as const,
         valid: validation.errors.length === 0,
         derivedStateCurrent: validation.warnings.length === 0,
-        upgradeRequired: validation.project?.runtimeVersion !== CADRE_RUNTIME_VERSION
+        upgradeRequired: !isCompatibleRuntimeVersion(validation.project?.runtimeVersion)
           || validation.project?.templateSetVersion !== TEMPLATE_SET_VERSION,
         targetRuntimeVersion: CADRE_RUNTIME_VERSION,
         targetTemplateSetVersion: TEMPLATE_SET_VERSION,

@@ -6,6 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TEMPLATE_IDS, TEMPLATE_SET_VERSION, templateCatalog } from "../src/domain/templates.js";
 import { createCadreServer } from "../src/mcp/server.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const skills = [
@@ -44,8 +45,8 @@ interface PackageManifest {
 }
 
 const packageManifest = readJson<PackageManifest>(join(root, "package.json"));
-if (packageManifest.name !== "cadre-ai" || packageManifest.version !== "3.9.0") {
-  errors.push("package: expected publish identity cadre-ai@3.9.0");
+if (packageManifest.name !== "cadre-ai" || packageManifest.version !== CADRE_RUNTIME_VERSION) {
+  errors.push(`package: expected publish identity cadre-ai@${CADRE_RUNTIME_VERSION}`);
 }
 if (packageManifest.private === true) errors.push("package: publishable CLI must not be private");
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {

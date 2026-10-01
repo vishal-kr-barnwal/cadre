@@ -77,6 +77,14 @@ Track status reports an exact staged `track-<id>` as a `staged_track_candidate` 
 
 Constrained promotion for track, revise, refresh, review remediation and revert reconciliation. Prepare accepts `request: {mode: "prepare", projectRoot, candidateId, workflow, files}` and returns the exact final manifest/digest and approval token. After the applicable approval, apply accepts only `{mode: "apply", proposalToken}`. It validates proposed state/graphs/memory, binds unchanged source inputs, generates indexes and operation references, journals before promotion, and returns immutable receipt trailers with `commit_pending`. Agent Git tools create the commit. `{mode: "reconcile", projectRoot, operationId}` verifies unique reachable committed receipt/artifacts and removes only ignored recovery state. `{mode: "resume", projectRoot, operationId, approvalDigest}` resumes the exact persisted approved promotion. It never writes product files or executes Git.
 
+Prepare also returns `stateChanges`: exact field-level `set`/`append` operations
+for runtime-derived track/project metadata. Apply these to the inspected source
+JSON to reconstruct the final manifest bytes and verify their hashes. A retry
+of a committed approval returns the original verified receipt with
+`changedPaths: []` and `changedCount: 0`, even after temporary stages are removed.
+Stale dependency context errors expose `expectedGraphHash` and `expectedSources`
+so the agent can read the required sources and reassess the candidate.
+
 ## diagnostic_read
 
 Explicit full diagnostic access after a bounded error: `diagnosticId`, optional `offset` (default 0) and `maxBytes` (default 49152, 1024–65536). Consume `nextOffset` until null. Ordinary runtime errors are capped at 8 KiB including the serialized MCP envelope; the full process-local diagnostic is available for 30 minutes subject to bounded eviction.
@@ -93,7 +101,7 @@ Approval-aware clean-review completion. Prepare accepts `projectRoot`, `trackId`
 
 ## archive_batch_candidate
 
-Approval-aware staged archive batch. Prepare consumes body-free update descriptors and returns the full manifest/moves. Apply re-reads exact bytes and returns changed paths/counts.
+Approval-aware staged archive batch. Prepare consumes body-free update descriptors and returns the full manifest/moves. `stateChanges` identifies each source and destination state path, final SHA-256, and exact field-level set/append operations, including project history. Preview and apply share the same deterministic derivation. Apply re-reads exact bytes and returns changed paths/counts. A committed retry verifies the original receipt before checking archive eligibility or reading removed stages; it returns that receipt with zero changed paths/counts.
 
 ## archive_batch_record
 

@@ -48,7 +48,7 @@ unrelated JSONC settings while ensuring both:
 If `permissions.deny` blocks Cadre tools, installation stops rather than
 overriding the deny rule. Remove or narrow the conflicting rule deliberately.
 
-## Zed Beta Skills Or MCP Are Missing
+## Zed Skills Or MCP Are Missing
 
 Rerun `cadre-ai install --target zed`. Cadre refuses to replace any existing
 `~/.agents/skills/cadre-*` path that it does not own. Move or rename the
@@ -95,6 +95,14 @@ Common legitimate recovery cases are:
 - a worker commit or merge exists but its node transition is not recorded.
 
 Anything else requires a deliberate reconciliation decision.
+
+Cadre 3.9.1 preserves the reviewed product HEAD across bookkeeping commits and
+recognizes already committed receipts. Upgrade the installed integration if
+implementation/review keeps requesting another bookkeeping commit. Resume the
+existing track and reconcile its original operation receipt; keep the verified
+product HEAD and approval evidence. Replaying a committed operation should
+return the original receipt with zero changes. Do not reset the repository or
+create a new receipt merely to record the previous commit's SHA.
 
 ## Plan Graph Validation Fails
 

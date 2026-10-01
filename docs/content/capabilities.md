@@ -1,6 +1,6 @@
 ---
 title: Capabilities
-description: What Cadre 3.5 supports today and where its boundaries are.
+description: What Cadre supports today and where its boundaries are.
 section: User Guide
 order: 40
 ---
@@ -8,15 +8,15 @@ order: 40
 # Capabilities
 
 Cadre is a focused, single-repository delivery harness for OpenAI Codex, Claude
-Code, and the native Zed Agent. Codex and Claude Code integrations are stable;
-native Zed Agent support is beta. Cadre governs work from project context
+Code, and the native Zed Agent. Codex, Claude Code, and native
+Zed Agent integrations are stable. Cadre governs work from project context
 through archived learning.
 
 ## Supported Today
 
 | Area | Capability |
 |---|---|
-| Clients | Stable native user plugins for Codex/Claude and beta global skills plus custom MCP for Zed Agent. |
+| Clients | Stable native user plugins for Codex/Claude and stable global skills plus custom MCP for Zed Agent. |
 | Project creation | Greenfield/brownfield classification, optional Git initialization, approved context, workflow, styleguides, and patterns. |
 | Tracks | Feature and bug specifications, acceptance criteria, dependencies, phased plans, and learning seeds. |
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |

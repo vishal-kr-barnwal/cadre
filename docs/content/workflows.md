@@ -9,7 +9,7 @@ order: 60
 # Workflow Guide
 
 Cadre exposes ten workflows in all supported clients. In Codex use
-`$cadre:<skill>`; in Claude Code use `/cadre:<skill>`; in the Zed Agent beta use
+`$cadre:<skill>`; in Claude Code use `/cadre:<skill>`; in the Zed Agent use
 `/cadre-<skill>`.
 
 ## create

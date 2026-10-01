@@ -5,6 +5,7 @@ import { existsSync, lstatSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   CADRE_RUNTIME_VERSION,
+  isCompatibleRuntimeVersion,
   LEGACY_RUNTIME_VERSIONS,
   LEGACY_TEMPLATE_SET_VERSIONS,
   TEMPLATE_SET_VERSION
@@ -526,7 +527,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
   const planEvidence: PlanEvidence[] = [];
   collectCommitReferences(project, "project.json", commitReferences);
   if (![1, 2].includes(project.schemaVersion)) errors.push("project.json: unsupported schemaVersion");
-  if (project.runtimeVersion !== CADRE_RUNTIME_VERSION) {
+  if (!isCompatibleRuntimeVersion(project.runtimeVersion)) {
     if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) {
       warnings.push(`PROJECT_REFRESH_REQUIRED: runtimeVersion ${project.runtimeVersion} must be refreshed to ${CADRE_RUNTIME_VERSION}`);
     } else errors.push(`project.json: unsupported runtimeVersion ${String(project.runtimeVersion)}`);

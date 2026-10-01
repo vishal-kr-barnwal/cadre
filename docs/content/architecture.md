@@ -8,7 +8,7 @@ order: 140
 # Architecture
 
 Cadre is one publishable TypeScript package that installs native user plugins
-for Codex and Claude Code plus a beta integration using global skills and a
+for Codex and Claude Code plus a stable integration using global skills and a
 custom MCP server for Zed Agent. The target repository stores delivery state,
 not runtime code.
 

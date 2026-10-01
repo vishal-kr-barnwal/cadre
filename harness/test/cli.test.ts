@@ -10,6 +10,7 @@ import test from "node:test";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
 import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
 import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
+import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "dist", "cadre-cli.mjs");
@@ -55,11 +56,11 @@ function runCli(args: string[], env = process.env) {
 test("global CLI exposes publish identity and self-contained runtime diagnostics", () => {
   const version = runCli(["--version"]);
   assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), "3.9.0");
+  assert.equal(version.stdout.trim(), CADRE_RUNTIME_VERSION);
 
   const doctor = runCli(["doctor"]);
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.match(doctor.stdout, /cadre-ai@3\.9\.0/);
+  assert.ok(doctor.stdout.includes(`cadre-ai@${CADRE_RUNTIME_VERSION}`));
   assert.match(doctor.stdout, new RegExp(`template catalog: ${TEMPLATE_IDS.length}/${TEMPLATE_IDS.length}`));
   assert.match(doctor.stdout, /self-contained runtime: ok/);
 

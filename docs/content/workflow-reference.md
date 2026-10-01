@@ -8,7 +8,7 @@ order: 200
 # Workflow Reference
 
 Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
-`/cadre-<name>` in the Zed Agent beta.
+`/cadre-<name>` in the Zed Agent.
 
 ## create
 

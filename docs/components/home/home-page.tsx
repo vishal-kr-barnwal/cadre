@@ -124,7 +124,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                 and Zed Agent. Published on npm as{" "}
                 <Link className="underline underline-offset-4" href="https://www.npmjs.com/package/cadre-ai">cadre-ai</Link>,
                 it combines approved project context, spec-first plans, resumable
-                execution, review gates, and parallel Git worktrees. Zed support is beta.
+                execution, review gates, and parallel Git worktrees. All three client integrations are stable.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">

@@ -7,6 +7,43 @@ order: 230
 
 # Release Notes
 
+## 3.9.1 - 2026-10-01
+
+Cadre 3.9.1 fixes implementation/review bookkeeping loops and interrupted-operation recovery. Native Zed Agent joins Codex and Claude Code as a stable integration. Track remains the default approval mode and Parallel remains the default scheduling mode; clean completion still requires explicit final approval.
+
+### Lifecycle and recovery fixes
+
+- Preserve the verified implementation HEAD and original Autonomous execution authority across bookkeeping commits. Route already committed prerequisites forward instead of requesting another bookkeeping commit.
+- Replay completed implementation, clean-review, revision, refresh, and archive operations from their original immutable receipts. Verify approval identity and unique reachable Git evidence; successful retries make zero changes and do not append history or create another commit.
+- Resolve archive receipts before checking moved-track eligibility or reading removed candidate stages, and return the actual receipt path.
+- Permit only exact runtime-generated track-index changes during parallel integration, with proposal-bound hashes. Continue rejecting tampered state, unrelated dirty files, and worker edits to protected Cadre artifacts.
+- Include exact derived state changes in candidate and archive previews, including project history and refresh metadata. Archive preview and apply share one deterministic derivation so reviewers can reconstruct the final files and verify their hashes.
+- Reject incomplete specification sections before promotion. Stale dependency diagnostics identify the exact expected sources and fingerprints for reassessment.
+- Clarify exact scheduler node IDs, safe artifact filenames, governed pause/resume, apply-time approval confirmation, and approval ordering around additive Git reverts. Explicitly map `implement auto` to Autonomous approval mode.
+- Fix the homepage Digests label contrast in dark mode by giving its amber background a matching dark-theme token.
+
+### Stable Zed Agent
+
+Zed Agent support is stable as of 3.9.1. The integration continues to use ten global `cadre-*` skills, the packaged custom MCP server, exact tool permission entries, and the existing chat fallback for approval forms. Native plugins remain the integration path for Codex and Claude Code.
+
+### Validation
+
+Native Codex fixtures exercised all ten workflows and all eight approval/scheduling combinations: Governed, Phase, Track, and Autonomous with Sequential and Parallel scheduling. Nine fixtures ended valid and clean with 11 archived tracks, 56 uniquely verified receipts, and no live workers or managed worktrees. Additional paths covered planned revision, active task reversal/reimplementation, archived revise and completed revert successors, batch archive, and two context refreshes. Fixtures used explicitly scoped test approvals; these results cover representative lifecycle paths rather than every possible repository or conflict.
+
+All 118 harness tests passed, along with package and documentation checks. Automated regressions cover receipt replay, approval identity, derived-state hash reconstruction, integration tampering, dependency diagnostics, and patch compatibility. Installed Codex and Claude plugins are enabled at the candidate version; Zed discovers all ten skills with the packaged server active. Homepage checks cover light/dark themes and desktop/mobile rendering.
+
+### Upgrade and compatibility
+
+```bash
+npm install -g cadre-ai@3.9.1
+cadre-ai doctor
+cadre-ai install --target all --scope user
+```
+
+Start a new Codex task, reload Claude Code plugins, and open a new Zed Agent thread. Existing 3.9.0/v5 projects continue without a refresh, schema migration, or rewritten history. Template set v5 and schema-2 state are unchanged. Interrupted tracks may still need their existing receipt reconciled before continuation. Older runtime/template contracts retain their approved refresh requirements. Installation does not approve project work.
+
+Direct MCP clients should accept the additional `stateChanges` preview fields and zero-change committed retry results. Re-run previews in a new server session; process-local proposal tokens are not portable between sessions.
+
 ## 3.9.0 - 2026-09-25
 
 Cadre 3.9.0 reduces bookkeeping commits and repeated context while preserving human approval, verification, provenance, and interruption recovery. Track remains the default approval mode and Parallel remains the default scheduling mode. Codex and Claude Code are stable integrations; native Zed Agent remains beta.

@@ -143,7 +143,7 @@ function checkCurrentModel(docsBySlug) {
   requireText(docsBySlug, "getting-started", "mcp__cadre__*")
   requireText(docsBySlug, "getting-started", "mcp:cadre:<tool>")
   requireText(docsBySlug, "getting-started", "--target zed")
-  requireText(docsBySlug, "getting-started", "Zed Agent support is beta")
+  requireText(docsBySlug, "getting-started", "Zed Agent support is stable")
   requireText(docsBySlug, "mcp-reference", "planValidations")
   requireText(docsBySlug, "mcp-reference", "staged_track_candidate")
   for (const workflow of ["create", "track", "implement", "review", "archive"]) {

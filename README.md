@@ -5,7 +5,7 @@
 <p align="center"><strong>Measure twice, code once.</strong></p>
 
 <p align="center">
-  A human-governed, Git-aware delivery harness for OpenAI Codex, Claude Code, and Zed Agent (beta).
+  A human-governed, Git-aware delivery harness for OpenAI Codex, Claude Code, and Zed Agent.
 </p>
 
 Cadre turns approved project context into resumable feature and bug tracks. It
@@ -17,7 +17,7 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-**Cadre 3.9.0** reduces bookkeeping commits and repeated context while preserving approval, verification, recovery, and provenance. New v5 projects use cohesive task commits, verified operation receipts, approved dependency context, and retained-context tokens. Track remains the default approval mode; Parallel remains the default scheduling mode. Existing projects migrate through one approved refresh at a quiescent boundary. Historical SHA records, execution contracts, and immutable v1–v4 templates remain supported.
+**Cadre 3.9.1** fixes implementation/review bookkeeping loops, makes committed operation retries idempotent, and improves approval previews and recovery guidance. Codex, Claude Code, and native Zed Agent are stable integrations. Existing 3.9.0/v5 projects continue without a project refresh or state migration. Track remains the default approval mode; Parallel remains the default scheduling mode. Older project formats retain their approved refresh path and historical evidence.
 
 
 ## What Cadre Provides
@@ -39,8 +39,8 @@ provenance without asking an agent to invent workflow state.
 
 ## Install
 
-Cadre supports OpenAI Codex and Claude Code as stable integrations. Native Zed
-Agent support is available in beta at user scope:
+Cadre supports OpenAI Codex, Claude Code, and native Zed Agent as stable
+integrations at user scope:
 
 ```bash
 npm install -g cadre-ai
@@ -72,7 +72,7 @@ $cadre:archive passwordless-login
 /cadre:review passwordless-login
 /cadre:archive passwordless-login
 
-# Zed Agent (beta)
+# Zed Agent
 /cadre-create
 /cadre-track Add passwordless login as a feature
 /cadre-implement passwordless-login
