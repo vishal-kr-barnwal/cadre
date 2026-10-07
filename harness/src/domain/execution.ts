@@ -47,7 +47,7 @@ export interface ExecutionJournal {
   schemaVersion: number;
   executionId: string;
   trackId: string;
-  status: "in_progress" | "completed";
+  status: "in_progress" | "completed" | "superseded";
   checkpoint: string;
   requestedMode: "parallel" | "sequential";
   effectiveMode: "parallel" | "sequential";
@@ -117,7 +117,7 @@ export interface ExecutionStartRequest {
 export function deriveExecutionStartInput(input: ExecutionStartRequest): ExecutionStartInput {
   const startedAt = new Date().toISOString();
   const state = JSON.parse(readSafeArtifact(input.projectRoot, `.cadre/tracks/${input.trackId}/state.json`)) as ExecutionTrackState;
-  const previousId = state.autonomousReview ? state.lastExecution?.executionId : undefined;
+  const previousId = state.lastExecution?.executionId;
   const previous = previousId ? readExecution(input.projectRoot, input.trackId, previousId) : undefined;
   const requestedMode = input.requestedMode ?? previous?.requestedMode ?? "parallel";
   return {
@@ -346,6 +346,18 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   const planRevision = graph.planRevision!;
   const relativeJournal = journalRelative(input.executionId);
   const journalPath = join(trackRoot, relativeJournal);
+  const nodes = buildNodes(graph);
+  if (state.lastExecution?.executionId) {
+    const retained = readExecution(input.projectRoot, input.trackId, state.lastExecution.executionId);
+    if (["completed", "superseded"].includes(retained.status)) for (const [id, node] of Object.entries(nodes)) {
+      const old = retained.nodes[id];
+      if (node.status !== "completed" || old?.status !== "completed") continue;
+      if (node.kind !== old.kind || node.phaseId !== old.phaseId || node.commitGroup !== old.commitGroup
+        || JSON.stringify(node.dependencies) !== JSON.stringify(old.dependencies)
+        || (node.workerCommit ?? node.mergeCommit) !== (old.workerCommit ?? old.mergeCommit)) continue;
+      nodes[id] = structuredClone(old);
+    }
+  }
   const journal: ExecutionJournal = {
     ...(state.schemaVersion === 2 ? { executionContract: "cohesive-v1" as const } : {}),
     schemaVersion: 1,
@@ -366,7 +378,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     startedAt: input.approvedAt,
     completedAt: null,
     headCommit: null,
-    nodes: buildNodes(graph)
+    nodes
   };
   if (existsSync(journalPath)) {
     if (lstatSync(journalPath).isSymbolicLink()) throw new Error("refusing an execution journal symbolic link");
@@ -737,6 +749,7 @@ export function executionSchedulerView(
   journal: ExecutionJournal,
   focusNodeIds: string[] = []
 ): ExecutionSchedulerView {
+  if (journal.status === "superseded") return { readyGroups: [], readyPhases: [], readyTasks: [], active: [], blocked: [], eventGuidance: {} };
   const status = deriveExecutionStatus(journal);
   const relevant = new Set([
     ...status.readyPhases,
@@ -1126,7 +1139,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   if (!stateAlreadyCompleted && (operation?.action !== "implement" || operation.executionId !== input.executionId)) {
     throw new Error("track does not point to this implementation execution");
   }
-  if (!(["in_progress", "completed"] as const).includes(journal.status)) throw new Error("execution cannot be completed");
+  if (journal.status !== "in_progress" && journal.status !== "completed") throw new Error("execution cannot be completed");
   if (journal.status === "completed"
     && (journal.headCommit !== input.headCommit || journal.completedAt !== input.completedAt)) {
     throw new Error("completed execution journal disagrees with the requested completion");
@@ -1298,6 +1311,7 @@ export function validateExecutionJournal(
     return;
   }
   if (journal.schemaVersion !== 1) errors.push(`${state.trackId}: unsupported execution schemaVersion`);
+  if (!["in_progress", "completed", "superseded"].includes(journal.status)) errors.push(`${state.trackId}: invalid execution status`);
   if (journal.trackId !== state.trackId) errors.push(`${state.trackId}: execution journal trackId mismatch`);
   if (!EXECUTION_ID.test(journal.executionId)) errors.push(`${state.trackId}: invalid executionId`);
   if (!["parallel", "sequential"].includes(journal.requestedMode) || !["parallel", "sequential"].includes(journal.effectiveMode)) {
@@ -1394,7 +1408,7 @@ export function validateExecutionJournal(
     if (state.lastExecution.executionId !== journal.executionId
       || state.lastExecution.graphDigest !== journal.graphDigest
       || state.lastExecution.planRevision !== journal.planRevision
-      || state.lastExecution.headCommit !== journal.headCommit
+      || (state.lastExecution.headCommit ?? null) !== journal.headCommit
       || (state.lastExecution.approvalPolicyVersion ?? 1) !== (journal.approvalPolicyVersion ?? 1)
       || String(state.lastExecution.approvalMode ?? "governed") !== String(journal.approvalMode ?? "governed")) {
       errors.push(`${state.trackId}: lastExecution does not match its execution journal`);

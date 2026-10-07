@@ -184,7 +184,7 @@ const executionStatusSchema = z.strictObject({
   execution: z.strictObject({
     executionId: z.string(),
     trackId: z.string(),
-    status: z.enum(["in_progress", "completed"]),
+    status: z.enum(["in_progress", "completed", "superseded"]),
     checkpoint: z.string(),
     requestedMode: z.enum(["parallel", "sequential"]),
     effectiveMode: z.enum(["parallel", "sequential"]),

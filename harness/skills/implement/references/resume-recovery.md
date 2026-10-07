@@ -13,6 +13,8 @@ Read the persisted handoff for the current node and declared dependencies throug
 
 For policy-v2 Autonomous, follow focused `project_status.nextStep` to the installed implement or review skill and resume its durable checkpoint. Legacy Autonomous requires an explicit Track-or-Autonomous migration through refresh before new work; preserve verification, findings, and execution history.
 
+After an approved v5 revision changes the graph, reconcile its receipt, then start the new execution rather than resuming the retained `superseded` journal. The revision proposal must bind the new track/spec/plan revisions, preserved completed work, and Autonomous scope reference together. If an older revision record is committed while canonical state or authority still points to the prior revision, stop and inspect the original approved manifest, receipt, journals, and Git. Reconcile that receipt once; repeating reconciliation cannot add missing approved state. Prepare an explicit repair through revise/refresh from verified evidence instead of editing authority or journal bindings by hand.
+
 ## Cohesive execution contract
 
 For a new cohesive-v1 execution, main may assign a whole approved commit group. Execute its internal dependencies in order, verify every task, and return individual authorization, verification and handoff evidence with one shared product commit. Never split a group across workers or independently schedule a member before the group's external dependencies. Legacy executions keep their original task boundaries. Main owns atomic complete_group, Git integration, receipts and all Cadre state. Use only the owned build-cache path main supplies. Fast-forward integration is valid provenance; do not require a merge object.

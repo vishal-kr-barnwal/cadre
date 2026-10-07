@@ -13,6 +13,8 @@ import { buildTracks, type TracksIndexEntry } from "./tracks-index.js";
 import { CADRE_RUNTIME_VERSION } from "./version.js";
 import { deriveAutonomousReviewCandidate } from "./review-candidate.js";
 import { candidateStateChanges } from "./candidate-state-changes.js";
+import { deriveRevisionCandidate } from "./revision-candidate.js";
+import { validateSpecContent } from "./state.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -48,6 +50,10 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       : input.workflow === "revert" ? "; revert artifact IDs use lowercase letters, digits and hyphens, e.g. reverts/revert-t1-1-execution-before.json for target T1.1"
       : input.workflow === "revise" ? "; revision artifact IDs use lowercase letters, digits and hyphens, e.g. revisions/revision-2.md" : "";
     throw new Error(`Candidate cannot promote ${path}${hint}`);
+  }
+  for (const [path, body] of original) if (/^tracks\/[^/]+\/spec\.md$/.test(path)) {
+    const errors: string[] = []; validateSpecContent(body, path, errors);
+    if (errors.length) throw new Error(errors.join("; "));
   }
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json"));
   if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
@@ -118,6 +124,10 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     if (input.workflow === "review") {
       if (previous?.status !== "ready_for_review") throw new Error("Review remediation requires canonical ready_for_review state; reconcile an interrupted promotion first");
       if (state.status !== "in_progress") throw new Error("Review remediation requires proposed in_progress state; Autonomous derives it from the next-cycle loop snapshot, other modes must stage state.json");
+    }
+    if (input.workflow === "revise" && previous && ["state.json", "spec.md", "plan.md"].some((file) => original.has(`${parent}/${file}`))) {
+      state = deriveRevisionCandidate(root, previous, state, original, overlay, reference,
+        (path) => { const body = readSafeArtifact(root, `.cadre/${path}`); unchanged.set(path, contentHash(body)); return body; });
     }
     const graph = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`), errors: string[] = [];
     validatePlanGraph(`${parent}/plan.md`, graph, state.status, errors);

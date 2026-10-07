@@ -57,6 +57,7 @@ export function validateTrackApprovalPolicy(state: TrackState, errors: string[],
     const loop = autonomousReviewSchema.safeParse(state.autonomousReview);
     if (!loop.success) errors.push(`${state.trackId}: invalid autonomousReview: ${loop.error.message}`);
     else {
+      if (loop.data.specCommit !== state.commits?.spec) errors.push(`${state.trackId}: Autonomous scope reference differs from its approved specification; prepare an explicitly approved revision/refresh repair`);
       if (state.operation?.kind === "review" && state.operation.action !== "review") {
         errors.push(`${state.trackId}: review operation must use action: "review", not a finding disposition`);
       }

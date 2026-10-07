@@ -152,10 +152,10 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
     if (journal.trackId !== input.trackId || journal.executionId !== executionId) throw new Error("execution identity mismatch");
     const differentGraph = journal.graphDigest !== graph.digest || journal.planRevision !== graph.planRevision;
     const historical = differentGraph && ["planned", "in_progress"].includes(state.status)
-      && journal.status === "completed" && state.lastExecution?.executionId === executionId
+      && ["completed", "superseded"].includes(journal.status) && state.lastExecution?.executionId === executionId
       && state.lastExecution.journal === `executions/execution-${executionId}.json`
       && state.lastExecution.graphDigest === journal.graphDigest && state.lastExecution.planRevision === journal.planRevision
-      && state.lastExecution.headCommit === journal.headCommit;
+      && (state.lastExecution.headCommit ?? null) === journal.headCommit;
     if (differentGraph && !historical) errors.push("execution handoffs belong to a different plan graph; reconcile before use");
     for (const node of Object.values(journal.nodes)) {
       if (phases && !phases.has(node.phaseId)) continue;
@@ -166,7 +166,7 @@ function collectContext(input: z.output<typeof contextInputSchema>) {
         note: (historical ? "Historical execution; reassess for the current plan. " : "") + (handoff ? "Persisted evidence, not authorization" : "not recorded"),
         sources: handoff?.sources.map((reference) => ({ ...reference, freshness: sourceFreshness(root, reference, read) })) ?? [] });
       sources.push({ path, sha256: contentHash(body), section: node.id,
-        reason: historical ? "historical handoff from retained completed execution; not current execution state" : "persisted handoff; reconcile journal/Git before resuming", format: "handoff", content });
+        reason: historical ? "historical handoff from retained execution; not current execution state" : "persisted handoff; reconcile journal/Git before resuming", format: "handoff", content });
     }
   }
   const identity = { projectRoot: root, trackId: input.trackId, executionId: executionId ?? null, nodeId: input.nodeId ?? null,

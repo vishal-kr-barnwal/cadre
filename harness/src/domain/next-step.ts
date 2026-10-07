@@ -68,7 +68,16 @@ export function deriveNextStep(projectRoot: string, state: TrackState | undefine
         return step("await_approval", "review", "Revalidate completion evidence with review_complete prepare and obtain explicit approval of its exact proposal.");
       }
     }
-    if (!state.operation && state.status === "in_progress" && loop.checkpoint === "remediating") {
+    if (!state.operation && ["planned", "in_progress"].includes(state.status) && loop.checkpoint === "remediating") {
+      const revision = Array.isArray(state.history) ? state.history.at(-1) as { action?: string; commit?: string } : undefined;
+      if (revision?.action === "revise" && revision.commit?.startsWith("op:")) {
+        try { resolveOperation(projectRoot, revision.commit); }
+        catch (error) {
+          if (error instanceof CadreError && error.code === "COMMIT_PENDING") return blocked("Commit and reconcile the approved revision receipt before starting its execution.");
+          throw error;
+        }
+        return step("invoke_skill", "implement", "Start a new execution for the explicitly approved revision, preserving prior executions.");
+      }
       return step("invoke_skill", "implement", "Start a new execution for the approved remediation graph, preserving prior executions.", prerequisite("review", "review_bookkeeping_commit"));
     }
     return blocked("Reconcile the Autonomous checkpoint, lifecycle, and operation before continuing.");
