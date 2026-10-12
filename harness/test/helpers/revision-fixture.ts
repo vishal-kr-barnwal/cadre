@@ -67,8 +67,8 @@ export function revisedFiles(root: string, state: Record<string, unknown>, produ
     "revisions/revision-2.md": "# Revision 2\n- Previous track revision: 1\n- New track revision: 2\n- Previous spec revision: 1\n- New spec revision: 2\n- Previous plan revision: 1\n- New plan revision: 2\n## Requested change\nAdd second behavior, preserving the first.\n## Approval\nExplicit fixture approval of this exact digest.\n"
   };
 }
-export async function finishCurrent(root: string, call: (name: string, args: Record<string, unknown>) => Promise<Record<string, any>>, executionId: string) {
-  const scope = { projectRoot: root, trackId: "sample", executionId }, journal = readExecution(root, "sample", executionId);
+export async function finishCurrent(root: string, call: (name: string, args: Record<string, unknown>) => Promise<Record<string, any>>, executionId: string, trackId = "sample") {
+  const scope = { projectRoot: root, trackId, executionId }, journal = readExecution(root, trackId, executionId);
   const checkpoint = (nodeId: string, event: string, extra = {}) => call("execution_checkpoint", { scope: { ...scope, nodeId }, action: { event, ...extra } });
   for (const phase of Object.values(journal.nodes).filter((node) => node.kind === "phase" && node.status !== "completed")) {
     if (phase.status === "pending") await checkpoint(phase.id, "start");

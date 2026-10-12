@@ -7,6 +7,7 @@ import { parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
 import type { TrackState } from "./state.js";
 import { isGitAncestor, readGitFileAtCommit } from "./git.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
+import { deriveDraftRevision } from "./draft-revision.js";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -16,7 +17,7 @@ export function deriveRevisionCandidate(root: string, previous: TrackState, prop
   authored: Map<string, string>, overlay: Map<string, string>, reference: string, read: (path: string) => string): TrackState {
   const parent = `tracks/${previous.trackId}`, statePath = `${parent}/state.json`;
   if (!authored.has(statePath)) throw new Error("Revision requires proposed state.json with the next track revision; include it before approval");
-  if (!["planned", "in_progress", "ready_for_review"].includes(previous.status)) throw new Error("Revision requires an approved active baseline");
+  if (!["drafting-plan", "planned", "in_progress", "ready_for_review"].includes(previous.status)) throw new Error("Revision requires an approved active baseline");
   if (proposed.revision !== Number(previous.revision) + 1) throw new Error("Revision must increment the track revision exactly once");
   const revisions = [...authored.keys()].filter((path) => path.startsWith(`${parent}/revisions/`));
   if (revisions.length !== 1) throw new Error("Revision requires exactly one revisions/revision-<id>.md artifact per revised track");
@@ -32,6 +33,7 @@ export function deriveRevisionCandidate(root: string, previous: TrackState, prop
   }
   requireUnchangedAutonomousReview(previous.autonomousReview, proposed.autonomousReview, "Revision");
   if (previous.operation && previous.operation.action !== "implement") throw new Error("Reconcile the pending operation before revising");
+  if (previous.status === "drafting-plan") return deriveDraftRevision(root, previous, proposed, authored, reference, read, record);
   const oldGraph = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`);
   const graph = parsePlanContent(overlay.get(`${parent}/plan.md`) ?? read(`${parent}/plan.md`), `${parent}/plan.md`);
   const graphChanged = graph.digest !== oldGraph.digest;
