@@ -6,6 +6,7 @@ import { archiveReceiptPath, replayCommittedArchive } from "./archive-replay.js"
 import { deriveArchivePromotion, explainArchiveState, type ArchiveStateChanges } from "./archive-promotion.js";
 import { requireCleanAutonomousReview } from "./autonomous-review.js";
 import { inspectStagedMemory } from "./staged-memory.js";
+import type { RecoveryInput } from "./recovery-inputs.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
@@ -473,6 +474,7 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
   digest: string;
   stateChanges: ArchiveStateChanges[];
   promotion: ReturnType<typeof deriveArchivePromotion> | null;
+  recoveryInputs: RecoveryInput[];
 } {
   if (!BATCH_ID.test(input.batchId)) throw new Error("invalid archive batchId");
   if (!SHA.test(input.baseCommit)) throw new Error("baseCommit must be a Git commit SHA");
@@ -628,8 +630,8 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     tracksPath: join(cadreRoot(root), "tracks.md"),
     tracksContent,
     resuming: existingOperation != null,
-    stateChanges, promotion,
-    digest: hash({ current, input, initialOperation, operation, moves: moves.map(({ trackId, state, needsMove }) => ({ trackId, state, needsMove })), updates, tracksContent })
+    stateChanges, promotion, recoveryInputs: memory.inputs.map(({ path, sha256 }) => ({ path: `.cadre/${path}`, sha256 })),
+    digest: hash({ current, input, memoryInputs: memory.inputs, initialOperation, operation, moves: moves.map(({ trackId, state, needsMove }) => ({ trackId, state, needsMove })), updates, tracksContent })
   };
 }
 
@@ -657,7 +659,7 @@ function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposal
     }
     for (const update of proposal.writes) files.push({ path: `.cadre/${update.path}`, content: update.content });
     files.push({ path: ".cadre/project.json", content: json(archivedProject) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
-    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit }, files);
+    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit, inputs: proposal.recoveryInputs }, files);
     return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
   }
   const currentOperation = existsSync(proposal.operationPath)

@@ -1,4 +1,5 @@
 import { readGitBlobs } from "./git.js";
+import { recordedRecoveryInputs, mergeRecoveryInputs, type RecoveryInput } from "./recovery-inputs.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -21,7 +22,8 @@ export const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), opera
   artifacts: z.array(z.strictObject({ path: z.string(), sha256: digest.nullable() })).min(1) });
 export type OperationReceipt = z.infer<typeof receiptSchema>;
 export interface ReceiptFile { path: string; content: string | null }
-const recoverySchema = z.strictObject({ receipt: receiptSchema, files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
+export type OperationPromotionInput = Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts"> & { inputs?: RecoveryInput[] };
+const recoverySchema = z.strictObject({ receipt: receiptSchema, inputs: z.array(z.strictObject({ path: z.string(), sha256: digest })).optional(), files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
 type Recovery = z.infer<typeof recoverySchema>;
 function parseRecovery(body: string): Recovery {
   const recovery = recoverySchema.parse(JSON.parse(body));
@@ -45,13 +47,18 @@ function target(root: string, path: string): string {
   let current = root;
   for (const part of relative(root, absolute).split("/")) {
     current = join(current, part);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${path}`);
+    try { if (lstatSync(current).isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${path}`); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
   return absolute;
 }
 function currentHash(root: string, path: string): string | null {
   const absolute = target(root, path);
   return existsSync(absolute) ? receiptHash(readFileSync(absolute, "utf8")) : null;
+}
+function requireUnchangedInputs(root: string, inputs: Array<{ path: string; sha256: string }>): void {
+  const paths = inputs.filter((input) => currentHash(root, input.path) !== input.sha256).map((input) => input.path);
+  if (paths.length) throw new CadreError("OPERATION_INPUT_DRIFT", "Required inputs changed after approval; preserve the pending operation and reassess before resuming", { paths });
 }
 function write(root: string, file: ReceiptFile): void {
   const path = target(root, file.path);
@@ -73,17 +80,24 @@ function write(root: string, file: ReceiptFile): void {
 }
 
 /** No Git writes. Persist intent first; repeat promotion safely after interruption. */
-export function promoteOperation(rootInput: string, input: Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts">,
+export function promoteOperation(rootInput: string, input: OperationPromotionInput,
   files: ReceiptFile[], afterWrite?: (path: string) => void) {
   const root = safeProjectRoot(rootInput);
   if (new Set(files.map((file) => file.path)).size !== files.length) throw new Error("Duplicate operation artifacts");
   if (files.some((file) => /^\.cadre\/(?:stage|receipts|\.worktrees|wisps)\//.test(file.path))) throw new Error("Operation cannot promote temporary state or overwrite receipts");
-  const receipt = receiptSchema.parse({ ...input, schemaVersion: 1, status: "completed", artifacts: files.map((file) => ({ path: file.path, sha256: file.content === null ? null : receiptHash(file.content) })).sort((a, b) => a.path.localeCompare(b.path)) });
+  const recoveryFile = target(root, recoveryPath(input.operationId));
+  const stored = existsSync(recoveryFile) ? parseRecovery(readFileSync(recoveryFile, "utf8")) : null;
+  const recorded = recordedRecoveryInputs(files);
+  const inputs = input.inputs !== undefined ? mergeRecoveryInputs(files, [...input.inputs, ...recorded])
+    : stored ? stored.inputs : recorded;
+  const {inputs: _inputs, ...receiptInput} = input;
+  const receipt = receiptSchema.parse({ ...receiptInput, schemaVersion: 1, status: "completed", artifacts: files.map((file) => ({ path: file.path, sha256: file.content === null ? null : receiptHash(file.content) })).sort((a, b) => a.path.localeCompare(b.path)) });
   const receiptBody = json(receipt), path = recoveryPath(input.operationId);
   let recovery: Recovery;
   if (existsSync(target(root, path))) {
     recovery = parseRecovery(readFileSync(target(root, path), "utf8"));
     if (json(recovery.receipt) !== receiptBody || json(recovery.files.map(({ before: _before, ...file }) => file)) !== json(files)) throw new Error("Pending operation differs from approved promotion");
+    if (input.inputs !== undefined && json(inputs) !== json(recovery.inputs ?? recorded)) throw new Error("Pending operation inputs differ from approved promotion");
     try {
       const committed = reconcileOperation(root, input.operationId);
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
@@ -94,10 +108,12 @@ export function promoteOperation(rootInput: string, input: Omit<OperationReceipt
       if (readFileSync(target(root, receiptPath(input.operationId)), "utf8") !== receiptBody) throw new Error("Operation ID is already used by a different receipt");
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
     }
-    recovery = { receipt, files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
+    requireUnchangedInputs(root, inputs ?? recorded);
+    recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
     write(root, { path, content: json(recovery) });
     afterWrite?.(path);
   }
+  requireUnchangedInputs(root, recovery.inputs ?? recordedRecoveryInputs(recovery.files));
   for (const file of recovery.files) {
     const actual = currentHash(root, file.path), expected = file.content === null ? null : receiptHash(file.content);
     if (actual !== file.before && actual !== expected) throw new CadreError("OPERATION_PROMOTION_DRIFT", "An artifact changed during operation recovery", { path: file.path });
@@ -214,7 +230,7 @@ export function resumeOperation(root: string, id: string, approvalDigest: string
   const recovery = parseRecovery(readFileSync(target(safeProjectRoot(root), recoveryPath(id)), "utf8"));
   const receipt = receiptSchema.parse(recovery.receipt);
   if (receipt.operationId !== id || receipt.approvalDigest !== approvalDigest) throw new Error("Recovery must match the persisted approved operation");
-  return promoteOperation(root, receipt, recovery.files.map(({ before: _before, ...file }) => file));
+  return promoteOperation(root, {...receipt, ...(recovery.inputs !== undefined ? {inputs: recovery.inputs} : {})}, recovery.files.map(({ before: _before, ...file }) => file));
 }
 
 /** Read-only recovery gate, including a crash before any canonical state was promoted. */

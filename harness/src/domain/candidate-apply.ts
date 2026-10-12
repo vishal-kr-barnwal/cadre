@@ -62,6 +62,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
   const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort()])).slice(0, 32)}`;
   const reference = operationRef(operationId), overlay = new Map(original), unchanged = new Map<string, string>();
+  unchanged.set("project.json", contentHash(readSafeArtifact(root, ".cadre/project.json")));
   const read = (path: string): string => {
     if (overlay.has(path)) return overlay.get(path)!;
     const body = readSafeArtifact(root, `.cadre/${path}`); unchanged.set(path, contentHash(body)); return body;
@@ -76,6 +77,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       if (previous.operation?.action === "implement") {
         const path = `tracks/${entry.name}/${previous.operation.journal}`;
         const journal = JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) as ExecutionJournal;
+        unchanged.set(path, contentHash(readSafeArtifact(root, `.cadre/${path}`)));
         requireQuiescentExecution(root, journal);
         if (overlay.has(path)) {
           const proposed = JSON.parse(overlay.get(path)!);
@@ -174,7 +176,10 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     path: `.cadre/${path}`,
     changes: candidateStateChanges(JSON.parse(original.get(path) ?? readSafeArtifact(root, `.cadre/${path}`)), JSON.parse(content))
   })).filter((item) => item.changes.length);
-  return { operationId, baseCommit, files: promoted, manifest, digest, memory, stateChanges, validation: { valid: true as const, errors: [] as string[] } };
+  const inputs = new Map([...unchanged, ...memory.inputs.map(({ path, sha256 }) => [path, sha256] as const)]);
+  const recoveryInputs = [...inputs].filter(([path]) => !overlay.has(path)).sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, sha256]) => ({ path: `.cadre/${path}`, sha256 }));
+  return { operationId, baseCommit, files: promoted, manifest, digest, memory, stateChanges, recoveryInputs, validation: { valid: true as const, errors: [] as string[] } };
 }
 
 export function applyCandidate(input: CandidateApplyInput, digest: string) {
@@ -182,6 +187,6 @@ export function applyCandidate(input: CandidateApplyInput, digest: string) {
   if (committed) return { ...committed, changedPaths: [], changedCount: 0, validation: { valid: true, errors: [] } };
   const preview = previewCandidateApply(input);
   if (preview.digest !== digest) throw new Error("Candidate or required context changed after approval; reassess and preview again");
-  return { ...promoteOperation(input.projectRoot, { operationId: preview.operationId, kind: input.workflow, approvalDigest: digest, baseCommit: preview.baseCommit }, preview.files),
+  return { ...promoteOperation(input.projectRoot, { operationId: preview.operationId, kind: input.workflow, approvalDigest: digest, baseCommit: preview.baseCommit, inputs: preview.recoveryInputs }, preview.files),
     changedPaths: preview.files.map((file) => file.path), changedCount: preview.files.length, validation: preview.validation };
 }
