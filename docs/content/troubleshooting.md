@@ -104,6 +104,45 @@ product HEAD and approval evidence. Replaying a committed operation should
 return the original receipt with zero changes. Do not reset the repository or
 create a new receipt merely to record the previous commit's SHA.
 
+## Autonomous Stops After A Revision
+
+A committed revision record and a reconciled receipt do not prove that the
+approved manifest included the matching state and execution transition.
+Compare the record's revision numbers, canonical state, spec/plan references,
+Autonomous scope reference, and the original receipt manifest. Reconcile that
+receipt once; repeated reconciliation cannot supply missing approved fields.
+Preserve the journals and Git evidence and prepare an explicitly approved
+revise/refresh repair. Do not clear the operation, rewrite the journal graph,
+or change Autonomous authority by hand. Keep the old revision record immutable
+and use a fresh repair artifact. If the active journal and canonical graph
+differ, the repair must name the journal's original graph digest and reachable
+plan commit under `Recovery evidence`; the runtime verifies that committed
+baseline before proposing supersession.
+
+Cadre 3.9.2 requires the complete revision state and record before approval. At a safe
+boundary it includes the old execution as superseded history and starts a new
+execution for the revised graph, retaining modes and completed work. This
+behavior fixes the active-revision gap in 3.9.1. Update both the global CLI and
+installed integrations, then start a fresh client session. An already broken
+track still requires the explicitly approved repair described above.
+
+## Revise Or Refresh Stops After Worker Cleanup
+
+Completed journals retain worker branch names and paths, including provenance
+carried into later executions. Cadre 3.9.2 checks registered worktrees, remaining
+directories, and actual Git branches instead of treating those historical strings
+as active workers. Finish supported cleanup of integrated workers before preparing
+a revision or refresh; preserve the journal evidence. A remaining worker branch,
+orphaned directory, or unsafe symlink still blocks promotion.
+
+A v5 refresh that changes active scope must include one fresh revision record per
+affected track, proposed state with the next track revision, a reassessed plan,
+and synchronized learning/dependency context. Keep authored execution and
+Autonomous authority fields unchanged; the runtime previews their resulting
+transition within the same approval. Context-only refresh retains counters and
+current scope authority. Complete legacy contract/policy migration first, then
+prepare a separate v5 scope proposal if needed.
+
 ## Plan Graph Validation Fails
 
 Check that:

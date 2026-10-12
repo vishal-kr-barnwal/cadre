@@ -132,9 +132,11 @@ cadre-ai install
 Use `--replace-marketplace` only when a marketplace already named `cadre`
 points at a different location that you have reviewed and intend to replace.
 
-Cadre 3.9.1 accepts existing 3.9.0/v5 projects without a refresh or state
-migration. Start a new client session after installation. An interrupted track
-may still need its existing receipt reconciled before continuation. Older
+Cadre 3.9.2 accepts existing 3.9.0/3.9.1 projects using v5 without a refresh
+or state migration. Start a new client session after installation. An interrupted track
+may still need its existing receipt reconciled before continuation. A track
+left inconsistent by an older partial revision requires an explicitly approved
+repair; installation does not rewrite its state or original receipt. Older
 runtime/template contracts retain their approved refresh requirements.
 
 ## Uninstall

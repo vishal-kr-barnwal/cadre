@@ -1,5 +1,5 @@
-export const CADRE_RUNTIME_VERSION = "3.9.1";
-export const COMPATIBLE_RUNTIME_VERSIONS = ["3.9.0"] as const;
+export const CADRE_RUNTIME_VERSION = "3.9.2";
+export const COMPATIBLE_RUNTIME_VERSIONS = ["3.9.0", "3.9.1"] as const;
 
 /** Patch upgrades retain the existing project contract without an approved refresh. */
 export function isCompatibleRuntimeVersion(version: unknown): boolean {

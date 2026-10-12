@@ -85,6 +85,19 @@ of a committed approval returns the original verified receipt with
 Stale dependency context errors expose `expectedGraphHash` and `expectedSources`
 so the agent can read the required sources and reassess the candidate.
 
+Cadre 3.9.2 revision promotion requires proposed state, a matching revision record,
+and reassessed spec/plan/learning/dependency context before approval. Its preview
+includes an active old journal's superseded disposition and the resulting
+Autonomous scope reference. Reconciliation preserves the approved receipt; it
+does not synthesize omitted state. Use `candidate_apply` prepare for this v5
+transition rather than legacy `candidate_inspect` against the old binding.
+The same derivation applies to active scope cascades in `workflow: "refresh"`,
+including fresh per-track revision records in its exact manifest. Context-only
+refresh preserves current execution and scope authority. Quiescence checks use
+actual worker worktrees, paths, and branches while retaining cleaned historical
+provenance. Record-only revision proposals and inconsistent counters fail before
+promotion. Legacy contract/policy migration precedes a later v5 scope revision.
+
 ## diagnostic_read
 
 Explicit full diagnostic access after a bounded error: `diagnosticId`, optional `offset` (default 0) and `maxBytes` (default 49152, 1024–65536). Consume `nextOffset` until null. Ordinary runtime errors are capped at 8 KiB including the serialized MCP envelope; the full process-local diagnostic is available for 30 minutes subject to bounded eviction.

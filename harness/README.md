@@ -1,6 +1,6 @@
 # Cadre
 
-**Cadre 3.9.1** fixes implementation/review bookkeeping loops, makes committed operation retries idempotent, and improves approval previews and recovery guidance. Codex, Claude Code, and native Zed Agent are stable integrations. Existing 3.9.0/v5 projects continue without a project refresh or state migration. Track remains the default approval mode; Parallel remains the default scheduling mode. Older project formats retain their approved refresh path and historical evidence.
+**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work and original receipts remain preserved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. All three integrations are stable as of Cadre 3.9.1.
@@ -431,7 +431,7 @@ pnpm --filter cadre-ai validate
 
 ### Memory format upgrade
 
-The current source uses template set v4 and requires an approved refresh of older projects before delivery. It preserves v1/v2/v3 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+The current source uses template set v5. Existing 3.9.0/3.9.1 projects using v5 need no routine project refresh for this patch; older template contracts require an approved refresh before delivery. It preserves v1/v2/v3/v4 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
 
 Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.
 

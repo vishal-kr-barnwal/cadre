@@ -17,7 +17,7 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-**Cadre 3.9.1** fixes implementation/review bookkeeping loops, makes committed operation retries idempotent, and improves approval previews and recovery guidance. Codex, Claude Code, and native Zed Agent are stable integrations. Existing 3.9.0/v5 projects continue without a project refresh or state migration. Track remains the default approval mode; Parallel remains the default scheduling mode. Older project formats retain their approved refresh path and historical evidence.
+**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work and original receipts remain preserved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
 
 
 ## What Cadre Provides

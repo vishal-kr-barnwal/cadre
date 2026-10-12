@@ -25,7 +25,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createCadreServer } from "../src/mcp/server.js";
 import { describeTemplate, getTemplate } from "../src/domain/templates.js";
 import { renderTracksWithState } from "../src/domain/tracks-index.js";
-import { isCompatibleRuntimeVersion } from "../src/domain/version.js";
+import { CADRE_RUNTIME_VERSION, isCompatibleRuntimeVersion } from "../src/domain/version.js";
 
 const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
 function write(root: string, path: string, body: string) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), body); }
@@ -55,19 +55,19 @@ function plan(grouped = false) {
   return `# Plan\n- Spec revision: 1\n- Plan revision: 1\n## Phase 1: Deliver\n- Phase dependencies: none\n- [ ] T1.1 First behavior\n  - Task dependencies: none\n  - Commit group: behavior\n${grouped ? "- [ ] T1.2 Second behavior\n  - Task dependencies: T1.1\n  - Commit group: behavior\n" : ""}- [ ] T1.${grouped ? 3 : 2} User Manual Verification\n- Phase completion commit: pending\n## Phase 2: Track-level User Manual Verification\n- [ ] T2.1 User Manual Verification\n- Phase completion commit: pending\n`;
 }
 
-test("3.9.0 projects continue through the patch upgrade without refresh or project mutation", async (t) => {
+for (const runtimeVersion of ["3.9.0", "3.9.1"]) test(`${runtimeVersion} projects continue through the patch upgrade without refresh or project mutation`, async (t) => {
   const root = fixture(t); initialize(root);
   const projectPath = join(root, ".cadre/project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  project.runtimeVersion = "3.9.0";
+  project.runtimeVersion = runtimeVersion;
   write(root, ".cadre/project.json", json(project));
-  git(root, "add", ".cadre/project.json"); git(root, "commit", "-m", "fixture: existing 3.9.0 project");
+  git(root, "add", ".cadre/project.json"); git(root, "commit", "-m", `fixture: existing ${runtimeVersion} project`);
   track(root);
   const before = readFileSync(projectPath, "utf8"), validation = validateProject(root);
   assert.deepEqual(validation.errors, []);
   assert.ok(!validation.warnings.some((warning) => warning.startsWith("PROJECT_REFRESH_REQUIRED:")));
-  assert.equal(isCompatibleRuntimeVersion("3.9.1"), true);
-  for (const version of ["3.8.0", "3.9.2", "3.9.0+unapproved", undefined]) assert.equal(isCompatibleRuntimeVersion(version), false);
+  assert.equal(isCompatibleRuntimeVersion(CADRE_RUNTIME_VERSION), true);
+  for (const version of ["3.8.0", "3.9.3", "3.9.0+unapproved", undefined]) assert.equal(isCompatibleRuntimeVersion(version), false);
   const server = createCadreServer(), client = new Client({ name: "codex", version: "1.0.0" });
   const [ct, st] = InMemoryTransport.createLinkedPair(); await server.connect(st); await client.connect(ct);
   t.after(async () => { await client.close(); await server.close(); });

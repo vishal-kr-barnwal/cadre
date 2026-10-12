@@ -2518,7 +2518,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal((legacyStatus.structuredContent as { upgradeRequired?: boolean }).upgradeRequired, true);
     assert.equal(
       (legacyStatus.structuredContent as { targetRuntimeVersion?: string }).targetRuntimeVersion,
-      "3.9.1"
+      CADRE_RUNTIME_VERSION
     );
     const rejectedLegacyMutation = await client.callTool({
       name: "execution_start",
@@ -2528,7 +2528,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     const visibleLegacyError = agentVisibleResult(rejectedLegacyMutation) as {
       error?: { details?: Record<string, unknown> };
     };
-    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, "3.9.1");
+    assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, CADRE_RUNTIME_VERSION);
     assert.equal(
       (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
       "PROJECT_REFRESH_REQUIRED"

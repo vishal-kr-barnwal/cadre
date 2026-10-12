@@ -82,4 +82,3 @@ export async function finishCurrent(root: string, call: (name: string, args: Rec
   }
   commit(root, (await call("execution_finish", scope)).receipt);
 }
-
