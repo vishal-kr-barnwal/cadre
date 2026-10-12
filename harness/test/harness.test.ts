@@ -1075,12 +1075,23 @@ test("clean review completion previews and applies its exact state and derived i
   const projectRoot = fixture();
   const trackRoot = writeFinalizedTrack(projectRoot, "reviewed-track", "ready_for_review");
   runState(projectRoot, "render");
+  execFileSync("git", ["init", "-b", "main"], {cwd: projectRoot});
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
+  gitText(projectRoot, ["add", ".cadre"]); gitText(projectRoot, ["commit", "-m", "fixture: approved review scope"]);
+  const reviewedHead = gitText(projectRoot, ["rev-parse", "HEAD"]);
+  for (const path of [join(trackRoot, "plan.md"), join(trackRoot, "state.json"),
+    join(trackRoot, "executions/execution-reviewed-track-execution.json"), join(projectRoot, ".cadre/project.json")]) {
+    writeFileSync(path, readFileSync(path, "utf8").replace(/1111111|aaaaaaa|bbbbbbb|ccccccc|abcdef[123]/g, reviewedHead));
+  }
+  gitText(projectRoot, ["add", ".cadre"]); gitText(projectRoot, ["commit", "-m", "fixture: reachable review bookkeeping"]);
   const input = {
     projectRoot,
     trackId: "reviewed-track",
     reviewedAt: "2026-07-28T02:00:00.000Z",
-    reviewedHead: "ccccccc",
-    commitRange: "bbbbbbb..ccccccc",
+    reviewedHead,
+    commitRange: `${reviewedHead}..${reviewedHead}`,
     approval: "Human rejected F1 and approved clean completion with the risk accepted.",
     acceptedRisks: ["F1: accepted bounded compatibility risk"]
   };
@@ -1111,6 +1122,8 @@ test("clean review completion previews and applies its exact state and derived i
 
 test("clean review derives its range from the completed execution base", () => {
   const projectRoot = fixture();
+  const trackId = "derived-review-range";
+  const trackRoot = writeFinalizedTrack(projectRoot, trackId, "ready_for_review");
   execFileSync("git", ["init", "-b", "main"], { cwd: projectRoot });
   gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
   gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
@@ -1125,8 +1138,7 @@ test("clean review derives its range from the completed execution base", () => {
     gitText(projectRoot, ["commit", "-m", `feat: ${value}`]);
     commits.push(gitText(projectRoot, ["rev-parse", "HEAD"]));
   }
-  const trackId = "derived-review-range";
-  const trackRoot = writeFinalizedTrack(projectRoot, trackId, "ready_for_review");
+
   const replacements = new Map([
     ["1111111", base], ["aaaaaaa", base], ["bbbbbbb", base], ["abcdef1", commits[0]!],
     ["abcdef2", commits[1]!], ["abcdef3", commits[2]!], ["ccccccc", commits[2]!]
@@ -2572,6 +2584,8 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     })}`);
 
     const reviewRoot = fixture();
+    const reviewTrackId = "mcp-review-complete";
+    const reviewTrackRoot = writeFinalizedTrack(reviewRoot, reviewTrackId, "ready_for_review");
     execFileSync("git", ["init", "-b", "main"], { cwd: reviewRoot });
     gitText(reviewRoot, ["config", "user.name", "Cadre Test"]);
     gitText(reviewRoot, ["config", "user.email", "cadre@example.test"]);
@@ -2586,8 +2600,6 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       gitText(reviewRoot, ["commit", "-m", `feat: ${value}`]);
       reviewCommits.push(gitText(reviewRoot, ["rev-parse", "HEAD"]));
     }
-    const reviewTrackId = "mcp-review-complete";
-    const reviewTrackRoot = writeFinalizedTrack(reviewRoot, reviewTrackId, "ready_for_review");
     const reviewReplacements = new Map([
       ["1111111", reviewBase], ["aaaaaaa", reviewBase], ["bbbbbbb", reviewBase],
       ["abcdef1", reviewCommits[0]!], ["abcdef2", reviewCommits[1]!],

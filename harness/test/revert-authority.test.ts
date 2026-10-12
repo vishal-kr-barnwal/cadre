@@ -7,8 +7,8 @@ import { validateProject } from "../src/domain/state.js";
 import { reviewAndArchive } from "./helpers/complete-fixture.js";
 import { fixture, read, write, json, git, commit, finishCurrent } from "./helpers/revision-fixture.js";
 
-for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMode of ["sequential", "parallel"]) {
-  test(`additive revert preserves review authority: ${clientName}/${requestedMode}`, async (t) => {
+for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMode of ["sequential", "parallel"]) for (const targetKind of ["task", "phase", "track"]) {
+  test(`additive revert preserves review authority: ${clientName}/${requestedMode}/${targetKind}`, async (t) => {
     const f = await fixture(t, clientName), {root, call, load} = f;
     await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode});
     const state = load(), id = state.operation.executionId, base = state.autonomousReview.initialBaseCommit;
@@ -22,7 +22,9 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
     const original = load(), path = original.operation.journal, before = read(root, `.cadre/tracks/sample/${path}`), journal = readExecution(root, "sample", id);
     const reset = structuredClone(journal);
     Object.assign(reset.nodes["T1.1"]!, {status: "pending", workerCommit: null, mergeCommit: null, verification: null, approval: null, blocker: null});
-    reset.checkpoint = "reverted:T1.1";
+    const targetId = targetKind === "task" ? "T1.1" : targetKind === "phase" ? "P1" : "sample";
+    if (targetKind !== "task") reset.nodes.P1!.status = "pending";
+    reset.checkpoint = `reverted:${targetId}`;
     const files: Record<string, string> = {"state.json": json(original), [path]: json(reset),
       "reverts/revert-task-execution-before.json": before, "reverts/revert-task.md": "# Approved additive reversal\nTarget T1.1; retain the original journal and scope.\n"};
     const stage = () => {
@@ -32,7 +34,7 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
     };
     assert.throws(() => previewCandidateApply(stage()), /persisted approved reversal/);
     const inspected = await call("candidate_inspect", {projectRoot: root, candidateId: "revert-sample", files: Object.keys(files)});
-    const operation = {action: "revert", checkpoint: "approved", targetKind: "task", targetId: "T1.1", baseCommit: product,
+    const operation = {action: "revert", checkpoint: "approved", targetKind, targetId, baseCommit: product,
       expectedCommit: "cadre(revert): reconcile sample", commits: [product], revertCommits: [] as string[],
       originalExecutionPath: "reverts/revert-task-execution-before.json", approvedArtifacts: Object.keys(files),
       approvedArtifactHashes: inspected.manifest, artifactProgress: [], approvalDigest: inspected.digest, approvedAt: new Date().toISOString()};
@@ -50,6 +52,14 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
       assert.equal(load().autonomousReview.initialBaseCommit, base);
     }
     files["state.json"] = json(original);
+    if (clientName === "codex" && requestedMode === "sequential" && targetKind === "track") {
+      const blocked = {...original.autonomousReview, checkpoint: "blocked", blocker: "Retain external prerequisite"};
+      write(root, ".cadre/tracks/sample/state.json", json({...temporary, operation, autonomousReview: blocked}));
+      files["state.json"] = json({...original, autonomousReview: blocked});
+      const blockedPreview = previewCandidateApply(stage());
+      assert.equal(JSON.parse(blockedPreview.files.find((file) => file.path === ".cadre/tracks/sample/state.json")!.content!).autonomousReview.checkpoint, "blocked");
+      write(root, ".cadre/tracks/sample/state.json", json({...temporary, operation})); files["state.json"] = json(original);
+    }
     const record = files["reverts/revert-task.json"]!;
     files["reverts/revert-task.json"] = json({...operation, revertCommits: [product], reconciliationCommit: null});
     assert.throws(() => previewCandidateApply(stage()), /exact durable reversal record/); files["reverts/revert-task.json"] = record;
