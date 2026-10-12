@@ -97,6 +97,12 @@ refresh preserves current execution and scope authority. Quiescence checks use
 actual worker worktrees, paths, and branches while retaining cleaned historical
 provenance. Record-only revision proposals and inconsistent counters fail before
 promotion. Legacy contract/policy migration precedes a later v5 scope revision.
+Context refresh preserves the complete existing Autonomous loop and approval
+policy. Imported `drafting-plan` specification revisions retain the previous spec
+approval and leave the draft plan unapproved. Pending resume checks fingerprints
+of approved unchanged inputs before further writes; `OPERATION_INPUT_DRIFT`
+identifies changed paths and retains the original intent. These fingerprints are
+temporary recovery metadata; published receipt formats are unchanged.
 
 ## diagnostic_read
 

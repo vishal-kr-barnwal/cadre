@@ -143,6 +143,38 @@ transition within the same approval. Context-only refresh retains counters and
 current scope authority. Complete legacy contract/policy migration first, then
 prepare a separate v5 scope proposal if needed.
 
+## Resume Reports OPERATION_INPUT_DRIFT
+
+The pending operation's unchanged pattern, dependency or context inputs differ
+from the exact approved fingerprints. Resume stops before further promotion and
+keeps its original journal and approval. Preserve the changed files and inspect
+the reported paths. Deliberately restore the approved inputs, or obtain an exact
+repair approval; do not replace the journal, change its hashes, or repeat product
+work. A committed operation still replays without changes after later guidance
+updates. Recovery fingerprints live in temporary state; published receipts remain
+unchanged. Older pending receipts check fingerprints retained in proposed artifacts.
+
+## Refresh Rejects Authored Autonomous Authority
+
+Context refresh retains the entire original loop: authorization, cumulative
+review baseline, findings, recorded attempts and blockers. Keep these fields
+unchanged in staged state. Use the review/revision procedures for their permitted
+lifecycle changes, and the explicit legacy policy migration for an old execution's
+first Autonomous authority. Changing context is not permission to shorten the
+review range or remove a finding attempt.
+
+## Revising An Imported Draft Specification
+
+An imported track at `drafting-plan` can revise its already approved specification
+without approving the unfinished plan. Include next track/spec/draft-plan counters,
+a fresh revision record, and reassessed plan/learning/dependency context. Preserve
+authored commit references and keep status `drafting-plan`; the runtime records the
+old specification approval and leaves `commits.plan` null. The approved baseline
+comes from the reachable specification commit, even when requested edits are
+already present on disk. An initial draft that
+has no plan uses previous plan revision 0. Resume track planning and obtain plan
+approval before implementation. Draft-plan-only edits remain in the track flow.
+
 ## Plan Graph Validation Fails
 
 Check that:

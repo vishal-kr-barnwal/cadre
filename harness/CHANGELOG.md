@@ -14,6 +14,9 @@ Cadre 3.9.2 fixes an active-revision bug in 3.9.1 that could strand a revised tr
 - Treat removed worker worktrees and branches as historical provenance, including paths inherited from earlier executions. Revise and refresh check actual Git/filesystem activity, retain completed evidence, and still reject live workers, orphaned paths, retained branches, and unsafe symlinks.
 - Support active scope cascades within one v5 refresh approval. Each affected track supplies a fresh revision record, synchronized counters, and reassessed learning/dependency context; the runtime derives journal supersession and renewed Autonomous scope authority. Context-only refresh keeps the journal and scope references stable, including identical copied spec/plan files.
 - Reject standalone revision-record promotions and records that disagree with canonical spec/plan counters. Reject counter-only context refreshes while retaining learning-only dependent reseeding.
+- Preserve the complete original Autonomous authority during context refresh, including its cumulative review baseline, finding attempts and blockers. Reject authored authority/policy rewrites before mutation; verify explicitly created legacy migration authority against its original execution.
+- Persist approved unchanged-input fingerprints in the temporary recovery journal. Resume rejects changed pattern, dependency and context inputs before any remaining writes, preserves dirty files and pending intent, and retains zero-change committed replay. Published receipt formats remain unchanged; older pending receipts check fingerprints retained in their proposed artifacts.
+- Support approved-spec revisions in imported `drafting-plan` tracks after refresh. Retain prior spec approval, keep the draft plan unapproved, and return to track planning before implementation. Initial drafts without a plan use explicit previous plan revision 0.
 
 ### Repairing an already stuck track
 
@@ -21,7 +24,7 @@ Updating the runtime prevents the faulty transition; it does **not** silently re
 
 ### Validation
 
-On 2026-10-12, the full harness suite passed 170 tests; a final added multi-track refresh regression passed separately (171 distinct maintained tests checked). New worker recovery coverage completes 24 lifecycle cases across Codex/Claude/Zed MCP formats and all eight approval/scheduling combinations. Two additional external matrices passed 48 cases, ending with 72 archived tracks and covering Git revert/reimplementation, terminal successors, findings remediation, refresh, and committed replay. Type, package, packaging, and documentation checks pass. These are synthetic runtime fixtures with explicit test approvals; they do not claim native model-driven coverage of every combination. Final patched-payload installation and activation checks remain required before publication.
+On 2026-10-12, all 216 maintained harness tests passed, including 45 new regressions for authority preservation, interrupted input drift, and imported draft-spec revision. Fresh external checks passed 24 two-worker cases and 96 approval-mode transitions (78 completed/archived, 18 expected pre-execution gates), across three MCP client formats and both scheduling requests. Packaged stdio server proofs reject the former authority/recovery defects and preserve cumulative review and unapproved draft-plan state. Prior lifecycle/remediation matrices cover Git revert/reimplementation, terminal successors, refresh, and committed replay. Type, package, packaging, and documentation checks pass. These are disposable runtime fixtures with explicit test approvals; exhaustive native AI-session coverage is not claimed. Final patched-payload installation and activation remain publication gates.
 
 ### Upgrade
 

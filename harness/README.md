@@ -1,6 +1,6 @@
 # Cadre
 
-**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work and original receipts remain preserved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
+**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work, cumulative review authority and original receipts remain preserved. Resume rejects changed approval inputs, and imported draft-spec revisions leave the plan unapproved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. All three integrations are stable as of Cadre 3.9.1.

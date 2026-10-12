@@ -1,7 +1,7 @@
 # Cadre 3.9.2 candidate verification
 
 Verification on 2026-10-12 covers the active-revision fix and three additional
-recovery defects found during lifecycle testing. This is a candidate verification
+recovery defects found during lifecycle testing, plus the subsequent authority, interrupted-input and imported-draft fixes. This is a candidate verification
 record. Publication and fresh native installer checks for the final patched
 payload remain pending.
 
@@ -31,11 +31,19 @@ schema-2 state and template set v5 remain unchanged.
 
 ## Maintained tests and package checks
 
-The complete harness run passed **170/170 tests**, with no failures or skips. One
-subsequently added multi-track atomic refresh regression passed separately, for
-**171 distinct maintained tests checked**. Type checking also includes that new
-test. The recovery suite adds 37 cases, including 24 complete worker lifecycle
-cases, eight record-only rejection cases, and five boundary/cascade regressions.
+The final complete harness run passed **216/216 tests**, with no failures or skips.
+The original recovery suite adds 37 cases. Subsequent extended verification adds
+45 maintained cases: eight authority tests, 27 interrupted-recovery tests and ten
+imported-draft tests. These cover both supported legacy migration and rejection of
+unapproved authority rewrites, four promotion interruption boundaries, dirty-file
+preservation, old pending receipt identity, committed replay after later guidance
+changes, and draft revision through planning, delivery, review and archive.
+
+One existing negative test needed its expected diagnostic updated because the new
+authority guard rejects its invalid operation earlier. The final full run includes
+that corrected assertion and all new cases. A subsequent authority regression run
+also passed 8/8 cases with the final comparison allowing JSON key reordering while
+retaining exact field values, finding arrays and approval policy.
 
 Checks passed:
 
@@ -43,8 +51,6 @@ Checks passed:
 pnpm install --frozen-lockfile
 pnpm --filter cadre-ai check
 pnpm --filter cadre-ai test
-# Final added regression, from harness/:
-node --import tsx --test --test-name-pattern='multi-track' test/candidate-recovery.test.ts
 pnpm --filter cadre-ai validate
 pnpm --filter cadre-ai pack --dry-run
 pnpm --filter cadre-docs check
@@ -82,6 +88,39 @@ results are stored under `~/.codex/tmp/cadre-fixes-20261012/` on the verificatio
 host. Earlier failing runs exposed a too-narrow inherited-worker path check and
 fixture expectation errors; the final corrected checks above passed. No additional
 unresolved product failure was found in this covered matrix.
+
+## Additional fixed boundaries and fresh retesting
+
+- Context refresh preserves the complete existing Autonomous loop and approval
+  policy. It cannot shorten the original cumulative review range, replace its
+  authorization, erase finding attempts, or bypass a blocker. Creation of an absent
+  loop during explicit legacy migration is checked against the original execution.
+- Pending recovery stores the approved unchanged-input fingerprints in its ignored
+  journal. Changed patterns, dependency sources or consumed context stop further
+  writes with `OPERATION_INPUT_DRIFT`. The journal and dirty files are retained;
+  restoration of approved inputs is deliberate. Original immutable receipt formats
+  remain unchanged. Older pending receipts check fingerprints retained in proposed
+  artifacts, and committed replay remains independent of later source changes.
+- Imported `drafting-plan` tracks can revise their approved specification, retain its
+  original approval in history, and keep the plan unapproved. Initial drafts with no
+  plan use explicit previous plan revision 0. Track planning approves the final
+  baseline before execution.
+
+Fresh additional matrices passed **24/24 two-worker scenarios** and **96/96 explicit
+approval-mode transition checks**. The latter contains 78 reviewed/archived results
+and 18 expected pre-execution blocks for leaving Autonomous without an approved
+policy transition; these blocks are correct safety behavior. The two matrices
+ended with 102 archived tracks and no unexpected errors. Governed parallel tests
+reject stale integration approval and live remaining workers still block refresh.
+
+Two packaged stdio server scenarios cover all three new fixes. The former review
+baseline exploit is rejected; valid interrupted recovery completes a cumulative
+review that includes the first implementation commit and ends archived. The draft
+scenario advances the specification while retaining `commits.plan: null`.
+
+Current evidence is under `~/.codex/tmp/cadre-extended-fixes-20261012/` on the test
+host. Earlier extended verification bug reproductions are retained separately;
+a passing defect-observation test is not described as a successful workflow.
 
 ## Native client and publication gate
 
