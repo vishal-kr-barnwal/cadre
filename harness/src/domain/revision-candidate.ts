@@ -6,6 +6,7 @@ import { validateExecutionJournal, type ExecutionJournal } from "./execution.js"
 import { parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
 import type { TrackState } from "./state.js";
 import { isGitAncestor, readGitFileAtCommit } from "./git.js";
+import { requireQuiescentExecution } from "./execution-quiescence.js";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -46,10 +47,10 @@ export function deriveRevisionCandidate(root: string, previous: TrackState, prop
     for (const file of ["learning.md", "dependency-context.json"]) {
       if (!authored.has(`${parent}/${file}`)) throw new Error(`Revision requires reassessed ${file}`);
     }
-    for (const [label, value] of [["Previous spec revision", oldGraph.specRevision], ["New spec revision", graph.specRevision],
+  }
+  for (const [label, value] of [["Previous spec revision", oldGraph.specRevision], ["New spec revision", graph.specRevision],
       ["Previous plan revision", oldGraph.planRevision], ["New plan revision", graph.planRevision]]) {
-      if (!record.split(/\r?\n/).includes(`- ${label}: ${value}`)) throw new Error(`Revision record must declare ${label}: ${value}`);
-    }
+    if (!record.split(/\r?\n/).includes(`- ${label}: ${value}`)) throw new Error(`Revision record must declare ${label}: ${value}`);
   }
   const binding = previous.operation?.action === "implement" ? previous.operation : previous.lastExecution;
   const errors: string[] = [];
@@ -93,9 +94,7 @@ export function deriveRevisionCandidate(root: string, previous: TrackState, prop
     state.checkpoint = "ready";
     state.operation = null;
     if (journal && previous.operation?.action === "implement") {
-      const live = Object.values(journal.nodes).filter((node) => node.workerId || node.worktreePath || node.branch
-        || node.kind !== "phase" && !["pending", "completed", "blocked"].includes(node.status));
-      if (live.length) throw new Error(`Revision requires a quiescent execution; reconcile partial work/workers first: ${live.map((node) => node.id).join(", ")}`);
+      requireQuiescentExecution(root, journal);
       entry.previousExecution = previous.operation;
       if (previous.lastExecution) entry.previousLastExecution = previous.lastExecution;
       // Superseded is historical, never a claim of successful completion. Node evidence stays exact.

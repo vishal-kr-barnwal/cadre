@@ -15,6 +15,8 @@ import { deriveAutonomousReviewCandidate } from "./review-candidate.js";
 import { candidateStateChanges } from "./candidate-state-changes.js";
 import { deriveRevisionCandidate } from "./revision-candidate.js";
 import { validateSpecContent } from "./state.js";
+import { requireQuiescentExecution } from "./execution-quiescence.js";
+import type { ExecutionJournal } from "./execution.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -25,7 +27,7 @@ export interface CandidateApplyInput {
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 function allowed(input: CandidateApplyInput, path: string): boolean {
-  if (input.workflow === "refresh") return /^(?:project\.json|\.gitignore|(?:product|guidelines|workflow|tech-stack)\.md|styleguides\/[a-z0-9-]+\.md|refreshes\/[a-z0-9-]+\.(?:md|json)|tracks\/[a-z0-9-]+\/(?:state\.json|spec\.md|plan\.md|learning\.md|dependency-context\.json|executions\/execution-[a-zA-Z0-9-]+\.json))$/.test(path);
+  if (input.workflow === "refresh") return /^(?:project\.json|\.gitignore|(?:product|guidelines|workflow|tech-stack)\.md|styleguides\/[a-z0-9-]+\.md|refreshes\/[a-z0-9-]+\.(?:md|json)|tracks\/[a-z0-9-]+\/(?:state\.json|spec\.md|plan\.md|learning\.md|dependency-context\.json|revisions\/revision-[a-z0-9-]+\.md|executions\/execution-[a-zA-Z0-9-]+\.json))$/.test(path);
   if (input.workflow === "revise" && /^tracks\/[a-z0-9-]+\/(?:state\.json|spec\.md|plan\.md|learning\.md|dependency-context\.json|revisions\/revision-[a-z0-9-]+\.md)$/.test(path)) return true;
   const owner = input.candidateId.slice(input.workflow.length + 1), parent = `tracks/${owner}/`;
   if (!path.startsWith(parent)) return false;
@@ -72,11 +74,11 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       if (previous.operation && previous.operation.action !== "implement") throw new Error("Refresh requires reconciliation of the active operation");
       if (previous.operation?.action === "implement") {
         const path = `tracks/${entry.name}/${previous.operation.journal}`;
-        const journal = JSON.parse(readSafeArtifact(root, `.cadre/${path}`));
-        if (Object.values(journal.nodes).some((value) => { const node = value as { kind: string; status: string; workerId: string | null; worktreePath: string | null }; return node.workerId || node.worktreePath || node.kind !== "phase" && !["pending", "completed", "blocked"].includes(node.status); })) throw new Error("Refresh migration requires a quiescent execution boundary");
+        const journal = JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) as ExecutionJournal;
+        requireQuiescentExecution(root, journal);
         if (overlay.has(path)) {
           const proposed = JSON.parse(overlay.get(path)!);
-          const stable = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => !["approvalMode", "approvalPolicyVersion"].includes(key)));
+          const stable = (value: object) => Object.fromEntries(Object.entries(value).filter(([key]) => !["approvalMode", "approvalPolicyVersion"].includes(key)));
           if (JSON.stringify(stable(proposed)) !== JSON.stringify(stable(journal))) throw new Error("Migration must preserve the original execution contract, nodes and evidence");
         }
       }
@@ -99,6 +101,14 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       || !Array.isArray(state.dependencies) || state.dependencies.includes(id)
       || new Set(state.dependencies).size !== state.dependencies.length) throw new Error("Candidate state requires a title, type, positive revision, artifact progress and unique non-self dependencies");
     const previous = existsSync(join(root, ".cadre", path)) ? JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) : null;
+    const recordAuthored = [...original.keys()].some((file) => file.startsWith(`${parent}/revisions/`));
+    const modified = (file: string) => original.has(`${parent}/${file}`)
+      && original.get(`${parent}/${file}`) !== readSafeArtifact(root, `.cadre/${parent}/${file}`);
+    const refreshRevision = input.workflow === "refresh" && previous
+      && (recordAuthored || modified("spec.md") || original.has(`${parent}/plan.md`)
+        && parsePlanContent(original.get(`${parent}/plan.md`)!, `${parent}/plan.md`).digest
+          !== parsePlanContent(readSafeArtifact(root, `.cadre/${parent}/plan.md`), `${parent}/plan.md`).digest);
+    if (refreshRevision && project.templateSetVersion !== "v5") throw new Error("Complete legacy refresh migration before revising track scope");
     if (input.workflow === "review" && previous?.autonomousReview) {
       state = deriveAutonomousReviewCandidate(root, previous, original, reference);
       // Bind canonical authority and execution evidence to the promotion digest.
@@ -107,13 +117,16 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     if (previous && ["completed", "archived"].includes(previous.status)) throw new Error("Terminal tracks are immutable; create a successor");
     if (previous && JSON.stringify(state.history ?? []) !== JSON.stringify(previous.history ?? [])) throw new Error("Preserve historical state evidence; promotion appends its receipt reference");
     if (previous && input.workflow === "refresh") {
+      if (!refreshRevision && state.revision !== previous.revision) throw new Error("Context-only refresh must preserve the track revision; include a complete revision proposal for changed scope");
       for (const key of ["lastExecution", "reviewCycles"]) if (JSON.stringify(state[key]) !== JSON.stringify(previous[key])) throw new Error(`Refresh must preserve ${key}`);
       for (const finding of previous.autonomousReview?.findings ?? []) if (!state.autonomousReview?.findings?.some((candidate: { id: string }) => candidate.id === finding.id)) throw new Error("Refresh must preserve existing finding identities");
     }
     state.schemaVersion = 2;
     state.history = [...(state.history ?? []), { action: input.workflow, commit: reference }];
     if (input.workflow !== "revert") {
-      state.commits = { ...state.commits, ...(overlay.has(`${parent}/spec.md`) ? { spec: reference } : {}), ...(overlay.has(`${parent}/plan.md`) ? { plan: reference } : {}) };
+      state.commits = { ...state.commits,
+        ...((input.workflow === "refresh" ? modified("spec.md") : overlay.has(`${parent}/spec.md`)) ? { spec: reference } : {}),
+        ...((input.workflow === "refresh" ? modified("plan.md") : overlay.has(`${parent}/plan.md`)) ? { plan: reference } : {}) };
     }
     if (overlay.has(`${parent}/dependency-context.json`)) state.commits = { ...state.commits, dependencyContext: reference };
     if (input.workflow === "track") {
@@ -125,8 +138,11 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       if (previous?.status !== "ready_for_review") throw new Error("Review remediation requires canonical ready_for_review state; reconcile an interrupted promotion first");
       if (state.status !== "in_progress") throw new Error("Review remediation requires proposed in_progress state; Autonomous derives it from the next-cycle loop snapshot, other modes must stage state.json");
     }
-    if (input.workflow === "revise" && previous && ["state.json", "spec.md", "plan.md"].some((file) => original.has(`${parent}/${file}`))) {
-      state = deriveRevisionCandidate(root, previous, state, original, overlay, reference,
+    if (refreshRevision || input.workflow === "revise" && previous
+      && (recordAuthored || ["state.json", "spec.md", "plan.md"].some((file) => original.has(`${parent}/${file}`)))) {
+      const revisionArtifacts = new Map(original);
+      if (input.workflow === "refresh" && !modified("spec.md")) revisionArtifacts.delete(`${parent}/spec.md`);
+      state = deriveRevisionCandidate(root, previous, state, revisionArtifacts, overlay, reference,
         (path) => { const body = readSafeArtifact(root, `.cadre/${path}`); unchanged.set(path, contentHash(body)); return body; });
     }
     const graph = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`), errors: string[] = [];
