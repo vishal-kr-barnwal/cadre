@@ -181,7 +181,7 @@ test("refresh scope revision rejects incomplete or manually rewritten authority 
   assert.throws(() => previewCandidateApply(stage(root, "refresh", {...files,
     ["tracks/sample/" + load().operation.journal]: json({...journal, status: "superseded"})})), /preserve the original execution contract/);
   assert.throws(() => previewCandidateApply(stage(root, "refresh", {...files,
-    "tracks/sample/state.json": json({...load(), revision: 2, operation: null})})), /preserve authored operation/);
+    "tracks/sample/state.json": json({...load(), revision: 2, operation: null})})), /preserve authored operation|preserve existing Autonomous approval policy/);
   assert.equal(read(root, trackPath + "state.json"), before);
 });
 

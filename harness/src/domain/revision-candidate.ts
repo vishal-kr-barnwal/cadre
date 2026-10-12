@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { autonomousReviewSchema } from "./autonomous-review.js";
+import { autonomousReviewSchema, requireUnchangedAutonomousReview } from "./autonomous-review.js";
 import { resolveApprovalMode, type ApprovalPolicyReference } from "./approval-policy.js";
 import { validateExecutionJournal, type ExecutionJournal } from "./execution.js";
 import { parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
@@ -27,9 +27,10 @@ export function deriveRevisionCandidate(root: string, previous: TrackState, prop
   for (const [label, value] of [["Previous track revision", previous.revision], ["New track revision", proposed.revision]]) {
     if (!record.split(/\r?\n/).includes(`- ${label}: ${value}`)) throw new Error(`Revision record must declare ${label}: ${value}`);
   }
-  for (const field of ["operation", "lastExecution", "reviewCycles", "autonomousReview", "approvalModeMigration"] as const) {
+  for (const field of ["operation", "lastExecution", "reviewCycles", "approvalModeMigration"] as const) {
     if (!equal(proposed[field], previous[field])) throw new Error(`Revision must preserve authored ${field}; the runtime derives the approved transition`);
   }
+  requireUnchangedAutonomousReview(previous.autonomousReview, proposed.autonomousReview, "Revision");
   if (previous.operation && previous.operation.action !== "implement") throw new Error("Reconcile the pending operation before revising");
   const oldGraph = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`);
   const graph = parsePlanContent(overlay.get(`${parent}/plan.md`) ?? read(`${parent}/plan.md`), `${parent}/plan.md`);

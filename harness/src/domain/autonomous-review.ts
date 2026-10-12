@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { isDeepStrictEqual } from "node:util";
 
 const commit = z.string().regex(/^[0-9a-f]{7,40}$/);
 const executionId = z.string().regex(/^[0-9A-Za-z-]+$/);
@@ -76,4 +77,11 @@ export function validateAutonomousRemediation(previous: AutonomousReview, candid
     }
   }
   return next;
+}
+
+/** Authored context/scope proposals retain the complete existing review authority. */
+export function requireUnchangedAutonomousReview(previous: AutonomousReview | undefined, proposed: AutonomousReview | undefined, workflow: string): void {
+  if (!isDeepStrictEqual(previous, proposed)) {
+    throw new Error(`${workflow} must preserve authored autonomousReview; use its validated review/policy transition instead`);
+  }
 }

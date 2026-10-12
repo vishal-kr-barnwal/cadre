@@ -16,6 +16,7 @@ import { candidateStateChanges } from "./candidate-state-changes.js";
 import { deriveRevisionCandidate } from "./revision-candidate.js";
 import { validateSpecContent } from "./state.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
+import { requireRefreshAuthority } from "./refresh-authority.js";
 import type { ExecutionJournal } from "./execution.js";
 
 export interface CandidateApplyInput {
@@ -119,7 +120,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     if (previous && input.workflow === "refresh") {
       if (!refreshRevision && state.revision !== previous.revision) throw new Error("Context-only refresh must preserve the track revision; include a complete revision proposal for changed scope");
       for (const key of ["lastExecution", "reviewCycles"]) if (JSON.stringify(state[key]) !== JSON.stringify(previous[key])) throw new Error(`Refresh must preserve ${key}`);
-      for (const finding of previous.autonomousReview?.findings ?? []) if (!state.autonomousReview?.findings?.some((candidate: { id: string }) => candidate.id === finding.id)) throw new Error("Refresh must preserve existing finding identities");
+      requireRefreshAuthority(root, previous, state, original);
     }
     state.schemaVersion = 2;
     state.history = [...(state.history ?? []), { action: input.workflow, commit: reference }];
