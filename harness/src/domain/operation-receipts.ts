@@ -1,5 +1,6 @@
 import { readGitBlobs } from "./git.js";
 import { recordedRecoveryInputs, mergeRecoveryInputs, type RecoveryInput } from "./recovery-inputs.js";
+import { requireReviewFreshness } from "./review-freshness.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -108,11 +109,13 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
       if (readFileSync(target(root, receiptPath(input.operationId)), "utf8") !== receiptBody) throw new Error("Operation ID is already used by a different receipt");
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
     }
+    requireReviewFreshness(root, input.kind, files);
     requireUnchangedInputs(root, inputs ?? recorded);
     recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
     write(root, { path, content: json(recovery) });
     afterWrite?.(path);
   }
+  requireReviewFreshness(root, recovery.receipt.kind, recovery.files);
   requireUnchangedInputs(root, recovery.inputs ?? recordedRecoveryInputs(recovery.files));
   for (const file of recovery.files) {
     const actual = currentHash(root, file.path), expected = file.content === null ? null : receiptHash(file.content);

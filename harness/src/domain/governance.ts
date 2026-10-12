@@ -1,7 +1,7 @@
 import { parsePlanContent } from "./plan.js";
 import { inspectDependencyContext } from "./dependency-context.js";
 import { resolveApprovalMode } from "./approval-policy.js";
-import { committedOperationReceipt, operationRef, promoteOperation, type ReceiptFile } from "./operation-receipts.js";
+import { committedOperationReceipt, committedReceiptForDigest, operationRef, promoteOperation, type ReceiptFile } from "./operation-receipts.js";
 import { archiveReceiptPath, replayCommittedArchive } from "./archive-replay.js";
 import { deriveArchivePromotion, explainArchiveState, type ArchiveStateChanges } from "./archive-promotion.js";
 import { requireCleanAutonomousReview } from "./autonomous-review.js";
@@ -14,7 +14,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 import { readCandidateFiles } from "./staging.js";
-import { isGitAncestor, resolveGitCommit, requireReviewedProductUnchanged } from "./git.js";
+import { isGitAncestor, resolveGitCommit, readGitFileAtCommit, requireReviewedProductUnchanged } from "./git.js";
 import { executionStatus } from "./execution.js";
 import {
   buildTracks, cadreRoot, validateProject,
@@ -154,7 +154,6 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
     requireCleanAutonomousReview(current.autonomousReview, execution, input.acceptedRisks ?? []);
     if (range[1] !== current.autonomousReview.initialBaseCommit) throw new Error("Autonomous review must cover the cumulative implementation range");
     if (!isGitAncestor(root, range[1]!, input.reviewedHead)) throw new Error("Autonomous review baseline is not an ancestor of reviewed HEAD");
-    requireReviewedProductUnchanged(root, input.reviewedHead, input.trackId);
   }
   const statePath = join(cadreRoot(root), track.location, "state.json");
   const tracksPath = join(cadreRoot(root), "tracks.md");
@@ -178,6 +177,7 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   const existingCycle = current.reviewCycles?.at(-1);
   const resuming = current.status === "completed"
     && JSON.stringify(Object.fromEntries(Object.entries(existingCycle ?? {}).filter(([key]) => key !== "approvalConfirmation"))) === JSON.stringify(cycle);
+  if (!resuming) requireReviewedProductUnchanged(root, input.reviewedHead, input.trackId);
   if (current.status !== "ready_for_review" && !resuming) throw new Error(`${input.trackId} is not ready for review`);
   const state: TrackState = resuming ? current : {
     ...current,
@@ -205,6 +205,13 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
 }
 
 export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: string) {
+  const committed = committedReceiptForDigest(input.projectRoot, "review", proposalDigest);
+  if (committed) {
+    const path = `.cadre/tracks/${input.trackId}/state.json`;
+    return { state: JSON.parse(readGitFileAtCommit(input.projectRoot, committed.commit, path)) as TrackState,
+      statePath: join(input.projectRoot, path), tracksPath: join(cadreRoot(input.projectRoot), "tracks.md"),
+      receipt: committed, valid: true, derivedStateCurrent: true };
+  }
   const proposal = previewReviewComplete(input);
   if (proposal.digest !== proposalDigest && !proposal.resuming) {
     throw new Error("review completion proposal is stale; preview it again");
