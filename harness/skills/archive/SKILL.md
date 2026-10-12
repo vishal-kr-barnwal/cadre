@@ -39,7 +39,7 @@ Expected human decision count is one for the complete batch. Ask again only when
 8. For v5, include the returned receipt and exact trailers in that one archive commit, then reconcile using `candidate_apply`. Do not call archive_batch_record or create a second archive commit. Legacy SHA batches finish their original archive_batch_record contract.
 9. Reuse the apply validation. Verify the receipt, one archive commit, and clean worktree; do not reread all completed histories.
 
-If interrupted, reuse the same approved apply token; the journal and approved hashes converge remaining moves/writes without another approval. Provenance recording is idempotent and never duplicates track/project history. Never redistill or start a second batch while one is active.
+If interrupted on v5, inspect the matching `.cadre/stage/operations/<operationId>.json` and Git evidence. If its receipt is already committed, use `candidate_apply` reconcile. Otherwise use `candidate_apply` with `request: {mode: "resume", projectRoot, operationId, approvalDigest}` from that original approved intent to converge remaining moves/writes, then commit the receipt once and reconcile. Repeating `archive_batch_candidate` apply before reconciliation encounters `COMMIT_PENDING`; it is not the pending-promotion recovery route. The original archive apply token supports zero-change replay after commit/reconciliation. Recovery and replay converge without another approval for unchanged consequences. Provenance recording is idempotent and never duplicates track/project history. Never redistill or start a second batch while one is active. Legacy batches retain their original journal contract.
 
 Do not delete learning, review cycles, revisions, bug reports, or commit provenance.
 
