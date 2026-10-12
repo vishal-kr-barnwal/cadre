@@ -17,6 +17,7 @@ import { deriveRevisionCandidate } from "./revision-candidate.js";
 import { validateSpecContent } from "./state.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
 import { requireRefreshAuthority } from "./refresh-authority.js";
+import { deriveRevertCandidate } from "./revert-candidate.js";
 import type { ExecutionJournal } from "./execution.js";
 
 export interface CandidateApplyInput {
@@ -123,6 +124,11 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       if (!refreshRevision && state.revision !== previous.revision) throw new Error("Context-only refresh must preserve the track revision; include a complete revision proposal for changed scope");
       for (const key of ["lastExecution", "reviewCycles"]) if (JSON.stringify(state[key]) !== JSON.stringify(previous[key])) throw new Error(`Refresh must preserve ${key}`);
       requireRefreshAuthority(root, previous, state, original);
+    }
+    if (input.workflow === "revert") {
+      if (!previous) throw new Error("Revert requires an existing approved active track");
+      state = deriveRevertCandidate(root, previous, state, original,
+        (path) => { const body = readSafeArtifact(root, `.cadre/${path}`); unchanged.set(path, contentHash(body)); return body; });
     }
     state.schemaVersion = 2;
     state.history = [...(state.history ?? []), { action: input.workflow, commit: reference }];
