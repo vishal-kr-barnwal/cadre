@@ -3,6 +3,7 @@ import { deriveNextStep } from "../domain/next-step.js";
 import { contextInputSchema, readContext } from "../domain/context.js";
 import { applyCandidate, previewCandidateApply, type CandidateApplyInput } from "../domain/candidate-apply.js";
 import { requireCommittedOperations, reconcileOperation, resumeOperation } from "../domain/operation-receipts.js";
+import { reviewRetrySchema } from "../domain/review-retry.js";
 import { handoffSchema, requireFreshTrackMemory } from "../domain/memory.js";
 import { inspectStagedMemory } from "../domain/staged-memory.js";
 import { validateStagedState } from "../domain/staged-state.js";
@@ -385,7 +386,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.workflowElicit, {
-    title: "Collect Cadre workflow input",
+    title: "Workflow decision",
     description: "Request a decision.",
     inputSchema: workflowElicitationInputSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.workflowElicit],
@@ -421,7 +422,7 @@ export function createCadreServer(): McpServer {
   }
 
   registerTool(CADRE_MCP_TOOLS.templateGetMany, {
-    title: "Get multiple Cadre templates",
+    title: "Read templates",
     description: "Read templates.",
     inputSchema: {
       ids: z.array(z.enum(TEMPLATE_IDS)).min(1),
@@ -438,7 +439,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.styleguideResolve, {
-    title: "Resolve default styleguides",
+    title: "Resolve styleguides",
     description: "Resolve styleguides.",
     inputSchema: { technologies: z.array(z.string()).min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.styleguideResolve],
@@ -458,21 +459,21 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.contextRead, {
-    title: "Read required track context", description: "Read scoped context; consume all pages before acting. Sources remain authoritative.",
+    title: "Read track context", description: "Read scoped context; consume all pages before acting. Sources remain authoritative.",
     inputSchema: contextInputSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.contextRead],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async (input) => { try { return result(readContext(input)); } catch (error) { return failure(error); } });
 
   registerTool(CADRE_MCP_TOOLS.diagnosticRead, {
-    title: "Read full failure diagnostics", description: "Read an explicitly requested diagnostic page.",
+    title: "Read diagnostics", description: "Read an explicitly requested diagnostic page.",
     inputSchema: { diagnosticId: z.string().uuid(), offset: z.number().int().nonnegative().default(0), maxBytes: z.number().int().min(1024).max(65536).default(49152) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.diagnosticRead],
     annotations: { readOnlyHint: true, openWorldHint: false }
   }, async ({ diagnosticId, offset, maxBytes }) => { try { return result(readDiagnostic(diagnosticId, offset, maxBytes)); } catch (error) { return failure(error); } });
 
   registerTool(CADRE_MCP_TOOLS.projectStatus, {
-    title: "Read Cadre project status",
+    title: "Project status",
     description: "Read project status.",
     inputSchema: {
       projectRoot: z.string().min(1),
@@ -602,7 +603,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.stateValidate, {
-    title: "Validate Cadre project state",
+    title: "Validate state",
     description: "Validate state.",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.stateValidate],
@@ -616,7 +617,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.candidateStagePrepare, {
-    title: "Prepare a Cadre candidate stage",
+    title: "Prepare candidate stage",
     description: "Prepare staging.",
     inputSchema: {
       projectRoot: z.string().min(1),
@@ -637,7 +638,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.candidateInspect, {
-    title: "Inspect staged artifact candidates",
+    title: "Inspect candidate",
     description: "Inspect staging.",
     inputSchema: z.strictObject({
       projectRoot: z.string().min(1),
@@ -719,9 +720,9 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.candidateApply, {
-    title: "Promote an approved Cadre candidate", description: "Preview or promote constrained Cadre artifacts; never writes product files or commits.",
+    title: "Apply candidate", description: "Preview or promote constrained Cadre artifacts; never writes product files or commits.",
     inputSchema: { request: z.discriminatedUnion("mode", [
-      z.strictObject({ mode: z.literal("prepare"), projectRoot: z.string().min(1), candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), workflow: z.enum(["track", "revise", "refresh", "review", "revert"]), files: z.array(z.string()).min(1) }),
+      z.strictObject({ mode: z.literal("prepare"), projectRoot: z.string().min(1), candidateId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), workflow: z.enum(["track", "revise", "refresh", "review", "revert"]), files: z.array(z.string()).min(1), reviewRetry: reviewRetrySchema.optional() }),
       z.strictObject({ mode: z.literal("apply"), proposalToken: proposalTokenSchema }),
       z.strictObject({ mode: z.literal("reconcile"), projectRoot: z.string(), operationId: z.string() }),
       z.strictObject({ mode: z.literal("resume"), projectRoot: z.string(), operationId: z.string(), approvalDigest: z.string().regex(/^[0-9a-f]{64}$/) })
@@ -743,7 +744,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.executionGraphValidate, {
-    title: "Validate a track execution graph",
+    title: "Validate plan",
     description: "Validate plan DAG.",
     inputSchema: { projectRoot: z.string().min(1), trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionGraphValidate],
@@ -771,7 +772,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.reviewComplete, {
-    title: "Complete a clean review",
+    title: "Complete review",
     description: "Complete review.",
     inputSchema: adaptiveInputSchema(reviewCompleteSchema),
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.reviewComplete],
@@ -836,7 +837,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.archiveBatchCandidate, {
-    title: "Govern a staged archive batch",
+    title: "Archive completed tracks",
     description: "Apply archive batch.",
     inputSchema: adaptiveInputSchema(archiveBatchCandidateSchema),
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.archiveBatchCandidate],
@@ -899,7 +900,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
-    title: "Record archive provenance",
+    title: "Record archive",
     description: "Record archive.",
     inputSchema: archiveRecordSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.archiveBatchRecord],
@@ -935,7 +936,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.executionStart, {
-    title: "Start implementation execution",
+    title: "Start execution",
     description: "Start execution.",
     inputSchema: executionStartSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionStart],
@@ -1020,7 +1021,7 @@ export function createCadreServer(): McpServer {
   ]);
 
   registerTool(CADRE_MCP_TOOLS.executionCheckpoint, {
-    title: "Apply an execution checkpoint",
+    title: "Checkpoint execution",
     description: "Checkpoint execution.",
     inputSchema: {
       scope: z.strictObject(checkpointScopeSchema),
@@ -1053,7 +1054,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.executionStatus, {
-    title: "Read implementation execution status",
+    title: "Execution status",
     description: "Read execution.",
     inputSchema: {
       projectRoot: z.string().min(1),
@@ -1079,7 +1080,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.executionFinish, {
-    title: "Complete implementation execution",
+    title: "Finish execution",
     description: "Finish execution.",
     inputSchema: executionFinishSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.executionFinish],
@@ -1123,7 +1124,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.worktreeCreate, {
-    title: "Create a Cadre worker worktree",
+    title: "Create worker worktree",
     description: "Create worktree.",
     inputSchema: worktreeSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.worktreeCreate],
@@ -1158,7 +1159,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.integration, {
-    title: "Integrate a worker branch",
+    title: "Integrate worker",
     description: "Integrate branch.",
     inputSchema: adaptiveInputSchema(worktreeSchema),
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.integration],
@@ -1213,7 +1214,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.worktreeCleanup, {
-    title: "Clean up an integrated worker",
+    title: "Clean worker",
     description: "Clean worktree.",
     inputSchema: worktreeSchema,
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.worktreeCleanup],
@@ -1251,7 +1252,7 @@ export function createCadreServer(): McpServer {
   };
 
   registerTool(CADRE_MCP_TOOLS.projectInitCandidate, {
-    title: "Initialize from a staged Cadre candidate",
+    title: "Initialize project",
     description: "Initialize project.",
     inputSchema: adaptiveInputSchema(initCandidateSchema),
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.projectInitCandidate],
@@ -1296,7 +1297,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
-    title: "Record the project setup commit",
+    title: "Record setup commit",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordCommit],
     annotations: { destructiveHint: false, openWorldHint: false }
@@ -1311,7 +1312,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
-    title: "Record Git initialization checkpoint",
+    title: "Record Git setup",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordGitInitialized],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
@@ -1325,7 +1326,7 @@ export function createCadreServer(): McpServer {
   });
 
   registerTool(CADRE_MCP_TOOLS.tracksRender, {
-    title: "Render the derived tracks index",
+    title: "Render tracks index",
     inputSchema: { projectRoot: z.string().min(1) },
     outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.tracksRender],
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }

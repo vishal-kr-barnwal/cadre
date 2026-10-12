@@ -18,6 +18,7 @@ import { validateSpecContent } from "./state.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
 import { requireRefreshAuthority } from "./refresh-authority.js";
 import { deriveRevertCandidate } from "./revert-candidate.js";
+import { deriveReviewRetry, reviewRetrySchema, type ReviewRetry } from "./review-retry.js";
 import type { ExecutionJournal } from "./execution.js";
 
 export interface CandidateApplyInput {
@@ -25,6 +26,7 @@ export interface CandidateApplyInput {
   candidateId: string;
   workflow: "track" | "revise" | "refresh" | "review" | "revert";
   files: string[];
+  reviewRetry?: ReviewRetry | undefined;
 }
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -42,6 +44,10 @@ function allowed(input: CandidateApplyInput, path: string): boolean {
 }
 
 export function previewCandidateApply(input: CandidateApplyInput) {
+  if (input.reviewRetry) {
+    reviewRetrySchema.parse(input.reviewRetry);
+    if (input.workflow !== "refresh") throw new Error("Explicit review retry requires the refresh workflow");
+  }
   requireCommittedOperations(input.projectRoot);
   const root = safeProjectRoot(input.projectRoot), baseCommit = resolveGitCommit(root);
   if (!input.candidateId.startsWith(`${input.workflow}-`)) throw new Error("Candidate ID must be owned by its workflow");
@@ -61,7 +67,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   }
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json"));
   if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
-  const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort()])).slice(0, 32)}`;
+  const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort(), ...(input.reviewRetry ? [input.reviewRetry] : [])])).slice(0, 32)}`;
   const reference = operationRef(operationId), overlay = new Map(original), unchanged = new Map<string, string>();
   unchanged.set("project.json", contentHash(readSafeArtifact(root, ".cadre/project.json")));
   const read = (path: string): string => {
@@ -69,6 +75,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     const body = readSafeArtifact(root, `.cadre/${path}`); unchanged.set(path, contentHash(body)); return body;
   };
   const trackIds = new Set([...overlay.keys()].map((path) => /^tracks\/([^/]+)\//.exec(path)?.[1]).filter((id): id is string => Boolean(id)));
+  if (input.reviewRetry) trackIds.add(input.reviewRetry.trackId);
   if (input.workflow === "refresh") {
     if (!overlay.has("project.json")) throw new Error("Refresh requires proposed project.json");
     for (const entry of readdirSync(join(root, ".cadre/tracks"), { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
@@ -132,6 +139,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     }
     state.schemaVersion = 2;
     state.history = [...(state.history ?? []), { action: input.workflow, commit: reference }];
+    if (input.reviewRetry?.trackId === id) state = deriveReviewRetry(previous, state, input.reviewRetry, original, reference);
     if (input.workflow !== "revert") {
       state.commits = { ...state.commits,
         ...((input.workflow === "refresh" ? modified("spec.md") : overlay.has(`${parent}/spec.md`)) ? { spec: reference } : {}),

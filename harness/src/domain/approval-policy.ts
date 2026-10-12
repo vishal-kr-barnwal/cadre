@@ -2,6 +2,7 @@ import type { TrackState } from "./state.js";
 import { autonomousReviewSchema, requireReviewProgress, type AutonomousReview } from "./autonomous-review.js";
 import { z } from "zod/v4";
 import { CadreError } from "./errors.js";
+import { validateReviewRetryEvidence } from "./review-retry.js";
 
 export const EXECUTION_APPROVAL_MODES = ["governed", "phase", "track", "autonomous"] as const;
 export type ExecutionApprovalMode = typeof EXECUTION_APPROVAL_MODES[number];
@@ -45,6 +46,7 @@ export function resolveApprovalMode(reference?: ApprovalPolicyReference | null, 
 }
 
 export function validateTrackApprovalPolicy(state: TrackState, errors: string[], warnings: string[] = []): void {
+  validateReviewRetryEvidence(state, errors);
   if (state.approvalModeMigration && !approvalModeMigrationSchema.safeParse(state.approvalModeMigration).success) {
     errors.push(`${state.trackId}: invalid approvalModeMigration`);
   }

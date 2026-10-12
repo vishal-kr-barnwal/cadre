@@ -13,6 +13,10 @@ export const autonomousReviewSchema = z.strictObject({
   reviewedExecutionId: executionId.optional(),
   reviewedHead: commit.optional(),
   blocker: z.string().trim().min(1).optional(),
+  retryAuthorization: z.strictObject({
+    commit: z.string().regex(/^op:[a-z0-9][a-z0-9-]{7,95}$/),
+    attemptBaseline: z.array(z.strictObject({id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), attemptExecutionIds: z.array(executionId)}))
+  }).optional(),
   findings: z.array(z.strictObject({
     id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     summary: z.string().trim().min(1),
@@ -25,6 +29,14 @@ export const autonomousReviewSchema = z.strictObject({
   for (const finding of loop.findings) {
     if (new Set(finding.attemptExecutionIds).size !== finding.attemptExecutionIds.length) issue("duplicate remediation attempt");
   }
+  const baseline = loop.retryAuthorization?.attemptBaseline ?? [];
+  if (new Set(baseline.map((item) => item.id)).size !== baseline.length) issue("duplicate retry finding baseline");
+  for (const item of baseline) {
+    const finding = loop.findings.find((finding) => finding.id === item.id);
+    if (!finding || !isDeepStrictEqual(finding.attemptExecutionIds.slice(0, item.attemptExecutionIds.length), item.attemptExecutionIds)) {
+      issue("retry baseline must retain the original finding attempt prefix");
+    }
+  }
   if (loop.checkpoint === "blocked" && !loop.blocker) issue("blocked review loop requires a blocker");
   if (["awaiting_approval", "completed"].includes(loop.checkpoint)) {
     if (!loop.reviewedExecutionId || !loop.reviewedHead) issue("clean review requires execution and HEAD evidence");
@@ -36,9 +48,14 @@ export type AutonomousReview = z.infer<typeof autonomousReviewSchema>;
 export function requireReviewProgress(value: AutonomousReview): AutonomousReview {
   const loop = autonomousReviewSchema.parse(value);
   if (loop.checkpoint === "blocked") throw new Error(`Autonomous review is blocked: ${loop.blocker}`);
-  const stalled = loop.findings.filter((finding) => finding.status === "open" && finding.attemptExecutionIds.length >= 2);
+  const stalled = stalledReviewFindings(loop);
   if (stalled.length) throw new Error(`Autonomous review stalled after two remediation attempts: ${stalled.map((finding) => finding.id).join(", ")}; ask the human how to continue`);
   return loop;
+}
+
+export function stalledReviewFindings(loop: AutonomousReview) {
+  return loop.findings.filter((finding) => finding.status === "open"
+    && finding.attemptExecutionIds.length - (loop.retryAuthorization?.attemptBaseline.find((item) => item.id === finding.id)?.attemptExecutionIds.length ?? 0) >= 2);
 }
 
 export function requireCleanAutonomousReview(value: AutonomousReview, execution: { executionId?: string; headCommit?: string }, acceptedRisks: string[]): void {
@@ -57,6 +74,7 @@ export function validateAutonomousRemediation(previous: AutonomousReview, candid
   for (const field of ["originExecutionId", "authorizedAt", "initialBaseCommit", "specCommit"] as const) {
     if (next[field] !== previous[field]) throw new Error(`Autonomous remediation cannot change ${field}; obtain explicit scope authorization`);
   }
+  if (!isDeepStrictEqual(previous.retryAuthorization, next.retryAuthorization)) throw new Error("Autonomous remediation cannot replace explicit retry authority");
   if (next.checkpoint !== "remediating" || !next.findings.some((finding) => finding.status === "open")) {
     throw new Error("Autonomous remediation requires open findings and its remediating checkpoint");
   }
