@@ -123,4 +123,6 @@ Resume `awaiting_approval` by checking the recorded execution/HEAD and product c
 
 ## Review freshness on approval and recovery
 
+All modes preserve the complete completed plan and append remediation at exactly the next plan revision, with the specification revision unchanged. Ordinary review state retains its prior execution, scope, policy and review history and appends one `changes_requested` cycle naming that execution's ID, plan revision, graph digest and reviewed HEAD. Approval of a review does not authorize reopening completed tasks. Pending promotion retains exact original state/plan evidence for recovery after partial writes or stage loss; missing or inconsistent original evidence requires an approved repair, never recreated hashes or another delivery run.
+
 Every approval mode checks product and verification-policy content against the reviewed HEAD before clean completion. Interrupted clean or finding-bearing review promotion performs the same check before any remaining write, using the reviewed evidence retained in its original intent, including older pending receipts. Preserve dirty changes and the pending journal if freshness fails; verify the current product and obtain an exact repair approval, or deliberately restore the approved inputs. A committed approval replays its immutable historical receipt even after later product changes.

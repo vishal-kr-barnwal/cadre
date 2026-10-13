@@ -46,6 +46,8 @@ After the artifact commit, atomically write the completed journal with `refreshC
 
 ## Approval policy v2 migration
 
+Refresh preserves completed and superseded execution journals byte-for-byte, including verification, approvals, commits and handoffs. Do not include edited historical journals in a context proposal. Active journals may change only through the supported explicit legacy policy migration or runtime-derived supersession in an approved scope revision. The same checks apply on interrupted recovery; preserve the original intent and evidence when an older pending proposal violates them.
+
 Before delivery, resolve each `APPROVAL_MODE_MIGRATION_REQUIRED` warning by including an explicit Track-or-Autonomous choice and its consequences in this refresh proposal. Never infer the choice from the old spelling. Preserve legacy Governed and Phase choices and the Governed fallback for an absent mode.
 
 At a quiescent worker boundary, stage `state.approvalModeMigration` as `{ executionId, approvalMode: "track" | "autonomous", approvedAt, refreshPath: "refreshes/refresh-<id>.md" }`. The existing refresh operation owns the inspected digest and exact path/hash manifest; the migration record points to that refresh without embedding its own digest. For an active execution, include its journal and implement operation in the same envelope: set both `approvalMode` to the selected mode and `approvalPolicyVersion` to `2`, preserving nodes, commits, timestamps, and graph identity. For a completed execution, leave the journal and `lastExecution` byte-for-byte unchanged; the migration record supplies the explicitly chosen effective mode for subsequent review or execution inheritance.

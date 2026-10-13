@@ -324,3 +324,57 @@ Evidence and retained matrix fixtures are under
 `*-final.log`, `unborn.log`, `recovery-packaged.log`, `nested-restart.log`, and
 `results.json`. Native AI-session coverage and final native installer activation
 remain separate release checks.
+
+
+## Shared transition preservation follow-up (2026-10-13)
+
+The subsequent cross-workflow audit reproduced three additional gaps: phase
+reconciliation treated an ordinary completion HEAD as a merge covering its
+ancestors; ordinary review could replace completed work with unchecked tasks;
+and refresh protected active journals but allowed rewriting completed journals.
+
+The fixes enforce completed-plan and state preservation across all review modes,
+protect every staged historical journal, and evaluate phase reversal coverage
+against the actual Git parents and approved mainline. Direct-main/fast-forward
+completion requires all distinct task deltas. Tasks already in the selected
+mainline remain separate reversals; covered tasks cannot be reversed twice.
+
+Preview and generic promotion/resume share the checks. Original before-images
+are bound to the existing pre-promotion hashes and retained only in ignored
+recovery state. Partial promotion and stage loss do not change the approved
+baseline. Older review intents may reuse their existing exact review authority;
+other missing evidence requires an approved repair without discarding intent or
+repeating product work. Completed receipts replay unchanged. No published
+receipt schema, immutable template, production dependency or MCP tool was added.
+
+The complete maintained suite passed **379/379 tests** (442,936 ms), with zero
+failures or skips. The 22 new tests cover completed-plan/state preservation in all
+four approval modes and both scheduling modes, incomplete phase/track reversals,
+actual merge mainlines, completed/superseded journals, valid interrupted recovery
+with stage loss, and rejection of unsafe older intents without changing files.
+
+The rebuilt packaged stdio server passed **96/96 cases** (275,652 ms) across
+three client identities, four approval modes and sequential/parallel scheduling:
+24 replacement reviews, 24 historical-journal rewrites and 24 incomplete phase
+reversals were rejected both before and after cold restart; 24 valid remediation
+flows retained completed nodes, resumed execution, completed review and archived.
+These are runtime fixtures with explicit synthetic approvals, not native AI
+conversations.
+
+The separate source/in-memory lifecycle matrix passed **24/24 cases**, covering
+all three client identities, four approval modes and both scheduling modes. Each
+case completed create, track, status, the wisp read-only contract, planned and
+active revision, active revert, implementation, clean review, archive, refresh,
+and a successor through completion/archive. Original and successor archive
+receipts replayed without changes; canonical state validation passed.
+
+TypeScript, package validation, pack dry run, complete docs checks, CLI doctor and
+all three edited skill validators passed. Documentation content checks also
+passed after recording these results. Earlier diagnostic runs with obsolete error
+message assertions were corrected; the complete 379-test run is authoritative.
+
+Evidence and test drivers are under
+`~/.codex/tmp/cadre-shared-invariants-fixes-20261013/`, including `full-tests.log`,
+`packaged-matrix.log`, `matrix-results.json`, `lifecycle.log`, `validate.log`,
+`pack.log` and `docs.log`. Native installer/activation and publication remain
+separate gates; this work does not claim a release.
