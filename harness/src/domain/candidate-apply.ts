@@ -20,6 +20,8 @@ import { requireRefreshAuthority } from "./refresh-authority.js";
 import { deriveRevertCandidate } from "./revert-candidate.js";
 import { deriveReviewRetry, reviewRetrySchema, type ReviewRetry } from "./review-retry.js";
 import type { ExecutionJournal } from "./execution.js";
+import { requireReviewPreservation } from "./review-preservation.js";
+import { requireJournalPreservation } from "./journal-preservation.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -69,6 +71,8 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
   const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort(), ...(input.reviewRetry ? [input.reviewRetry] : [])])).slice(0, 32)}`;
   const reference = operationRef(operationId), overlay = new Map(original), unchanged = new Map<string, string>();
+  if (input.workflow === "refresh") requireJournalPreservation(root,
+    [...original].map(([path, content]) => ({path: `.cadre/${path}`, content})), undefined, undefined, false);
   unchanged.set("project.json", contentHash(readSafeArtifact(root, ".cadre/project.json")));
   const read = (path: string): string => {
     if (overlay.has(path)) return overlay.get(path)!;
@@ -87,11 +91,6 @@ export function previewCandidateApply(input: CandidateApplyInput) {
         const journal = JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) as ExecutionJournal;
         unchanged.set(path, contentHash(readSafeArtifact(root, `.cadre/${path}`)));
         requireQuiescentExecution(root, journal);
-        if (overlay.has(path)) {
-          const proposed = JSON.parse(overlay.get(path)!);
-          const stable = (value: object) => Object.fromEntries(Object.entries(value).filter(([key]) => !["approvalMode", "approvalPolicyVersion"].includes(key)));
-          if (JSON.stringify(stable(proposed)) !== JSON.stringify(stable(journal))) throw new Error("Migration must preserve the original execution contract, nodes and evidence");
-        }
       }
     }
     const next = JSON.parse(overlay.get("project.json")!);
@@ -183,6 +182,8 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   }
   overlay.set("tracks.md", buildTracks(tracks.sort((a, b) => a.id.localeCompare(b.id))));
   const promoted: ReceiptFile[] = [...overlay].map(([path, content]) => ({ path: `.cadre/${path}`, content }));
+  if (input.workflow === "review") requireReviewPreservation(root, promoted);
+  if (["refresh", "revise"].includes(input.workflow)) requireJournalPreservation(root, promoted);
   const before = promoted.map((file) => ({ path: file.path, sha256: existsSync(join(root, file.path)) ? contentHash(readSafeArtifact(root, file.path)) : null }));
   const manifest = promoted.map((file) => ({ path: file.path, sha256: contentHash(file.content!) }));
   const digest = contentHash(JSON.stringify({ operationId, baseCommit, manifest, before, memoryInputs: memory.inputs, unchanged: [...unchanged].sort() }));

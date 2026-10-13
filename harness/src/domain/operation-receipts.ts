@@ -4,6 +4,9 @@ import { requireReviewFreshness } from "./review-freshness.js";
 import { requireRevertFreshness, revertApprovalProofSchema } from "./revert-freshness.js";
 import { requireInitFreshness } from "./init-freshness.js";
 import { repositoryBasisSchema, type RepositoryBasis } from "./repository-basis.js";
+import { requireReviewPreservation } from "./review-preservation.js";
+import { requireJournalPreservation } from "./journal-preservation.js";
+import type { BeforeEvidence, PromotionFile } from "./promotion-evidence.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -28,6 +31,7 @@ export type OperationReceipt = z.infer<typeof receiptSchema>;
 export interface ReceiptFile { path: string; content: string | null }
 export type OperationPromotionInput = Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts"> & { inputs?: RecoveryInput[]; createBasis?: RepositoryBasis };
 const recoverySchema = z.strictObject({ receipt: receiptSchema, inputs: z.array(z.strictObject({ path: z.string(), sha256: digest })).optional(),
+  transitionBefore: z.array(z.strictObject({path: z.string(), content: z.string()})).optional(),
   revertApproval: revertApprovalProofSchema.optional(), reviewBeforeState: z.string().max(1024 * 1024).optional(), createBasis: repositoryBasisSchema.optional(),
   files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
 type Recovery = z.infer<typeof recoverySchema>;
@@ -65,6 +69,12 @@ function currentHash(root: string, path: string): string | null {
 function requireUnchangedInputs(root: string, inputs: Array<{ path: string; sha256: string }>): void {
   const paths = inputs.filter((input) => currentHash(root, input.path) !== input.sha256).map((input) => input.path);
   if (paths.length) throw new CadreError("OPERATION_INPUT_DRIFT", "Required inputs changed after approval; preserve the pending operation and reassess before resuming", { paths });
+}
+function transitionEvidence(root: string, kind: string, files: PromotionFile[], saved?: BeforeEvidence[], base?: string | null) {
+  if (kind === "review") return requireReviewPreservation(root, files, saved, base);
+  if (kind === "refresh" || kind === "revise") return requireJournalPreservation(root, files, saved, base);
+  if (saved?.length) throw new Error("Transition evidence belongs only to review, refresh or revision");
+  return [];
 }
 function write(root: string, file: ReceiptFile): void {
   const path = target(root, file.path);
@@ -115,17 +125,24 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
       if (readFileSync(target(root, receiptPath(input.operationId)), "utf8") !== receiptBody) throw new Error("Operation ID is already used by a different receipt");
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
     }
+    const beforeFiles = files.map((file) => ({...file, before: currentHash(root, file.path)}));
+    const transitionBefore = transitionEvidence(root, input.kind, beforeFiles);
     const reviewBeforeState = requireReviewFreshness(root, input.kind, files);
     const revertApproval = requireRevertFreshness(root, input.kind, input.operationId, files);
     requireUnchangedInputs(root, inputs ?? recorded);
     if (input.kind === "create") requireInitFreshness(root, files, input.createBasis, false, input.approvalDigest);
     recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), ...(revertApproval ? {revertApproval} : {}),
+      ...(transitionBefore.length ? {transitionBefore} : {}),
       ...(reviewBeforeState ? {reviewBeforeState} : {}), ...(input.createBasis ? {createBasis: input.createBasis} : {}),
-      files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
+      files: beforeFiles };
     write(root, { path, content: json(recovery) });
     afterWrite?.(path);
   }
   const reviewBeforeState = requireReviewFreshness(root, recovery.receipt.kind, recovery.files, recovery.reviewBeforeState, recovery.receipt.baseCommit);
+  const retainedBefore = recovery.transitionBefore ?? (reviewBeforeState ? recovery.files
+    .filter((file) => /^\.cadre\/tracks\/[^/]+\/state\.json$/.test(file.path))
+    .map(({path}) => ({path, content: reviewBeforeState})) : undefined);
+  const transitionBefore = transitionEvidence(root, recovery.receipt.kind, recovery.files, retainedBefore, recovery.receipt.baseCommit);
   const revertApproval = requireRevertFreshness(root, recovery.receipt.kind, recovery.receipt.operationId, recovery.files, recovery.revertApproval);
   requireUnchangedInputs(root, recovery.inputs ?? recordedRecoveryInputs(recovery.files));
   if (recovery.receipt.kind === "create") requireInitFreshness(root, recovery.files, recovery.createBasis, true, recovery.receipt.approvalDigest);
@@ -133,9 +150,11 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
     const actual = currentHash(root, file.path), expected = file.content === null ? null : receiptHash(file.content);
     if (actual !== file.before && actual !== expected) throw new CadreError("OPERATION_PROMOTION_DRIFT", "An artifact changed during operation recovery", { path: file.path });
   }
-  if (revertApproval && !recovery.revertApproval || reviewBeforeState && !recovery.reviewBeforeState) {
+  if (revertApproval && !recovery.revertApproval || reviewBeforeState && !recovery.reviewBeforeState
+    || transitionBefore.length && !recovery.transitionBefore) {
     if (revertApproval) recovery.revertApproval = revertApproval;
     if (reviewBeforeState) recovery.reviewBeforeState = reviewBeforeState;
+    if (transitionBefore.length) recovery.transitionBefore = transitionBefore;
     write(root, {path, content: json(recovery)});
   }
   for (const file of recovery.files) { write(root, file); afterWrite?.(file.path); }

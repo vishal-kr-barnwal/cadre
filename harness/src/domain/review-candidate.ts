@@ -3,7 +3,8 @@ import { autonomousReviewSchema, validateAutonomousRemediation } from "./autonom
 import { isGitAncestor, requireReviewedProductUnchanged } from "./git.js";
 import { validateExecutionJournal } from "./execution.js";
 import { readSafeArtifact } from "./memory.js";
-import { parsePlanContent, validatePlanGraph, type PlanGraph } from "./plan.js";
+import { parsePlanContent, validatePlanGraph } from "./plan.js";
+import { requireReviewPlan } from "./review-invariants.js";
 import type { TrackState } from "./state.js";
 import { join } from "node:path";
 
@@ -41,13 +42,7 @@ export function deriveAutonomousReviewCandidate(root: string, previous: TrackSta
   const proposed = parsePlanContent(artifacts.get(`${parent}/plan.md`)!, `${parent}/plan.md`, errors);
   validatePlanGraph(`${parent}/plan.md`, proposed, "in_progress", errors);
   if (errors.length) throw new Error(errors.join("; "));
-  if (proposed.specRevision !== original.specRevision || proposed.planRevision !== original.planRevision! + 1
-    || proposed.phases.length <= original.phases.length) throw new Error("Review must append remediation to the next plan revision without changing specification scope");
-  const evidence = (graph: PlanGraph) => graph.phases.map(({ line: _line, tasks, ...phase }) => ({ ...phase,
-    tasks: tasks.map(({ line: _taskLine, ...task }) => task) }));
-  if (JSON.stringify(evidence(original)) !== JSON.stringify(evidence(proposed).slice(0, original.phases.length))) {
-    throw new Error("Review remediation must preserve every completed phase, task and commit marker");
-  }
+  requireReviewPlan(readSafeArtifact(root, `.cadre/${parent}/plan.md`), artifacts.get(`${parent}/plan.md`)!);
   return { ...previous, status: "in_progress", checkpoint: "ready", operation: null, autonomousReview: loop,
     reviewCycles: [...(previous.reviewCycles ?? []), {
       cycle, outcome: "changes_requested", executionId: execution.executionId,
