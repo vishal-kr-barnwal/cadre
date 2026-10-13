@@ -263,3 +263,64 @@ Host-local drivers, retained external fixtures and logs are under
 fixtures use explicit synthetic approvals and MCP client identities; exhaustive
 model-driven native client sessions are not claimed. Native installation/activation
 and publishing remain separate release gates.
+
+## Repository-bound create and target-aligned reversal follow-up
+
+Five further defects from the expanded audit are fixed:
+
+- Create fingerprints repository HEAD, index and tracked/untracked product inputs,
+  rejects canonical state introduced after preview, and retains the original
+  repository evidence through interrupted promotion. A separately initialized
+  project cannot be overwritten by an older token. Historical committed replay
+  remains zero-change. Existing unborn Git worktrees are supported without
+  reinitialization, while wrong Git bases and nested roots are rejected.
+- Reversal commits and journal resets must agree with the named task/phase/track
+  and explicitly approved shared group. All required delivery boundaries are
+  covered; an approved phase integration reverses its introduced tasks once.
+  Unrelated nodes and the execution contract remain unchanged. Quiescent worker
+  ownership is cleared for reimplementation while history/handoffs are retained.
+- Git computes rename-aware reversal results with disposable refs, worktree,
+  index and object storage. The delivery Git state is not used for experiments.
+  Exact conflict trees remain bounded to target paths and verified later renames.
+- Stage preparation returns a dirty-input `revertBaseline`. Its exact JSON is an
+  approved `reverts/revert-<id>-baseline.json` artifact, named by
+  `repositoryBaselinePath` in the operation and reversal record. Unchanged prior
+  edits survive reconciliation; new product/policy/index drift blocks it.
+  Recovery remains self-contained after stage loss, including nested staging.
+
+The final complete suite passed **357/357 tests** (367,370 ms), with zero failures,
+skips or cancellations. This adds 40 maintained cases to the previous 317-test
+suite: 30 create/freshness/recovery cases, six Git-result/scope cases, three
+baseline recovery cases and one multi-assertion journal-reset case.
+
+The packaged matrix passed **156/156 cases**: 12 brownfield initialization cases
+and 144 reversal cases across three MCP identities, all four approval modes and
+both requested scheduling modes. All 120 valid reversals reached review/archive;
+all 24 wrong-task reconciliations failed before canonical promotion and retained
+the original journal. Supplemental packaged checks passed **13/13**: three
+unborn-Git initializations, seven review/revert recovery cases, and three nested
+baseline recoveries after partial state promotion and stage loss. The latter
+reject changed user inputs, retain intent, restore the approved inputs deliberately,
+and finish delivery/review/archive without another Git reversal.
+
+The matrix began before final compatibility refinements for unborn Git roots and
+canonical nested baseline paths. The complete 357-test run and supplemental
+packaged checks cover those final refinements. A previous full run exposed the
+MCP catalog budget; compact shared-detail advertisements retain strict runtime
+validation and keep the original 80 KiB budget. An invalid fixture claiming an
+existing Git repository without Git was corrected to request initialization.
+Earlier interrupted test runs remain diagnostic evidence, not final results.
+
+Frozen installation, TypeScript, package validation, pack dry run, docs checks,
+CLI doctor, and both edited skill validators pass. The package remains 3.9.2,
+with immutable templates and published receipt schemas unchanged. Stage preparation
+adds optional baseline output; no project schema migration is required. Older
+pending create approvals missing repository evidence require an explicit repair,
+and older reversals retain their original clean-input contract. No automatic
+approval renewal, source-file cleanup, history rewrite or repeat reversal occurs.
+
+Evidence and retained matrix fixtures are under
+`~/.codex/tmp/cadre-all-five-fixes-20261013/`; final logs include `complete.log`,
+`*-final.log`, `unborn.log`, `recovery-packaged.log`, `nested-restart.log`, and
+`results.json`. Native AI-session coverage and final native installer activation
+remain separate release checks.

@@ -37,6 +37,8 @@ At every required clarification or approval boundary, show a concise summary or 
 
 ## Resume protocol
 
+Create approval binds the inspected repository HEAD, index and tracked/untracked product inputs as well as the staged artifacts. Preserve that baseline through apply and interruption recovery. If source content or canonical project state changes after preview, inspect the new reality and prepare a fresh proposal; never reuse the old token to overwrite a newer setup. Committed replay resolves the original immutable receipt before checking later repository content. An older pending setup without repository evidence needs an explicitly approved repair, retaining its original intent and receipts.
+
 - `git-pending`: initialize Git only when the journal says `initialize`; verify the exact approved root and record the checkpoint.
 - `.cadre/stage/create` with only bootstrap state: re-read the candidate manifest and resume approval or apply. Matching partially promoted canonical files are resumable; any differing or unrelated canonical byte is a hard stop.
 - `commit-pending` plus matching dirty artifacts: validate and create the expected artifact commit.
