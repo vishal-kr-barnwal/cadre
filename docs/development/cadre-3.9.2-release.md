@@ -2,8 +2,9 @@
 
 Verification through 2026-10-13 covers the active-revision fix and three additional
 recovery defects found during lifecycle testing, plus the subsequent authority, interrupted-input and imported-draft fixes. This is a candidate verification
-record. Publication and fresh native installer checks for the final patched
-payload remain pending.
+record. The final payload has passed automated validation and native installation.
+Zed UI activation/discovery is blocked by the locked Mac; publication remains
+pending that gate. See the final section for current results.
 
 ## Fixed failures
 
@@ -378,3 +379,70 @@ Evidence and test drivers are under
 `packaged-matrix.log`, `matrix-results.json`, `lifecycle.log`, `validate.log`,
 `pack.log` and `docs.log`. Native installer/activation and publication remain
 separate gates; this work does not claim a release.
+
+
+## Publish-readiness admission follow-up (2026-10-13)
+
+The next audit found that context refresh could change lifecycle state, new track
+creation could reuse an archived ID, and dependency edits could evade scope
+revision and admit unfinished prerequisites. A further configuration probe found
+that refresh could admit an unsupported project context or remove required ignore
+rules. In each case candidate success could precede canonical validation failure.
+
+The fixes share project metadata and whole-track-set invariants between canonical
+validation and a read-only proposed overlay. Candidate preview and generic
+promotion/recovery validate configuration, unique active/archive identity, final
+clean review binding, dependency readiness/cycles and affected staged artifacts.
+Context refresh retains lifecycle, execution ownership and artifact authority;
+dependency edits route through revision. Original refresh state and any required
+plan before-image are retained in ignored recovery evidence and checked against
+existing approval hashes. Committed historical receipts still replay unchanged.
+
+Healthy existing projects need the updated installed payload and server restart,
+without a schema migration. Older invalid pending operations fail before writes
+and retain their exact intent; already-affected state requires an approved repair.
+Evidence, fixture repositories and final validation logs are retained under
+`~/.codex/tmp/cadre-publish-readiness-20261013/`.
+
+
+Final automated verification passed **400/400 maintained tests** with no failures
+or skips. The 21 new tests cover all four approval modes and both schedules,
+valid interrupted refresh recovery, archived identity, dependency revision, and
+invalid configuration in preview and older partial/intent recovery. Compatibility
+checks preserve repair of already-committed historical revision defects and
+legacy interrupted archive operations.
+
+The broader matrix passed **144/144 cases**: 96 packaged negative cases rejected
+before/after restart, 24 packaged repeated remediation flows completed three
+review cycles and archived, and 24 source/in-memory full lifecycle cases archived
+original and successor tracks. A further **24/24 final packaged cases** rejected
+invalid context/ignore changes after restart, then completed valid context refresh,
+review and archive. All matrix modes cover three client identities, four approval
+modes and two requested schedules. These are explicitly approved synthetic runtime
+fixtures, not exhaustive model-driven native conversations.
+
+Frozen dependency installation, strict TypeScript, package validation, pack dry
+run, full docs checks, all ten skill validators and CLI doctor passed. The initial
+full run found four compatibility-test failures; those were fixed and the complete
+400-test rerun is authoritative. Logs: `final-tests.log`, `matrix.log`,
+`config-matrix.log`, `compatibility.log`, `final-check.log`, `final-validate.log`,
+`final-pack.log`, `docs.log` and `doctor.log` in the evidence directory above.
+
+Native installation from the final build succeeded for all clients. Codex reports
+`3.9.2+codex.local-20261013T111117Z` installed/enabled; Claude reports
+`3.9.2+claude.local-20261013T111117Z` enabled at user scope. Zed is `1.23.2` and
+has all ten collision-safe skill links, the packaged server command and 25 exact
+Cadre tool permissions. Codex/Claude narrow approval settings are present, and
+fingerprints confirm unrelated settings were preserved. All three installed MCP
+bundles match SHA-256
+`066a1ff985d6daada8ba20c2f1a47919ddf4a7842d1d0ed7bb171c230c10331c`
+and independently initialize as Cadre 3.9.2 with 25 tools. The global CLI was
+updated from the locally packed candidate; `cadre-ai --version` now reports
+`3.9.2`, and its installed-package doctor passes all 39 templates and the
+self-contained runtime check.
+
+**Remaining publication gate:** the computer-use tool reports that the Mac is
+locked. Zed native skill discovery and active-server UI verification could not be
+completed. Skill links and direct MCP startup do not substitute for that native
+check. Unlock the Mac and complete it before publishing. No tag, push, npm
+publication or GitHub release was performed.
