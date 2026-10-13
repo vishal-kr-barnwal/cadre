@@ -3,8 +3,9 @@
 Verification through 2026-10-13 covers the active-revision fix and three additional
 recovery defects found during lifecycle testing, plus the subsequent authority, interrupted-input and imported-draft fixes. This is a candidate verification
 record. The final payload has passed automated validation and native installation.
-Zed UI activation/discovery is blocked by the locked Mac; publication remains
-pending that gate. See the final section for current results.
+Zed UI activation and skill discovery also passed. No known release blockers
+remain in the tested scope; publication is pending. See the final section for
+current results.
 
 ## Fixed failures
 
@@ -441,8 +442,15 @@ updated from the locally packed candidate; `cadre-ai --version` now reports
 `3.9.2`, and its installed-package doctor passes all 39 templates and the
 self-contained runtime check.
 
-**Remaining publication gate:** the computer-use tool reports that the Mac is
-locked. Zed native skill discovery and active-server UI verification could not be
-completed. Skill links and direct MCP startup do not substitute for that native
-check. Unlock the Mac and complete it before publishing. No tag, push, npm
-publication or GitHub release was performed.
+**Native gate completed (2026-10-13):** after the Mac was unlocked, Zed's
+User / AI / Agent Configuration / Skills settings visibly listed all ten
+`cadre-*` workflows. User / AI / General / MCP Servers showed `cadre` enabled
+with a green status indicator. The Zed process (PID 87505) owned Node children
+87523 and 87663 running the installed marketplace's `dist/cadre-mcp.mjs`.
+The bundle SHA-256 remained identical to the tested candidate above.
+
+The old sample project's Restricted Mode was preserved. Native activation was
+inspected in the already-trusted harness repository window without executing a
+workflow or creating a root `.cadre/` directory. No model request was sent.
+The native gate is complete, and there are no known release blockers in the
+verified scope. No tag, push, npm publication or GitHub release was performed.
