@@ -52,21 +52,22 @@ context.
 
 ## Review And Remediation
 
-Run `review` after implementation reaches `ready_for_review`. Review findings do
-not mutate state until the human accepts their disposition and exact remediation
-artifacts.
-
-After approved remediation, rerun `implement`, including manual verification,
-then review again. A track is completed only after an approved clean cycle.
+Governed, Phase and Track modes use `review` after implementation reaches
+`ready_for_review`; approved findings return to implementation. Autonomous mode
+continues into review and bounded in-scope remediation under its persisted
+authority without another command. All modes require explicit approval of the
+final clean completion. Autonomous cannot waive findings with accepted risks.
 
 ## Archive Batches
 
-Archive explicit track IDs or `all completed`. If selection is omitted and one
-track is uniquely eligible, it can be included directly in the complete batch
-proposal. Ambiguous multi-track selection is resolved before mutation.
+Archive explicit track IDs or `all completed`. An omitted selection includes all
+eligible completed tracks in dependency order. Review the complete selection
+and consequences in one batch approval before mutation.
 
-Archive validates the entire selection and applies it atomically. One
-ineligible track blocks the batch; Cadre never partially archives the rest.
+Archive validates the entire selection before promotion. One ineligible track
+rejects the batch. Promotion uses journaled, resumable writes and moves; an
+interruption may leave partial progress, which resumes under the original
+approval before the single archive commit and receipt reconciliation.
 
 ## Revert Recorded Work
 

@@ -36,7 +36,7 @@ Review the proposed product, engineering guidelines, technology stack,
 workflow, styleguides, patterns, project state, and Git disposition in one final
 authorization envelope. Cadre identifies unchanged bundled defaults concisely
 and asks separately only when a material choice is unresolved. After approval,
-it creates `.cadre/`, validates it, and records setup commits without more
+it creates `.cadre/`, validates it, and records one setup/receipt commit without more
 approval prompts.
 
 ## 2. Create A Feature Or Bug Track
@@ -101,7 +101,7 @@ review, and fix in-scope findings until clean, with one final completion approva
 Parallel/Sequential scheduling remains independent. Phase, Track, and Autonomous
 do not add a start-approval prompt.
 
-Cadre starts a digest-gated execution journal, derives a global queue from ready
+Cadre starts an execution journal under the requested approval mode, derives a global queue from ready
 phases and phase-local tasks, and creates workers only when at least two safe
 nodes can run. A phase can move between sequential execution and task fan-out
 only at a clean checkpoint. Workers use isolated Git worktrees; main reviews
@@ -125,10 +125,11 @@ finds actionable bugs, it presents the findings together with exact bug and
 remediation-plan artifacts. Approved remediation returns the track to
 implementation.
 
-If the evidence is clean—or the human explicitly rejects proposed findings and
-accepts the risks—Cadre previews a clean completion bound to the current
-execution, plan revision, graph digest, and reviewed HEAD. Only `review` can
-mark the track `completed`.
+When evidence is clean, Cadre previews completion bound to the current
+execution, plan revision, graph digest and reviewed HEAD. Outside Autonomous
+mode, the human may explicitly reject findings and record accepted risks.
+Autonomous requires all findings resolved. Every mode requires explicit approval
+of the exact completion proposal; only `review` can mark the track `completed`.
 
 ## 6. Archive Completed Work
 

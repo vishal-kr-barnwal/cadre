@@ -8,7 +8,7 @@ order: 190
 
 # Project Artifact Reference
 
-Cadre 3.5 configuration and state are distributed across explicit approved
+Cadre 4.0 configuration and state are distributed across explicit approved
 artifacts. There is no current `cadre/config.json`.
 
 Unapproved artifact proposals live temporarily beneath
@@ -31,10 +31,9 @@ commit checkpoint and then removed.
 | `.cadre/styleguides/*.md` | Approved general and technology-specific conventions. |
 
 `project.json` includes `schemaVersion`, `runtimeVersion`, and
-`templateSetVersion`. Setup state contains status, checkpoint, commit,
-artifact progress, and an operation with repository root and Git disposition.
-In-progress operation journals may also record the approval digest and exact
-approved artifact path/hash entries used for recovery.
+`templateSetVersion`. Completed setup retains status, checkpoint, an operation reference and artifact
+progress. New initialization recovery lives under `.cadre/stage/operations/`;
+its receipt binds the approved digest and exact artifact path/hash entries.
 
 ## Track State
 
@@ -97,23 +96,29 @@ are `pending`, `running`, `awaiting_approval`, `committed`, `integrating`,
 
 ## Operation Journals
 
-- `.cadre/operations/refresh-<id>.json` records a project refresh.
-- `.cadre/operations/archive-<id>.json` records an archive batch.
-- Track `state.json.operation` records specification, planning, revision,
-  review remediation, or revert work.
+- `.cadre/stage/operations/<operationId>.json` records pending approved
+  promotion, original inputs and recovery evidence. It is ignored by Git.
+- `.cadre/receipts/<operationId>.json` records immutable approval/provenance
+  and belongs in the operation's one commit.
+- Track `state.json.operation` binds active implementation and retained workflow
+  state; execution journals own task progress.
 
-All record approved artifact membership, durable progress, expected Git
-provenance, and the resulting commit when known.
+Resolve `op:<operationId>` through receipt reconciliation before Git range
+commands. Preserve legacy `.cadre/operations/` refresh/archive journals as
+historical evidence. Pending operations using removed legacy mutation paths
+require recovery with Cadre 3.9.0 before returning to 4.0.
 
 ## Ignored Runtime Paths
 
 `.cadre/.gitignore` excludes:
 
-- `stage/` — unapproved, human-inspectable candidate artifacts;
+- `stage/` — candidate artifacts and approved temporary recovery journals;
 - `.worktrees/` — temporary Cadre-managed execution worktrees;
-- `wisps/` — disposable untracked exploration output.
+- `wisps/` — disposable untracked exploration output;
+- `.build-cache/cadre/` — the runtime-owned build cache.
 
-Neither path is durable delivery state.
+These paths are excluded from commits. Pending recovery journals and worktrees
+can contain essential unfinished work; being ignored does not make them safe to delete.
 
 
 ### Autonomous review state

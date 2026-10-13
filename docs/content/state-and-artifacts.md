@@ -24,9 +24,7 @@ The installed plugin owns the runtime and immutable template catalog.
 ├── styleguides/
 ├── patterns/
 │   └── index.md
-├── operations/
-│   ├── refresh-<id>.json
-│   └── archive-<id>.json
+├── operations/             # retained legacy journals, if any
 ├── receipts/               # immutable completed operation evidence
 ├── refreshes/
 ├── tracks/
@@ -40,7 +38,8 @@ The installed plugin owns the runtime and immutable template catalog.
 │       ├── bugs/
 │       └── revisions/
 ├── archive/
-├── stage/                  # ignored unapproved candidate artifacts
+├── stage/                  # ignored candidates and pending recovery intent
+│   └── operations/
 ├── .build-cache/cadre/     # explicitly ignored owned build cache
 ├── .worktrees/             # ignored execution worktrees
 └── wisps/                  # optional ignored output in initialized projects
@@ -94,18 +93,14 @@ handoffs from the retained completed execution as historical evidence, labeled
 with their recorded revision and graph. Reassess them against the new plan;
 they do not describe its execution state or grant approval.
 
-Every multi-step mutation records intent and progress before changing the next
-artifact or Git state. Common fields include:
+Every multi-step promotion records intent before canonical writes. The pending
+recovery journal contains the original receipt, exact proposed file contents,
+source fingerprints and workflow-specific evidence. Execution journals separately
+record node progress, verification, worker history and commits.
 
-- action and operation/batch/execution identity;
-- base commit and expected commit;
-- approved timestamp and artifact set;
-- artifact progress and durable checkpoint;
-- source/target status and operation-specific evidence;
-- resulting commit when it becomes known.
-
-The journal is part of recovery correctness, not temporary metadata. Do not
-delete or replace it to make a blocked workflow appear fresh.
+Recovery intent is temporary but essential until the receipt commit reconciles.
+Do not delete or replace it to make a blocked workflow appear fresh. Successful
+reconciliation removes it without changing tracked provenance.
 
 ## Derived State
 

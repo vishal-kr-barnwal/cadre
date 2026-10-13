@@ -66,13 +66,15 @@ decline, cancel, and fallback responses do not.
 
 ## Mutation And Commit Boundary
 
-Multi-step procedures record an operation before the first write. Artifact
-progress advances durably. Validation and derived-index checks occur before the
-expected commit. The resulting SHA is then recorded in state, sometimes in a
-small follow-up commit when it cannot safely be part of the artifact commit.
+Multi-step promotions persist approved recovery intent under ignored
+`.cadre/stage/operations/` before the first canonical write. The promoted files
+and immutable `.cadre/receipts/<operationId>.json` share one commit containing
+the exact `Cadre-Operation` and `Cadre-Receipt` trailers.
 
-This two-commit pattern is intentional: a successful Git commit may occur just
-before interruption, and the next run must record rather than repeat it.
+Tracked provenance uses `op:<operationId>` references. Reconciliation verifies
+the unique reachable commit and its receipt/artifact hashes, then changes only
+temporary state. A restart after the Git commit reconciles that existing commit;
+it never creates a follow-up SHA-recording commit.
 
 ## Execution Transitions
 
@@ -99,9 +101,9 @@ same full suite again. Product-task commits remain distinct, while Cadre-only
 journal, plan, learning, and index changes are checkpointed once per phase and
 once at final readiness instead of once per node status.
 
-After `execution_finish` converges its four state artifacts, implementation
+After `execution_finish` promotes its completed state artifacts and receipt, implementation
 creates one `cadre(implement): complete <track-id>` commit containing only the
-completed journal, plan markers, track state, and derived index. Review starts
+completed journal, plan markers, track state, derived index, and immutable receipt. Review starts
 from that clean bookkeeping boundary.
 
 ## Finality

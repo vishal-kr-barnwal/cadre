@@ -280,7 +280,7 @@ Zed Agent:   /cadre-implement passwordless-login sequentially
 
 Implementation starts only after declared track dependencies are completed. Phase and task dependencies form a hierarchical DAG: phase dependencies activate phases, task dependencies expose phase-local work, and main allocates one global worker bound across every ready task. The generated workflow defaults to three delegated workers, the execution runtime accepts `maxWorkers` from 1 through 32, and effective concurrency is clamped by safe ready nodes and available host worker slots. Different phases can use direct execution, a sequential phase worker, or task-worker fan-out concurrently. Within one phase, execution can switch between sequential and fan-out modes only at a clean, journaled checkpoint. The main agent remains the only scheduler, operational owner of phase integration worktrees, state owner, merger, conflict resolver, worktree cleaner, and recorder of human approval.
 
-Every delivery phase ends with a derived manual-verification barrier over its tasks. The final track-level manual verification depends on every delivery phase and always runs in the main agent against the canonical worktree. Cadre resumes from its execution journal, reads dependency-phase learning, verifies and presents each change before commit, records task and phase provenance, and advances the track to `ready_for_review` only after all barriers pass.
+Every delivery phase ends with a derived verification barrier over its tasks. The final track-level verification depends on every delivery phase and always runs in the main agent against the canonical worktree. Governed and Phase modes require human phase approval; Governed, Phase and Track require human track verification. Autonomous verifies under persisted authority and requires explicit final clean-completion approval. Cadre resumes from its execution journal, reads dependency-phase learning, verifies changes under the selected mode, records task and phase provenance, and advances the track to `ready_for_review` only after all barriers pass.
 
 ### 4. Review and complete the track
 
@@ -353,7 +353,8 @@ An initialized project has this shape:
 ├── tracks.md
 ├── styleguides/
 ├── patterns/
-├── operations/
+├── receipts/                    # tracked immutable operation evidence
+├── operations/                  # retained historical journals, when present
 ├── refreshes/
 ├── tracks/
 │   └── <track-id>/
@@ -365,7 +366,7 @@ An initialized project has this shape:
 │       ├── bugs/
 │       └── revisions/
 ├── archive/
-├── stage/                       # ignored, unapproved candidate artifacts
+├── stage/                       # ignored candidates and approved recovery journals
 ├── .worktrees/                  # ignored, temporary execution worktrees
 └── wisps/                       # ignored, disposable exploration output
 ```
@@ -377,7 +378,8 @@ Important sources of truth:
 - `executions/execution-<id>.json` is the resumable runtime journal. Ready and active nodes are derived from it; track state does not duplicate an active phase or task.
 - Track-local `state.json` defines identity, type, lifecycle status, track dependencies, revision, checkpoints, operation history, and the last completed execution reference.
 - `project.json` contains project setup and refresh history; it does not duplicate track records.
-- `.cadre/operations/refresh-<id>.json` and archive operation files preserve project-wide mutation checkpoints.
+- `.cadre/receipts/<operation-id>.json` preserves immutable operation evidence. Commit it with the promoted artifacts once; reconciliation verifies that commit without writing a follow-up SHA commit.
+- `.cadre/stage/operations/<operation-id>.json` retains ignored approved recovery state until reconciliation. Preserve it across interruptions. Historical `.cadre/operations/` records remain supported evidence.
 - `tracks.md` is generated from track-local state and is never hand-edited.
 - Track directory paths are derived from status and ID. A path is never persisted in track state.
 
@@ -387,28 +389,32 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
+| `workflow_elicit` | No | Return required workflow questions through native elicitation or a structured fallback. |
 | `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguide descriptors and hashes for an approved technology list. |
 | `context_read` | No | Read required track/node context with source hashes, freshness findings, and complete continuation pages. |
+| `diagnostic_read` | No | Page through a full process-local diagnostic after a bounded error response. |
 | `project_status` | No | Return complete validation plus scoped canonical, staged, shadowed, or implementation status. |
 | `state_validate` | No | Validate project, track, plan, learning, dependency, review, and archive invariants. |
 | `candidate_stage_prepare` | Atomic | Create/resume a stage and optionally prune files outside its exact `expectedFiles` set. |
 | `candidate_inspect` | No | Return one exact manifest and validate every staged root or nested plan against its declared target status. |
+| `candidate_apply` | Approval-aware | Prepare/apply approved candidates and resume/reconcile immutable operation receipts. |
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
-| `review_complete` | Adaptive | Derive the full execution-base review range, then prepare/apply an idempotent clean completion. |
+| `review_complete` | Adaptive | Derive the review range from the execution base or original Autonomous baseline, then prepare/apply clean completion. |
 | `archive_batch_candidate` | Adaptive | Read staged pattern/seed files, return the complete batch for approval, then apply its unchanged token. |
 | `execution_start` | Atomic | Create the authorized execution journal and enter `in_progress` in one call. |
 | `execution_checkpoint` | Atomic | Apply one strict `scope` + event-specific `action` with required evidence. |
 | `execution_status` | No | Return a compact ready/active/blocked scheduler view, with optional focused node detail. |
-| `execution_finish` | Atomic | Convergently write completed execution, plan markers, `ready_for_review` state, and index. |
+| `execution_finish` | Atomic | Promote completed execution, plan markers, `ready_for_review` state, index and receipt with resumable per-file writes. |
 | `worktree_create` | Atomic | Create/reconcile a worktree and record node start. |
 | `integration` | Adaptive | Merge and record integration; require a second call only in governed mode. |
 | `worktree_cleanup` | Atomic | Remove a verified integrated worktree and record completion. |
 | `project_init_candidate` | Adaptive | Generate defaults around staged authored context and apply after approval. |
 | `tracks_render` | Atomic | Validate and write deterministic `tracks.md` from current track state. |
 
-The four adaptive tools use a strict `request` union: prepare accepts only its
-declared fields, while apply accepts only an unchanged `proposalToken`. The MCP
+Adaptive prepare/apply tools use a strict `request` union: prepare accepts only
+its declared fields, while apply accepts only an unchanged `proposalToken`.
+`candidate_apply` also supports explicit resume and reconcile requests. The MCP
 selects one result representation: structured JSON and output schemas for recognized structured clients, compact text for other clients. Server-side output validation remains strict in both cases. Template bodies appear once. The Node-18-compatible serialized tool catalog is kept below 80 KiB, including the context and handoff contracts. The MCP
 server cannot approve its own proposals or run arbitrary shell commands. Its
 Git surface is limited to derived Cadre worktree creation, non-squash
@@ -418,7 +424,7 @@ Multi-file state operations use atomic individual writes and converge from
 matching partial state; mismatched bytes, hashes, journals, or Git HEAD remain
 hard failures.
 
-Review and archive minimize approval fragmentation without weakening governance. A finding disposition and its exact remediation artifacts may share one approval; explicit reject-and-complete records accepted risks in the clean review; and a uniquely eligible archive target is included directly in the full batch proposal. Archive prepare computes the post-move `tracks.md` before approval, including archived rows. Any changed content, selection, digest, or consequence requires a corrected proposal and renewed approval.
+Review and archive minimize approval fragmentation without weakening governance. A finding disposition and its exact remediation artifacts may share one approval. Outside Autonomous, explicit reject-and-complete records accepted risks; Autonomous completion requires no unresolved findings or accepted risks. Omitting archive track IDs selects all eligible completed tracks in dependency order. Archive prepare computes the post-move `tracks.md` before approval, including archived rows. Any changed content, selection, digest, or consequence requires a corrected proposal and renewed approval.
 
 ### Worktree layout and worker model
 

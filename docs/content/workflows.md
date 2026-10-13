@@ -25,7 +25,7 @@ The workflow:
 4. Identifies bundled workflow/styleguide defaults concisely and asks only
    about unresolved material choices.
 5. Presents one complete initialization authorization envelope.
-6. Applies initialization atomically after approval of its prepare digest.
+6. Promotes initialization with journaled recovery after approval of its prepare digest.
 7. Initializes Git when included in that envelope and no repository exists.
 8. Validates, commits, and records provenance without follow-up approvals.
 
@@ -120,8 +120,9 @@ included with all cascading changes in one revision approval.
 
 ## archive
 
-Use `archive` after a clean approved review. It accepts explicit track IDs,
-`all completed`, or a uniquely eligible track.
+Use `archive` after a clean approved review. It accepts explicit track IDs or
+`all completed`; omitting selection includes all eligible completed tracks in
+dependency order, presented in the batch approval.
 
 One digest-bound batch can move multiple completed tracks, distill their
 learning with existing patterns, reseed active tracks, update lifecycle state,

@@ -62,6 +62,17 @@ export default async function DocPage({ params }: PageProps) {
     <DocsShell docs={docs} headings={doc.headings}>
       <StructuredData data={{
         "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "@id": `${siteUrl(`${doc.href}/`)}#article`,
+        headline: doc.title,
+        description: doc.description,
+        url: siteUrl(`${doc.href}/`),
+        mainEntityOfPage: siteUrl(`${doc.href}/`),
+        inLanguage: "en",
+        isPartOf: { "@id": `${siteUrl()}#website` },
+      }} />
+      <StructuredData data={{
+        "@context": "https://schema.org",
         "@type": "BreadcrumbList",
         itemListElement: breadcrumbs.map((crumb, index) => ({
           "@type": "ListItem",

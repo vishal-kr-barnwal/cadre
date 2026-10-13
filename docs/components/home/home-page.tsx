@@ -29,7 +29,7 @@ const featureCards = [
   {
     title: "Human approval gates",
     description:
-      "Artifacts, commits, integrations, verification, and lifecycle changes stay proposals until you approve them.",
+      "Approved scope and your chosen approval mode govern delivery. Every clean track completion requires your explicit approval.",
     icon: WorkflowIcon,
   },
   {
@@ -41,7 +41,7 @@ const featureCards = [
   {
     title: "Safe parallel execution",
     description:
-      "Dependency-ready workers use isolated worktrees while the main agent owns scheduling, integration, and approval.",
+      "Dependency-ready workers use isolated worktrees while the main agent owns scheduling, integration, and approval recording.",
     icon: GitBranchIcon,
   },
 ]
@@ -137,7 +137,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               </Button>
             </div>
             <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3">
-              {["Claude Code", "OpenAI Codex", "versioned MCP runtime"].map((label) => (
+              {["Claude Code", "OpenAI Codex", "Zed Agent"].map((label) => (
                 <div key={label} className="rounded-xl border bg-card px-4 py-3 text-sm font-medium text-cadre-ink">
                   {label}
                 </div>
@@ -157,6 +157,12 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
             <p className="text-muted-foreground">
               The docs follow the actual create-to-archive lifecycle: context,
               planning, implementation, verification, review, learning, and recovery.
+            </p>
+            <p className="text-muted-foreground">
+              Upcoming, independently opt-in capabilities include GitHub/GitLab
+              coordination for multiple people, a knowledge base built during work
+              and reused as context, and polyrepo support. Each will be disabled
+              by default. <Link className="underline underline-offset-4" href="/team-and-polyrepo">Explore the roadmap</Link>.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
@@ -198,7 +204,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                       </CardTitle>
                     </CardHeader>
                     <CardFooter>
-                      <Button variant="ghost" size="sm" render={<Link href={link.href} />}>
+                      <Button variant="ghost" size="sm" aria-label={`Open ${link.title}`} render={<Link href={link.href} />}>
                         Open guide
                         <ArrowRightIcon data-icon="inline-end" />
                       </Button>
@@ -232,7 +238,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                   <CardDescription>{doc.description}</CardDescription>
                 </CardHeader>
                 <CardFooter>
-                  <Button variant="outline" size="sm" render={<Link href={doc.href} />}>
+                  <Button variant="outline" size="sm" aria-label={`Read ${doc.navTitle}`} render={<Link href={doc.href} />}>
                     Read
                     <ArrowRightIcon data-icon="inline-end" />
                   </Button>

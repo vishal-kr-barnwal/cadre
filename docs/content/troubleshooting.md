@@ -95,13 +95,13 @@ Do not delete the journal or reset the repository.
 Common legitimate recovery cases are:
 
 - approved files are dirty and ready for their expected commit;
-- the expected commit already exists and only its SHA needs recording;
-- artifact work is committed while follow-up state bookkeeping remains dirty;
+- the expected receipt commit exists and needs reconciliation;
+- promoted artifacts and their receipt await the original operation's one commit;
 - a worker commit or merge exists but its node transition is not recorded.
 
 Anything else requires a deliberate reconciliation decision.
 
-Cadre 3.9.1 preserves the reviewed product HEAD across bookkeeping commits and
+Cadre 4.0 preserves the reviewed product HEAD across bookkeeping commits and
 recognizes already committed receipts. Upgrade the installed integration if
 implementation/review keeps requesting another bookkeeping commit. Resume the
 existing track and reconcile its original operation receipt; keep the verified
@@ -140,13 +140,14 @@ as active workers. Finish supported cleanup of integrated workers before prepari
 a revision or refresh; preserve the journal evidence. A remaining worker branch,
 orphaned directory, or unsafe symlink still blocks promotion.
 
-A v5 refresh that changes active scope must include one fresh revision record per
+A receipt-based refresh that changes active scope must include one fresh revision record per
 affected track, proposed state with the next track revision, a reassessed plan,
 and synchronized learning/dependency context. Keep authored execution and
 Autonomous authority fields unchanged; the runtime previews their resulting
 transition within the same approval. Context-only refresh retains counters and
 current scope authority. Complete legacy contract/policy migration first, then
-prepare a separate v5 scope proposal if needed.
+prepare a separate scope proposal if needed. Unsupported formats use the 3.9.0
+bridge first; compatible 3.9.x/v5 projects need no version-only refresh.
 
 ## Resume Reports OPERATION_INPUT_DRIFT
 
@@ -228,8 +229,8 @@ recording the merge. Never force cleanup or branch deletion.
 Review requires `ready_for_review`, a current completed execution, a matching
 plan revision and graph digest, a reviewed HEAD, and clean centralized
 validation. Approved actionable findings return the track to implementation.
-Only an approved clean cycle—or explicit accepted-risk completion—can mark it
-completed.
+Only explicit clean-completion approval can mark it completed. Non-Autonomous
+modes can record explicitly accepted risks; Autonomous cannot waive findings.
 
 ## Archive Rejects A Batch
 

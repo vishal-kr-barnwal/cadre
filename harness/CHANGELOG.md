@@ -19,6 +19,9 @@ The package, runtime, docs and native plugin manifests are versioned together at
 
 ### Compatibility and verification
 
+- Reconcile public guides and the package README with the 4.0 receipt/recovery paths, approval modes, archive selection and all 22 MCP tools.
+- Fix documentation heading links containing underscores or punctuation. Add social-preview images, page structured data and export validation for metadata, internal links, sitemap and robots directives.
+
 All ten skills, four approval modes, sequential/parallel scheduling, schema-2
 project/track state, historical journals and approval evidence remain supported.
 Direct MCP consumers must replace the three removed setup/archive tools with

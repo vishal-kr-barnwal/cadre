@@ -37,3 +37,21 @@ pnpm build
 pnpm preview:pages
 pnpm deploy
 ```
+
+## Content and search validation
+
+`pnpm --filter cadre-docs check` validates content/navigation and version parity,
+lints, type-checks, exports the site, then audits the rendered HTML with
+`check:seo`. The export audit checks every page for unique titles/descriptions,
+one H1, canonical URLs, social previews, JSON-LD, internal links and section
+anchors, sitemap coverage, crawlable robots rules and a noindex 404.
+
+Canonical URLs use `SITE_ORIGIN` in `lib/seo.ts` plus the configured base path.
+Update that origin before deploying to a different canonical domain. Sitemap
+and metadata share this URL builder. Dates are not fabricated at build time;
+there is no artificial sitemap freshness claim.
+
+The optional `GOOGLE_SITE_VERIFICATION` build variable adds a verification meta
+tag. Deployment and Google Search Console indexing remain separate from local
+validation. Guidance follows [Google's SEO starter guide](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)
+and [sitemap guidance](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap).

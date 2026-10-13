@@ -21,6 +21,8 @@ for (const [sectionOrder, group] of navigation.entries()) {
 const files = fs.readdirSync(contentRoot).filter((file) => file.endsWith(".md")).sort()
 const docs = new Map()
 const orders = new Map()
+const titles = new Set()
+const descriptions = new Set()
 
 for (const file of files) {
   const slug = file.replace(/\.md$/, "")
@@ -43,6 +45,14 @@ for (const file of files) {
   }
   orders.set(parsed.data.order, file)
 
+  for (const [key, seen] of [["title", titles], ["description", descriptions]]) {
+    const value = parsed.data[key]
+    if (typeof value !== "string" || !value.trim()) fail(`${file}: ${key} must be nonempty text`)
+    if (seen.has(value)) fail(`${file}: duplicate ${key}`)
+    seen.add(value)
+  }
+  const prose = parsed.content.replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, "")
+  if ([...prose.matchAll(/^#\s+.+$/gm)].length !== 1) fail(`${file}: expected one top-level title`)
   checkHeadings(file, parsed.content)
   docs.set(slug, { file, source, content: parsed.content, data: parsed.data })
 }
@@ -118,6 +128,17 @@ function checkMcpCoverage(docsBySlug) {
     if (!reference.includes(`## ${tool}\n`)) {
       fail(`mcp-reference.md: missing ${tool}`)
     }
+  }
+  for (const [, heading] of reference.matchAll(/^## ([a-z]+_[a-z_]+)$/gm)) {
+    if (!tools.includes(heading)) fail(`mcp-reference.md: undocumented or retired tool ${heading}`)
+  }
+  const packageReadme = fs.readFileSync(path.join(harnessRoot, "README.md"), "utf8")
+  const mcpSection = packageReadme.split("## MCP capabilities\n")[1]?.split(/^## /m)[0] ?? ""
+  const documented = [...mcpSection.matchAll(/^\| `([a-z_]+)` \|/gm)]
+    .map((match) => match[1])
+  if (documented.length !== tools.length || new Set(documented).size !== tools.length ||
+      tools.some((tool) => !documented.includes(tool))) {
+    fail("harness/README.md: MCP table must match the runtime tool catalog")
   }
 }
 

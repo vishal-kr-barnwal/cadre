@@ -50,8 +50,10 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `skills/*/agents/openai.yaml` | Explicit Codex picker metadata. |
 | `agents/` | Claude phase/task worker isolation contracts. |
 | `src/domain/templates.ts` | Immutable template catalog and styleguide resolution. |
-| `src/domain/init.ts` | Digest-gated project initialization and setup checkpoints. |
+| `src/domain/init.ts` | Digest-gated project initialization and receipt promotion. |
 | `src/domain/staging.ts` | Safe project-local candidate paths, bounded reads, and manifest inputs. |
+| `src/domain/candidate-apply.ts` | Validated candidate promotion and lifecycle reconciliation. |
+| `src/domain/operation-receipts.ts` | Immutable operation receipts, interrupted promotion recovery and unique Git commit verification. |
 | `src/domain/state.ts` | Project discovery, validation, status, and derived track index. |
 | `src/domain/plan.ts` | Plan parsing and DAG/manual-barrier validation. |
 | `src/domain/execution.ts` | Execution journals, node transitions, and finish gating. |
@@ -59,9 +61,7 @@ coordinate the `cadre-ai` and `cadre-docs` packages.
 | `src/domain/governance.ts` | Review completion and archive-batch governance. |
 | `src/mcp/server.ts` | MCP server instructions, resource registration, schemas, and tool adapters. |
 | `scripts/` | Build, CLI, installation, uninstall, permissions, packaging, and source validation. |
-| `templates/v1/` | Immutable published 3.3 template set. |
-| `templates/v2/` | Immutable published compact template set. |
-| `templates/v3/` | Immutable published memory and context templates. |
+| `templates/v1/` through `templates/v5/` | Immutable historical source fixtures, excluded from the installed payload. |
 | `templates/v6/` | Active cohesive-change, receipt, dependency-context, workflow, and styleguide templates. |
 
 The domain directory currently includes filesystem and Git-aware behavior; it
@@ -108,7 +108,7 @@ Its adapters request text-mode template bundles because Zed does not expose
 embedded MCP resource bodies to the agent, and unsupported form elicitation
 falls back to one concise chat question.
 
-Both clients operate the same workflow and state contracts. Client-specific
+All three clients operate the same workflow and state contracts. Client-specific
 metadata does not create different lifecycle semantics.
 
 ## Safety Architecture

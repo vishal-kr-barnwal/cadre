@@ -131,7 +131,7 @@ For finding-bearing reviews, use `candidate_inspect` with target status `in_prog
 
 ## review_complete
 
-Approval-aware clean-review completion. Prepare accepts `projectRoot`, `trackId`, `approval`, and optional `acceptedRisks`; the server derives `<execution.baseCommit>..<lastExecution.headCommit>`, so the first implementation commit is included. The legacy `approval` input stores proposal evidence as `reviewEvidence`; prepare does not record confirmed approval. Apply persists a separate `approvalConfirmation` receipt bound to the proposal digest. There is no caller-supplied range start. Apply returns a compact receipt, recognizes an already-written matching review cycle, and repairs a stale derived index without duplicating history.
+Approval-aware clean-review completion. Prepare accepts `projectRoot`, `trackId`, `approval`, and optional `acceptedRisks` (forbidden in Autonomous). The server derives the range through `lastExecution.headCommit`, starting at `autonomousReview.initialBaseCommit` for Autonomous or `execution.baseCommit` otherwise. This includes the first implementation commit and preserves the original Autonomous baseline across revisions and remediation. The legacy `approval` input stores proposal evidence as `reviewEvidence`; prepare does not record confirmed approval. Apply persists a separate `approvalConfirmation` receipt bound to the proposal digest. There is no caller-supplied range start. Apply returns a compact receipt, recognizes an already-written matching review cycle, and repairs a stale derived index without duplicating history.
 
 Every approval mode checks product and verification-policy content against the
 reviewed HEAD before clean completion. Pending clean or finding-bearing review
@@ -167,7 +167,7 @@ Returns compact scheduler state. It remains available for focused follow-up, but
 
 ## execution_finish
 
-Verifies completed nodes, commits, final manual approval, and removed worktrees, then writes plan markers, completed execution, `ready_for_review` state, and index with atomic per-file replacement. If interrupted, it reuses persisted completion time/HEAD and accepts each artifact in its exact source or target form while completing the remaining writes.
+Verifies completed nodes, commits, final verification under the selected approval mode, and removed worktrees, then promotes plan markers, completed execution, `ready_for_review` state, index and an immutable operation receipt with atomic per-file replacement. Final verification requires human approval in Governed, Phase and Track modes; Autonomous records verification under persisted authority. Commit the promoted artifacts and receipt once, then reconcile through `candidate_apply`. If interrupted, resume the approved operation from its ignored recovery journal; mismatched inputs remain a hard stop.
 
 ## worktree_create
 
@@ -183,7 +183,7 @@ Removes a verified integrated worktree/branch and records node completion. Retry
 
 ## project_init_candidate
 
-Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v6 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
+Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v6 workflow/default guides and digest-binds all outputs. Apply journals promotion and writes an immutable receipt with the initial project artifacts. Commit them once and reconcile through `candidate_apply`. Resume an interrupted approved promotion using its operation ID and approval digest; unexpected or differing bytes remain a hard stop. Matching committed receipt replay does not create another initialization commit.
 
 ## tracks_render
 

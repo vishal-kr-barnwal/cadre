@@ -35,7 +35,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Use for:** a new/resumed feature or bug.
 - **Requires:** substantive scope, acceptance, dependencies, and plan evidence.
 - **Primary MCP:** project status, template bundles,
-  `candidate_stage_prepare`, `candidate_inspect`, state validation, and
+  `candidate_stage_prepare`, `candidate_inspect`, `candidate_apply`, state validation, and
   atomic tracks index rendering.
 - **Candidate recovery:** focused status distinguishes an unapproved staged
   candidate from canonical track state; resume its exact manifest and plan
@@ -72,7 +72,9 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   implementation.
 - **Clean path:** adaptive `review_complete` binds approval to execution,
   plan revision, graph digest, reviewed HEAD, accepted risks, and the server-
-  derived range from execution base through reviewed HEAD.
+  derived range through reviewed HEAD. Autonomous uses its original review
+  baseline across revisions and remediation; other modes use the execution base.
+  Autonomous cannot complete with accepted risks.
 - **Final decision:** after a clean Autonomous review, summarize verification and
   remediation and present the exact completion proposal. The author can approve
   without invoking review again or report additional bugs. Changed product or
@@ -96,10 +98,13 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 ## archive
 
 - **Use for:** one or more tracks already completed by clean review.
-- **Primary MCP:** adaptive staged archive command and atomic provenance record.
+- **Primary MCP:** `archive_batch_candidate` for approved promotion and
+  `candidate_apply` for receipt recovery/reconciliation.
 - **Writes:** track moves/status, consolidated patterns, relevant active-track
   seeds, immutable receipt and derived index in one commit.
-- **Atomicity:** one ineligible selection rejects the whole batch.
+- **Selection:** omitted track IDs select all eligible completed tracks in dependency order.
+- **Recovery:** one ineligible selection rejects the batch before promotion.
+  Approved writes and moves are journaled and resumable after partial progress.
 - **Stops at:** `archived`.
 
 ## refresh

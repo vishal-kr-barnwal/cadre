@@ -22,8 +22,8 @@ through archived learning.
 | Planning | Validated acyclic phase/task graphs with derived phase and track manual-verification barriers. |
 | Implementation | Parallel-by-default or explicitly sequential execution, with a global ready queue, phase-local task waves, clean mode handoffs, and resumable journals. |
 | Isolation | Phase and task workers in Cadre-managed sibling Git worktrees. |
-| Governance | Semantic authorization envelopes bind exact proposals to unchanged journals, indexes, commits, transitions, and provenance; implementation adds governed, track-default, or autonomous boundaries. |
-| Review | Evidence-backed findings, approved remediation cycles, accepted-risk recording, and clean completion. |
+| Governance | Semantic authorization envelopes bind exact proposals to unchanged journals, indexes, commits, transitions, and provenance; implementation adds Governed, Phase, Track (default), or Autonomous boundaries. |
+| Review | Evidence-backed findings and remediation cycles; explicit clean-completion approval in every mode. Accepted risks are available only outside Autonomous mode. |
 | Change control | Lifecycle-aware revision, project-context refresh, and additive Git-aware revert. |
 | Learning | Dependency-phase learning, pattern seeds, pattern distillation, and active-track reseeding. |
 | Recovery | Setup, execution, revision, review, refresh, revert, and archive reconciliation after interruption. |
@@ -46,8 +46,9 @@ list. Each can be accepted, amended, or replaced before project initialization.
 Cadre's MCP runtime is intentionally constrained:
 
 - It exposes immutable versioned templates and typed state operations.
-- Already-authorized deterministic mutations validate and apply atomically in
-  one call; genuine decision boundaries return a digest-bound proposal token.
+- Already-authorized deterministic mutations validate and apply in one call;
+  multi-file promotions use journaled recovery and atomic per-file writes.
+  Genuine decision boundaries return a digest-bound proposal token.
 - Git support is limited to derived worktree creation, non-squash integration,
   status, and verified cleanup.
 - It does not run arbitrary shell commands, edit product files for workers,
@@ -61,7 +62,7 @@ before the first artifact or Git mutation.
 
 ## Not In The Current Release
 
-Cadre 3.5 does not currently provide:
+Cadre 4.0 does not currently provide:
 
 - GitHub Copilot or Google Antigravity plugins;
 - project-scoped client installation;
@@ -71,5 +72,7 @@ Cadre 3.5 does not currently provide:
 - a generic `cadre_workflow` packet API;
 - multi-repository orchestration.
 
-Polyrepo delivery is planned. See [Polyrepo Mode](team-and-polyrepo.md) for the
-current boundary and intended direction.
+Deeper GitHub/GitLab multi-person coordination, a knowledge base built during
+delivery and reused as context, and polyrepo support are on the
+[upcoming roadmap](team-and-polyrepo.md). Each will be independently opt-in and
+disabled by default. Existing phase learning and archive patterns remain core capabilities.

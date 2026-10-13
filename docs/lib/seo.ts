@@ -26,7 +26,18 @@ export function pageMetadata(title: string, description: string, path: string): 
       title: displayTitle,
       description,
       url: siteUrl(path),
+      images: [{
+        url: siteUrl("/cadre-mark.png"),
+        width: 1024,
+        height: 1024,
+        alt: "Cadre AI logo",
+      }],
     },
-    twitter: { card: "summary", title: displayTitle, description },
+    twitter: {
+      card: "summary",
+      title: displayTitle,
+      description,
+      images: [{ url: siteUrl("/cadre-mark.png"), alt: "Cadre AI logo" }],
+    },
   }
 }

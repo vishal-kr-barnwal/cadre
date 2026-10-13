@@ -2,6 +2,12 @@ import fs from "node:fs"
 import path from "node:path"
 
 import matter from "gray-matter"
+import GithubSlugger from "github-slugger"
+import { unified } from "unified"
+import remarkParse from "remark-parse"
+import remarkGfm from "remark-gfm"
+import { toString } from "mdast-util-to-string"
+import { visit } from "unist-util-visit"
 
 import { DOC_NAVIGATION, getNavigationPosition, type DocSection } from "@/lib/navigation"
 
@@ -108,7 +114,7 @@ export function getDocBySlug(slug: string): DocPage {
     section: current.section,
     order: Number(data.order ?? current.order),
     content: stripTopLevelTitle(parsed.content),
-    headings: extractHeadings(parsed.content),
+    headings: extractHeadings(stripTopLevelTitle(parsed.content)),
     previous: index > 0 ? docs[index - 1] : null,
     next: index < docs.length - 1 ? docs[index + 1] : null,
   }
@@ -138,22 +144,18 @@ export function getAllSlugs() {
 }
 
 function extractHeadings(content: string): Heading[] {
-  const headingPattern = /^(#{2,3})\s+(.+)$/gm
+  // Parse the same Markdown syntax and use the same slugger as rehype-slug.
+  // Regex parsing both included fenced examples and changed punctuation IDs.
+  const tree = unified().use(remarkParse).use(remarkGfm).parse(content)
+  const slugger = new GithubSlugger()
   const headings: Heading[] = []
-  const seen = new Map<string, number>()
-  let match: RegExpExecArray | null
-
-  while ((match = headingPattern.exec(content))) {
-    const text = match[2].replace(/`/g, "").trim()
-    const base = slugify(text)
-    const count = seen.get(base) ?? 0
-    seen.set(base, count + 1)
-    headings.push({
-      id: count ? `${base}-${count}` : base,
-      text,
-      level: match[1].length,
-    })
-  }
+  visit(tree, "heading", (node) => {
+    const text = toString(node)
+    const id = slugger.slug(text)
+    if (node.depth === 2 || node.depth === 3) {
+      headings.push({ id, text, level: node.depth })
+    }
+  })
 
   return headings
 }
@@ -163,15 +165,6 @@ function titleFromSlug(slug: string) {
     .split("-")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ")
-}
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/`/g, "")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
 }
 
 function stripTopLevelTitle(content: string) {

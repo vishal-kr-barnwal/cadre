@@ -22,9 +22,6 @@ skills/                  # create, track, implement, review, revise, archive,
 zed-skills/              # generated cadre-* adapters for native Zed Agent
 agents/                  # Claude phase and task worker definitions
 dist/cadre-mcp.mjs       # self-contained stdio MCP runtime
-templates/v1/            # immutable published legacy templates
-templates/v2/            # immutable compact legacy templates
-templates/v3/            # immutable memory and context templates
 templates/v6/            # active cohesive-change and bounded-context templates
 .codex-plugin/           # Codex manifest
 .claude-plugin/          # Claude manifest
@@ -60,9 +57,10 @@ apply(token only)
 ```
 
 Apply recomputes against current state. Changed files, state, branches, commits,
-selection, or input invalidate the digest and require a new prepare. The second
-call is retained only for initialization, archive selection, clean review, and
-governed integration. Worktree creation/start and cleanup/completion are each
+selection, or input invalidate the digest and require a new prepare. The two-step shape covers initialization, candidate-based track/revision/refresh/
+review/revert promotion, archive selection, clean review, and governed integration.
+Already persisted Autonomous authority can authorize bounded remediation; it never
+replaces explicit final completion approval. Worktree creation/start and cleanup/completion are each
 coalesced into one resumable call.
 
 The MCP server cannot infer approval from a prior conversation or approve a
@@ -72,16 +70,16 @@ proposal itself.
 
 Longer workflows write durable intent before changing artifacts or Git:
 
-- `project.json.setup.operation` records project creation.
-- Track-local `state.json.operation` records specification, planning,
-  revision, review remediation, and revert work.
-- `.cadre/operations/refresh-*.json` records project refresh.
-- `.cadre/operations/archive-*.json` records archive batches.
-- `executions/execution-*.json` records implementation nodes and evidence.
+- `.cadre/stage/operations/<operationId>.json` stores approved promotion intent
+  and recovery inputs before canonical writes. Keep it until reconciliation.
+- `.cadre/receipts/<operationId>.json` stores immutable approval and artifact
+  evidence, committed alongside the promoted files with exact Git trailers.
+- Track-local `state.json.operation` binds active implementation and retained
+  workflow state; `executions/execution-*.json` records nodes and evidence.
 
-The journal stores the base commit, expected commit, approved artifacts,
-checkpoint, progress, and operation-specific evidence. It makes the next
-invocation a reconciliation rather than a restart.
+Reconcile the original receipt after its one commit. Old journals under
+`.cadre/operations/` are historical or require recovery with Cadre 3.9.0; do not
+create that legacy journal format for new 4.0 operations.
 
 ## Recovery Rules
 
@@ -89,10 +87,9 @@ On resume, Cadre compares the journal with files, Git status, HEAD, recorded
 commits, worktree registrations, worker branches, and merges:
 
 - Matching dirty artifacts resume at the first incomplete checkpoint.
-- A clean tree at the expected commit records the existing commit instead of
-  repeating it.
-- Completed artifact work with pending bookkeeping finishes only the state
-  record.
+- An existing receipt commit is verified and reconciled without repeating it.
+- Reconciliation removes temporary recovery state; it does not write the commit
+  SHA back into tracked files or require a second bookkeeping commit.
 - Committed or integrated execution nodes are not rerun.
 - Any disagreement stops and is presented to the human.
 

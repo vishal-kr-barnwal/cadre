@@ -146,8 +146,10 @@ For each regular worker task:
 3. It runs focused verification.
 4. It stops with changes uncommitted and returns the diff, checks, risks,
    learning candidates, and proposed commit message.
-5. Main records `awaiting_approval` and presents the evidence.
-6. After approval, the worker commits the assigned task or whole approved group.
+5. Main reviews the evidence and presents it when required by the persisted
+   approval mode.
+6. After human approval or persisted-mode authorization, the worker commits the
+   assigned task or whole approved group.
 7. Main verifies the clean worktree and records the commit SHA.
 8. Main calls adaptive integration when a branch boundary exists.
 
@@ -176,8 +178,11 @@ worktree whose branch ancestry proves that its work exists in the parent.
 ## Manual Verification
 
 Each delivery phase ends with a derived `User Manual Verification` barrier over
-all sibling tasks. Technical evidence is prepared in the phase context, but the
-main agent presents and records the human decision.
+all sibling tasks. Technical evidence is prepared in the phase context. Main
+records a human decision for Governed/Phase phase gates; Track/Autonomous record
+actual verification under persisted authority. Track-level verification requires
+the human in Governed, Phase and Track. Autonomous proceeds to review and then
+requires explicit final clean-completion approval.
 
 The final track-level manual verification depends on every delivery phase and
 runs only in the main agent against the fully integrated canonical worktree.

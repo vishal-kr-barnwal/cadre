@@ -234,8 +234,9 @@ from an uncertain base.
 - Workers never spawn workers or merge branches.
 - Parallel task workers in one wave share one recorded phase base.
 - Downstream waves begin only after dependency commits are integrated.
-- Every regular task retains its own approval-mode authorization and
-  Conventional Commit.
+- Every regular task retains its own approval-mode authorization and commit
+  provenance; approved cohesive groups may share a Conventional Commit.
 - Phase and track manual-verification barriers remain explicit at the boundary
-  selected by the persisted approval mode; track-level verification is always
-  human-approved.
+  selected by the persisted approval mode. Governed, Phase and Track require
+  human track verification; Autonomous records actual checks under persisted
+  authority and requires explicit final clean-completion approval.
