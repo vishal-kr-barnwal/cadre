@@ -7,6 +7,13 @@ export function validateTrackSet(tracks: LocatedTrack[], errors: string[]): void
   const byId = new Map<string, LocatedTrack>();
   for (const track of tracks) {
     const {state, location} = track, id = state.trackId;
+    if (![1, 2].includes(state.schemaVersion)) errors.push(`${id}: unsupported state schemaVersion`);
+    if (!state.title || typeof state.title !== "string") errors.push(`${id}: title is required`);
+    if (!["feature", "bug"].includes(state.type)) errors.push(`${id}: type must be feature or bug`);
+    if (!["drafting-spec", "drafting-plan", "planned", "in_progress", "ready_for_review", "completed", "archived"].includes(state.status)) errors.push(`${id}: invalid status ${state.status}`);
+    if (!Number.isInteger(state.revision) || (state.revision ?? 0) < 1) errors.push(`${id}: revision must be a positive integer`);
+    if (typeof state.checkpoint !== "string" || !state.checkpoint.trim()) errors.push(`${id}: state checkpoint is required`);
+    if (!Array.isArray(state.artifactProgress)) errors.push(`${id}: artifactProgress must be an array`);
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id ?? "")) { errors.push(`${location}: invalid trackId`); continue; }
     const existing = byId.get(id);
     if (existing) { errors.push(`${id}: duplicate track state under ${existing.location} and ${location}`); continue; }

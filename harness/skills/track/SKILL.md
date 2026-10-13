@@ -46,7 +46,7 @@ Expected human decision count is one for a clear new track; do not create a spec
 
 The plan is the execution source of truth. Dependency changes or a modified approved spec require the Cadre revise workflow.
 
-When resuming `drafting-plan`, compare the proposed specification against its reachable approved commit, even if the working copy already contains requested edits. Preserve that approved content, track revision and dependencies during planning. Route changed approved scope through revise first; an interrupted older planning proposal that replaces it requires an approved repair.
+When resuming `drafting-plan`, compare the proposed specification against its reachable approved commit, even if the working copy already contains requested edits. Preserve that approved content, specification revision counter, track revision and dependencies during planning. Unapproved draft-plan counters cannot replace the specification's approval evidence. Route changed approved scope through revise first; an interrupted older planning proposal that replaces it requires an approved repair.
 
 ## Memory contract
 

@@ -123,11 +123,6 @@ function collectCommitReferences(value: unknown, owner: string, references: Comm
   }
 }
 
-const TRACK_STATUSES = new Set([
-  "drafting-spec", "drafting-plan", "planned", "in_progress",
-  "ready_for_review", "completed", "archived"
-]);
-const TRACK_TYPES = new Set(["feature", "bug"]);
 const REQUIRED_CONTEXT = [
   ".gitignore", "workflow.md", "product.md", "guidelines.md", "tech-stack.md",
   "styleguides/general.md", "patterns/index.md", "operations", "tracks", "archive",
@@ -513,14 +508,6 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     collectCommitReferences(state, `${track.id}/state.json`, commitReferences);
     const trackRoot = join(root, track.location);
     validateTrackApprovalPolicy(state, errors, warnings);
-    if (![1, 2].includes(state.schemaVersion)) errors.push(`${track.id}: unsupported state schemaVersion`);
-    if (!state.title || typeof state.title !== "string") errors.push(`${track.id}: title is required`);
-    if (!TRACK_TYPES.has(track.type)) errors.push(`${track.id}: type must be feature or bug`);
-    if (!TRACK_STATUSES.has(track.status)) errors.push(`${track.id}: invalid status ${track.status}`);
-    if (!Array.isArray(track.dependencies)) errors.push(`${track.id}: dependencies must be an array`);
-    if (!Number.isInteger(track.revision) || (track.revision ?? 0) < 1) errors.push(`${track.id}: revision must be a positive integer`);
-    if (!state.checkpoint) errors.push(`${track.id}: state checkpoint is required`);
-    if (!Array.isArray(state.artifactProgress)) errors.push(`${track.id}: artifactProgress must be an array`);
     validateTrackOperation(state, `${track.id} state`, errors, trackRoot);
     if (Object.hasOwn(state, "activePhase") || Object.hasOwn(state, "activeTask")) {
       errors.push(`${track.id}: activePhase and activeTask are redundant; derive active nodes from the execution journal`);

@@ -23,6 +23,8 @@ At every required clarification or approval boundary, show a concise impact summ
 
 Call `project_status` first with `view: "implementation"` and `trackId` for active canonical work, otherwise `view: "track"`; use its embedded structured validation and do not repeat `state_validate` at command entry. Stop on invalid status, except for preparing an explicitly approved v5 revision repair when the only errors are the reported revision's scope/current-graph mismatch and the original execution binding remains intact. Inspect the original receipt, full artifacts, and committed execution plan first; unrelated validation failures remain blockers. A `staged_track_candidate` has no approved baseline: route its changes through the track proposal without creating a revision artifact or operation.
 
+Pending recovery enforces the original history, fresh revision record and synchronized counters before further writes. If an older intent lacks that evidence, retain it for an explicitly approved repair; do not repeatedly reconcile it or fabricate missing approval fields. Already-committed receipt replay remains historical and unchanged.
+
 ## Route by current status
 
 - No canonical track: use `track`; revision cannot create its own approved baseline, including when resuming an older pending operation.

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { promotionEvidence, type BeforeEvidence, type PromotionFile } from "./promotion-evidence.js";
 import { approvalModeMigrationSchema } from "./approval-policy.js";
 import type { TrackState } from "./state.js";
+import { requireRevisionPreservation } from "./revision-preservation.js";
 
 /** Refresh authority is narrower than arbitrary edits to an otherwise valid track state. */
 export function requireRefreshPreservation(root: string, files: PromotionFile[], saved?: BeforeEvidence[], base?: string | null): BeforeEvidence[] {
@@ -17,6 +18,7 @@ export function requireRefreshPreservation(root: string, files: PromotionFile[],
       || history.at(-1)?.action !== "refresh") throw new Error("Refresh must append history while retaining its original track evidence");
     const revised = proposed.revision !== previous.revision;
     if (revised) {
+      requireRevisionPreservation(root, previous, proposed, files, evidence.read, "refresh");
       const records = files.filter((item) => item.path.startsWith(`.cadre/tracks/${match[1]}/revisions/`) && item.content !== null);
       if (proposed.revision !== Number(previous.revision) + 1 || records.length !== 1
         || !records[0]!.content!.split(/\r?\n/).includes(`- Previous track revision: ${previous.revision}`)
