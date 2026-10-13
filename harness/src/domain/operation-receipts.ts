@@ -7,6 +7,8 @@ import { repositoryBasisSchema, type RepositoryBasis } from "./repository-basis.
 import { requireReviewPreservation } from "./review-preservation.js";
 import { requireJournalPreservation } from "./journal-preservation.js";
 import type { BeforeEvidence, PromotionFile } from "./promotion-evidence.js";
+import { requireRefreshPreservation } from "./refresh-preservation.js";
+import { requireProjectOverlay } from "./project-overlay.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -71,8 +73,13 @@ function requireUnchangedInputs(root: string, inputs: Array<{ path: string; sha2
   if (paths.length) throw new CadreError("OPERATION_INPUT_DRIFT", "Required inputs changed after approval; preserve the pending operation and reassess before resuming", { paths });
 }
 function transitionEvidence(root: string, kind: string, files: PromotionFile[], saved?: BeforeEvidence[], base?: string | null) {
+  requireProjectOverlay(root, files);
   if (kind === "review") return requireReviewPreservation(root, files, saved, base);
-  if (kind === "refresh" || kind === "revise") return requireJournalPreservation(root, files, saved, base);
+  if (kind === "refresh") {
+    const evidence = [...requireJournalPreservation(root, files, saved, base), ...requireRefreshPreservation(root, files, saved, base)];
+    return [...new Map(evidence.map((file) => [file.path, file])).values()];
+  }
+  if (kind === "revise") return requireJournalPreservation(root, files, saved, base);
   if (saved?.length) throw new Error("Transition evidence belongs only to review, refresh or revision");
   return [];
 }

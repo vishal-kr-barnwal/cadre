@@ -19,6 +19,8 @@ Legacy SHA records and immutable v1–v4 templates remain evidence. Migrate thro
 
 Create only `feature` or `bug` tracks. Resume an existing drafting track instead of replacing it.
 
+Track IDs remain reserved after archive. Inspect both active and archived ownership before proposing a new track; terminal work needs a distinct successor ID. An interrupted older proposal that would duplicate an archived ID requires an approved repair, preserving the archived evidence and pending intent.
+
 At every required clarification or approval boundary, show a concise summary or focused diff. Inspect the active host policy before calling `workflow_elicit`: if the task context reports approval policy `never`, including Codex Full Access, skip the form and ask the same short question once in chat. Otherwise prefer `workflow_elicit`, using `clarification` for at most three questions and `approval` bound to the current proposal digest. Treat only an `approved` result as approval. If it returns `fallback_required`, or immediately returns `declined` while the task explicitly reports policy `never`, ask the same short question once in chat; the latter is policy rejection, not a human decline. Never request secrets or retry the form.
 
 ## Required context

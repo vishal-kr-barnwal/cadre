@@ -7,6 +7,7 @@ import type { TrackState } from "./state.js";
 
 /** Context refresh cannot replace delivery/review evidence with authored state. */
 export function requireRefreshAuthority(root: string, previous: TrackState, proposed: TrackState, artifacts: Map<string, string>): void {
+  if (!isDeepStrictEqual(previous.commits, proposed.commits)) throw new Error("Refresh must preserve authored commit references; the runtime binds changed artifacts");
   if (previous.autonomousReview) {
     requireUnchangedAutonomousReview(previous.autonomousReview, proposed.autonomousReview, "Refresh");
     const binding = (state: TrackState) => state.operation?.action === "implement" ? state.operation : state.lastExecution;

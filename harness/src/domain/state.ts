@@ -3,13 +3,6 @@ import { inspectMemory, readSafeArtifact, type FreshnessFinding } from "./memory
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import {
-  CADRE_RUNTIME_VERSION,
-  isCompatibleRuntimeVersion,
-  LEGACY_RUNTIME_VERSIONS,
-  LEGACY_TEMPLATE_SET_VERSIONS,
-  TEMPLATE_SET_VERSION
-} from "./version.js";
 import { readAndValidatePlan, type PlanGraph } from "./plan.js";
 import { validateExecutionJournal } from "./execution.js";
 import { validateTrackApprovalPolicy, type ApprovalModeMigration } from "./approval-policy.js";
@@ -18,6 +11,8 @@ import { buildTracks } from "./tracks-index.js";
 import { reachableGitCommits, readGitBlobs } from "./git.js";
 import { validatePlanProvenance, type PlanEvidence } from "./plan-provenance.js";
 import { isCommitRef, resolveOperation, pendingOperationErrors } from "./operation-receipts.js";
+import { validateTrackSet } from "./track-set-validation.js";
+import { validateProjectConfig } from "./project-config-validation.js";
 export { buildTracks } from "./tracks-index.js";
 
 export interface OperationState {
@@ -505,66 +500,13 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     if (!existsSync(join(root, file))) errors.push(`${join(root, file)}: missing required Cadre file`);
   }
   const gitignorePath = join(root, ".gitignore");
-  let candidateStageIgnored = false;
-  if (existsSync(gitignorePath)) {
-    const gitignore = readFileSync(gitignorePath, "utf8");
-    candidateStageIgnored = gitignore.split(/\r?\n/).includes("/stage/");
-    if (!gitignore.split(/\r?\n/).includes("/.worktrees/")) {
-      errors.push(`${gitignorePath}: must ignore /.worktrees/`);
-    }
-    if (!gitignore.split(/\r?\n/).includes("/wisps/")) {
-      errors.push(`${gitignorePath}: must ignore /wisps/`);
-    }
-  }
   const project = readJson<ProjectState>(join(root, "project.json"), errors);
   if (!project) return { project: null, tracks: [], states: new Map<string, TrackState>(), plans, staleMemory, errors, warnings };
-  if (!candidateStageIgnored) {
-    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) {
-      warnings.push("PROJECT_REFRESH_REQUIRED: .cadre/.gitignore must ignore /stage/");
-    } else errors.push(`${gitignorePath}: must ignore /stage/`);
-  }
   const commitReferences: CommitReference[] = [];
   const planEvidence: PlanEvidence[] = [];
   collectCommitReferences(project, "project.json", commitReferences);
-  if (![1, 2].includes(project.schemaVersion)) errors.push("project.json: unsupported schemaVersion");
-  if (!isCompatibleRuntimeVersion(project.runtimeVersion)) {
-    if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) {
-      warnings.push(`PROJECT_REFRESH_REQUIRED: runtimeVersion ${project.runtimeVersion} must be refreshed to ${CADRE_RUNTIME_VERSION}`);
-    } else errors.push(`project.json: unsupported runtimeVersion ${String(project.runtimeVersion)}`);
-  }
-  if (project.templateSetVersion !== TEMPLATE_SET_VERSION) {
-    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) {
-      warnings.push(
-        `PROJECT_REFRESH_REQUIRED: templateSetVersion ${project.templateSetVersion} must be refreshed to ${TEMPLATE_SET_VERSION}`
-      );
-    } else errors.push(`project.json: unsupported templateSetVersion ${String(project.templateSetVersion)}`);
-  }
-  if (!project.project?.context || !["greenfield", "brownfield"].includes(project.project.context)) {
-    errors.push("project.json: project context must be greenfield or brownfield");
-  }
-  if (!project.setup?.checkpoint) errors.push("project.json: setup checkpoint is required");
-  if (!Array.isArray(project.setup?.artifactProgress)) errors.push("project.json: setup artifactProgress must be an array");
-  if (project.setup?.status === "in_progress") {
-    validateOperation(
-      project.setup.operation,
-      "project.json setup",
-      errors,
-      root,
-      project.setup.artifactProgress
-    );
-  } else if (project.setup?.status === "completed") {
-    if (!isCommitRef(project.setup?.commit)) {
-      errors.push("project.json: completed setup requires a commit SHA");
-    }
-    if (project.setup.checkpoint !== "completed") errors.push("project.json: completed setup requires completed checkpoint");
-    if (project.setup.operation != null) errors.push("project.json: completed setup cannot retain an operation journal");
-  } else {
-    errors.push(`project.json: invalid setup status ${project.setup?.status ?? "<missing>"}`);
-  }
-  if (project.lastRefresh && !isCommitRef(project.lastRefresh.commit)) {
-    errors.push("project.json: lastRefresh requires a commit SHA");
-  }
-  if (Object.hasOwn(project, "tracks")) errors.push("project.json: must not duplicate track records");
+  validateProjectConfig(project, existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : undefined, gitignorePath, errors, warnings);
+  if (project.setup?.status === "in_progress") validateOperation(project.setup.operation, "project.json setup", errors, root, project.setup.artifactProgress);
   const { tracks, states, byId } = discoverTracks(root, errors);
   for (const track of tracks) {
     const state = states.get(track.id)!;
@@ -582,10 +524,6 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     validateTrackOperation(state, `${track.id} state`, errors, trackRoot);
     if (Object.hasOwn(state, "activePhase") || Object.hasOwn(state, "activeTask")) {
       errors.push(`${track.id}: activePhase and activeTask are redundant; derive active nodes from the execution journal`);
-    }
-    const expectedDirectory = track.status === "archived" ? "archive" : "tracks";
-    if (track.location !== `${expectedDirectory}/${track.id}`) {
-      errors.push(`${track.id}: status ${track.status} requires location ${expectedDirectory}/${track.id}`);
     }
     const specCommit = state.commits?.spec;
     const planCommit = state.commits?.plan;
@@ -665,45 +603,9 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
         errors.push(`${track.id}: finalized track retains managed execution worktrees`);
       }
     }
-    if (["completed", "archived"].includes(track.status)) {
-      const review = state.reviewCycles?.at(-1);
-      const execution = state.lastExecution;
-      if (review?.outcome !== "clean") errors.push(`${track.id}: ${track.status} track lacks a final clean review cycle`);
-      else if (!execution
-        || review.executionId !== execution.executionId
-        || review.planRevision !== execution.planRevision
-        || review.graphDigest !== execution.graphDigest
-        || review.reviewedHead !== execution.headCommit) {
-        errors.push(`${track.id}: final clean review is not bound to the current completed execution`);
-      }
-    }
   }
   validateProjectOperations(root, byId, errors);
-  for (const track of tracks) {
-    for (const dependency of track.dependencies ?? []) {
-      if (!byId.has(dependency)) errors.push(`${track.id}: unknown dependency ${dependency}`);
-      if (dependency === track.id) errors.push(`${track.id}: track cannot depend on itself`);
-      const dependencyStatus = byId.get(dependency)?.status;
-      if (["in_progress", "ready_for_review", "completed", "archived"].includes(track.status)
-        && dependencyStatus && !["completed", "archived"].includes(dependencyStatus)) {
-        errors.push(`${track.id}: ${track.status} track has incomplete dependency ${dependency}`);
-      }
-    }
-  }
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  function visit(id: string, trail: string[]): void {
-    if (visiting.has(id)) {
-      errors.push(`dependency cycle: ${[...trail, id].join(" -> ")}`);
-      return;
-    }
-    if (visited.has(id) || !byId.has(id)) return;
-    visiting.add(id);
-    for (const dep of byId.get(id)!.dependencies ?? []) visit(dep, [...trail, id]);
-    visiting.delete(id);
-    visited.add(id);
-  }
-  for (const id of byId.keys()) visit(id, []);
+  validateTrackSet(tracks.map((track) => ({location: track.location, state: states.get(track.id)!})), errors);
   const failedOperations = new Set<string>();
   for (const reference of commitReferences.filter((reference) => reference.commit.startsWith("op:"))) {
     if (failedOperations.has(reference.commit)) continue;

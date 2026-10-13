@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { previewCandidateApply, applyCandidate } from "../src/domain/candidate-apply.js";
-import { promoteOperation, reconcileOperation, resolveOperation, receiptHash } from "../src/domain/operation-receipts.js";
+import { reconcileOperation, resolveOperation, receiptHash } from "../src/domain/operation-receipts.js";
 import { validateProject } from "../src/domain/state.js";
 import { readExecution, executionSchedulerView } from "../src/domain/execution.js";
 import { readContext } from "../src/domain/context.js";
@@ -88,7 +88,14 @@ for (const driftedGraph of [false, true]) {
       ...(driftedGraph ? { plan: `op:${legacyId}` } : {}) } };
     const files = [{ path: prefix + "spec.md", content: proposed["spec.md"] }, { path: prefix + "state.json", content: json(broken) }, { path: prefix + "revisions/revision-2.md", content: proposed["revisions/revision-2.md"] }];
     if (driftedGraph) for (const file of ["plan.md", "learning.md", "dependency-context.json"] as const) files.push({ path: prefix + file, content: proposed[file] });
-    commit(root, promoteOperation(root, { operationId: legacyId, kind: "revise", approvalDigest: "a".repeat(64), baseCommit: git(root, "rev-parse", "HEAD") }, files));
+    // Current promotion rejects this old defect. Materialize its already-committed
+    // historical receipt directly so the test still verifies supported repair.
+    const legacyReceipt = {schemaVersion: 1, operationId: legacyId, kind: "revise", status: "completed",
+      approvalDigest: "a".repeat(64), baseCommit: git(root, "rev-parse", "HEAD"),
+      artifacts: files.map((file) => ({path: file.path, sha256: receiptHash(file.content)})).sort((a, b) => a.path.localeCompare(b.path))};
+    for (const file of files) write(root, file.path, file.content);
+    write(root, `.cadre/receipts/${legacyId}.json`, json(legacyReceipt));
+    commit(root, {operationId: legacyId, trailers: [`Cadre-Operation: ${legacyId}`, `Cadre-Receipt: ${receiptHash(json(legacyReceipt))}`]});
     const oldReceipt = read(root, `.cadre/receipts/${legacyId}.json`), oldCommit = resolveOperation(root, `op:${legacyId}`);
     assert.equal(load().revision, 1);
     assert.ok(validateProject(root).errors.some((error) => error.includes("Autonomous scope reference")));

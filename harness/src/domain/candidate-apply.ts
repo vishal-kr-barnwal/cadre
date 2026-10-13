@@ -22,6 +22,9 @@ import { deriveReviewRetry, reviewRetrySchema, type ReviewRetry } from "./review
 import type { ExecutionJournal } from "./execution.js";
 import { requireReviewPreservation } from "./review-preservation.js";
 import { requireJournalPreservation } from "./journal-preservation.js";
+import { requireRefreshPreservation } from "./refresh-preservation.js";
+import { requireProjectOverlay } from "./project-overlay.js";
+import { isDeepStrictEqual } from "node:util";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -115,7 +118,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     const modified = (file: string) => original.has(`${parent}/${file}`)
       && original.get(`${parent}/${file}`) !== readSafeArtifact(root, `.cadre/${parent}/${file}`);
     const refreshRevision = input.workflow === "refresh" && previous
-      && (recordAuthored || modified("spec.md") || original.has(`${parent}/plan.md`)
+      && (recordAuthored || !isDeepStrictEqual(state.dependencies, previous.dependencies) || modified("spec.md") || original.has(`${parent}/plan.md`)
         && parsePlanContent(original.get(`${parent}/plan.md`)!, `${parent}/plan.md`).digest
           !== parsePlanContent(readSafeArtifact(root, `.cadre/${parent}/plan.md`), `${parent}/plan.md`).digest);
     if (refreshRevision && project.templateSetVersion !== "v5") throw new Error("Complete legacy refresh migration before revising track scope");
@@ -184,6 +187,8 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   const promoted: ReceiptFile[] = [...overlay].map(([path, content]) => ({ path: `.cadre/${path}`, content }));
   if (input.workflow === "review") requireReviewPreservation(root, promoted);
   if (["refresh", "revise"].includes(input.workflow)) requireJournalPreservation(root, promoted);
+  if (input.workflow === "refresh") requireRefreshPreservation(root, promoted);
+  requireProjectOverlay(root, promoted);
   const before = promoted.map((file) => ({ path: file.path, sha256: existsSync(join(root, file.path)) ? contentHash(readSafeArtifact(root, file.path)) : null }));
   const manifest = promoted.map((file) => ({ path: file.path, sha256: contentHash(file.content!) }));
   const digest = contentHash(JSON.stringify({ operationId, baseCommit, manifest, before, memoryInputs: memory.inputs, unchanged: [...unchanged].sort() }));

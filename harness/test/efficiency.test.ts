@@ -191,7 +191,7 @@ test("operation receipts recover every promotion boundary without duplicate comm
   for (let crash = 0; crash < 4; crash++) {
     const root = fixture(t); write(root, ".cadre/.gitignore", "/stage/\n");
     const input = { operationId: `track-crash-${crash}`, kind: "track" as const, approvalDigest: "a".repeat(64), baseCommit: null };
-    const files = [{ path: ".cadre/tracks/sample/state.json", content: json({ schemaVersion: 2 }) }, { path: ".cadre/tracks/sample/spec.md", content: "Approved spec" }];
+    const files = [{ path: ".cadre/evidence/one.json", content: json({ schemaVersion: 2 }) }, { path: ".cadre/evidence/two.md", content: "Approved evidence" }];
     let step = 0;
     assert.throws(() => promoteOperation(root, input, files, () => { if (step++ === crash) throw new Error("crash"); }), /crash/);
     const result = resumeOperation(root, input.operationId, input.approvalDigest); assert.equal(result.status, "commit_pending");

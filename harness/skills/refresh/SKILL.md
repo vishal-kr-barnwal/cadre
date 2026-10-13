@@ -46,6 +46,8 @@ After the artifact commit, atomically write the completed journal with `refreshC
 
 ## Approval policy v2 migration
 
+Context-only refresh preserves track lifecycle status, checkpoint and dependencies. Completion belongs to clean review; lifecycle changes belong to their approved workflow. A dependency change is a scope revision even when the plan text is unchanged: include the next track revision, its fresh revision record and reassessed dependency context. An active track cannot gain an unfinished dependency. These rules and cross-track identity/dependency validation also apply when resuming partial promotion; preserve an invalid older intent for explicit repair.
+
 Refresh preserves completed and superseded execution journals byte-for-byte, including verification, approvals, commits and handoffs. Do not include edited historical journals in a context proposal. Active journals may change only through the supported explicit legacy policy migration or runtime-derived supersession in an approved scope revision. The same checks apply on interrupted recovery; preserve the original intent and evidence when an older pending proposal violates them.
 
 Before delivery, resolve each `APPROVAL_MODE_MIGRATION_REQUIRED` warning by including an explicit Track-or-Autonomous choice and its consequences in this refresh proposal. Never infer the choice from the old spelling. Preserve legacy Governed and Phase choices and the Governed fallback for an absent mode.
