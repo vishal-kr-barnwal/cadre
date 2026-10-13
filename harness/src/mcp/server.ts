@@ -7,6 +7,7 @@ import { reviewRetrySchema } from "../domain/review-retry.js";
 import { handoffSchema, requireFreshTrackMemory } from "../domain/memory.js";
 import { inspectStagedMemory } from "../domain/staged-memory.js";
 import { validateStagedState } from "../domain/staged-state.js";
+import { captureRepositoryBasis } from "../domain/repository-basis.js";
 import { fullProjectTracks } from "../domain/status-views.js";
 import { lifecycleSchema, pageTracks, summarizeGraph, summarizeTrackState, trackSources } from "../domain/status-views.js";
 import { McpServer, type RegisteredTool, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -629,7 +630,8 @@ export function createCadreServer(): McpServer {
   }, async ({ projectRoot, candidateId, expectedFiles }) => {
     try {
       return result(
-        prepareCandidateStage(projectRoot, candidateId, expectedFiles),
+        {...prepareCandidateStage(projectRoot, candidateId, expectedFiles),
+          ...(candidateId.startsWith("revert-") ? {revertBaseline: captureRepositoryBasis(projectRoot, true, candidateId.slice("revert-".length))} : {})},
         `Prepared Cadre candidate stage ${candidateId}.`
       );
     } catch (error) {

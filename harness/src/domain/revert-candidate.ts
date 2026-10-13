@@ -3,6 +3,9 @@ import { requireRevertApproval } from "./revert-approval.js";
 import { requireRevertGitProof } from "./revert-git.js";
 import { requireUnchangedAutonomousReview } from "./autonomous-review.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
+import { requireRevertReset } from "./revert-scope.js";
+import { repositoryBasisSchema } from "./repository-basis.js";
+import { candidateArtifactPath } from "./staging.js";
 import type { ExecutionJournal } from "./execution.js";
 import type { TrackState } from "./state.js";
 
@@ -40,7 +43,20 @@ export function deriveRevertCandidate(root: string, previous: TrackState, propos
     return record.reconciliationCommit === null
       && Object.entries(operation).every(([key, value]) => isDeepStrictEqual(record[key], value));
   })) throw new Error("Revert requires the exact durable reversal record from its persisted approval");
-  requireRevertGitProof(root, operation, journal);
+  let baseline;
+  if (operation.repositoryBaselinePath !== undefined) {
+    const path = String(operation.repositoryBaselinePath);
+    if (!/^reverts\/revert-[a-z0-9-]+-baseline\.json$/.test(path) || !operation.approvedArtifacts?.some((approved) =>
+      candidateArtifactPath(`revert-${previous.trackId}`, approved) === `${parent}/${path}`)) {
+      throw new Error("Reversal baseline must be an originally approved artifact");
+    }
+    const body = artifacts.get(`${parent}/${path}`);
+    if (!body) throw new Error("Missing approved reversal baseline");
+    baseline = repositoryBasisSchema.parse(JSON.parse(body));
+  }
+  const selected = requireRevertGitProof(root, operation, journal, baseline);
+  const reset = JSON.parse(artifacts.get(`${parent}/${binding.journal}`)!) as ExecutionJournal;
+  requireRevertReset(journal, reset, selected, String(operation.targetId));
   return { ...proposed, ...(previous.autonomousReview ? {
     autonomousReview: {...previous.autonomousReview,
       checkpoint: previous.autonomousReview.checkpoint === "blocked" ? "blocked" as const : "implementing" as const}

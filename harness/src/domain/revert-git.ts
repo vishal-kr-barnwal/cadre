@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { z } from "zod/v4";
 import { gitRoot, isGitAncestor, resolveGitCommit, requireReviewedProductUnchanged } from "./git.js";
 import { countGitProcess } from "./inspection.js";
 import type { OperationState } from "./state.js";
-import type { ExecutionNode } from "./execution.js";
+import { requireRevertScope, type RevertDelivery } from "./revert-scope.js";
+import { isolatedReverseResult } from "./revert-result.js";
+import { requireRevertBaseline } from "./revert-baseline.js";
+import type { RepositoryBasis } from "./repository-basis.js";
 
 const sha = z.string().regex(/^[0-9a-f]{7,40}$/);
 const choices = z.strictObject({
@@ -17,7 +18,7 @@ const choices = z.strictObject({
 
 /** Compute the approved reverse result without touching the user's index or objects. */
 export function requireRevertGitProof(projectRoot: string, operation: OperationState,
-  delivery: {trackId: string; nodes: Record<string, Pick<ExecutionNode, "id" | "kind" | "workerCommit" | "mergeCommit">>}): void {
+  delivery: RevertDelivery, baseline?: RepositoryBasis): Set<string> {
   const proof = choices.parse({commits: operation.commits, revertCommits: operation.revertCommits, baseCommit: operation.baseCommit,
     ...(operation.mainlineParents !== undefined ? {mainlineParents: operation.mainlineParents} : {}),
     ...(operation.conflictResolutionTrees !== undefined ? {conflictResolutionTrees: operation.conflictResolutionTrees} : {})});
@@ -34,18 +35,8 @@ export function requireRevertGitProof(projectRoot: string, operation: OperationS
   const commits = proof.commits.map((commit) => resolveGitCommit(root, commit));
   const reversals = proof.revertCommits.map((commit) => resolveGitCommit(root, commit));
   if (new Set(commits).size !== commits.length || new Set(reversals).size !== reversals.length) throw new Error("Revert cannot alias target or reversal commits");
-  const target = delivery.nodes[String(operation.targetId)];
-  if (operation.targetKind === "track" ? operation.targetId !== delivery.trackId
-    : !target || target.kind !== operation.targetKind) throw new Error("Revert target must exist in its retained execution");
-  const delivered = new Set(Object.values(delivery.nodes).flatMap((node) => [node.workerCommit, node.mergeCommit])
-    .filter((commit): commit is string => Boolean(commit)).map((commit) => resolveGitCommit(root, commit)));
-  if (commits.some((commit) => !delivered.has(commit))) throw new Error("Revert targets require retained execution commit provenance");
+  const selected = requireRevertScope(root, operation, delivery, commits);
   const objects = resolve(root, text(["rev-parse", "--git-path", "objects"]));
-  const temporary = mkdtempSync(join(tmpdir(), "cadre-revert-proof-"));
-  try {
-    const temporaryObjects = join(temporary, "objects"); mkdirSync(temporaryObjects);
-    const env = {...process.env, GIT_INDEX_FILE: join(temporary, "index"), GIT_OBJECT_DIRECTORY: temporaryObjects,
-      GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objects), GIT_OPTIONAL_LOCKS: "0"};
     for (let i = 0; i < commits.length; i++) {
       const target = commits[i]!, reversal = reversals[i]!, named = proof.commits[i]!;
       const parents = text(["show", "-s", "--format=%P", target]).split(" ").filter(Boolean);
@@ -60,16 +51,11 @@ export function requireRevertGitProof(projectRoot: string, operation: OperationS
         throw new Error("Revert requires reachable ordered additive reversals after the approved base");
       }
       const parent = parents[(mainline ?? 1) - 1]!;
-      const patch = run(["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", target, parent, "--"]);
-      if (patch.status !== 0 || !patch.stdout.length) throw new Error("Approved reversal target has no reverse patch");
-      const seeded = run(["read-tree", "--reset", actualParents[0]!], {env});
-      if (seeded.status !== 0) throw new Error("Cannot compute isolated reversal result");
-      const applied = run(["apply", "--cached", "--3way", "--whitespace=nowarn"], {env, input: patch.stdout});
+      const computed = isolatedReverseResult(root, objects, target, parent, actualParents[0]!, mainline);
       let expected: string;
-      if (applied.status !== 0) {
-        const unmerged = run(["ls-files", "--unmerged", "-z"], {env});
+      if (computed.tree === null) {
         expected = proof.conflictResolutionTrees?.[named] ?? "";
-        if (!unmerged.stdout.length || !expected || text(["cat-file", "-t", expected]) !== "tree") {
+        if (!expected || text(["cat-file", "-t", expected]) !== "tree") {
           throw new Error("Reverse patch conflicts; obtain exact approval for conflictResolutionTrees before reconciliation");
         }
         const names = (from: string, to: string) => {
@@ -77,18 +63,16 @@ export function requireRevertGitProof(projectRoot: string, operation: OperationS
           if (result.status !== 0) throw new Error("Cannot verify approved conflict scope");
           return result.stdout.toString("utf8").split("\0").filter(Boolean);
         };
-        const allowed = new Set(names(target, parent));
-        if (names(actualParents[0]!, expected).some((path) => !allowed.has(path))) throw new Error("Approved conflict result cannot change paths outside the reversal target");
+        if (names(actualParents[0]!, expected).some((path) => !computed.allowedPaths.has(path))) throw new Error("Approved conflict result cannot change paths outside the reversal target");
       } else {
-        const tree = run(["write-tree"], {env});
-        if (tree.status !== 0) throw new Error("Cannot compute isolated reversal tree");
-        expected = tree.stdout.toString("utf8").trim();
+        expected = computed.tree;
       }
       const actualTree = text(["rev-parse", `${reversal}^{tree}`]);
       if (actualTree !== expected || text(["rev-parse", `${actualParents[0]}^{tree}`]) === actualTree) {
         throw new Error("Actual reversal does not match the approved reverse patch/result");
       }
     }
-    requireReviewedProductUnchanged(root, reversals.at(-1)!, delivery.trackId);
-  } finally {rmSync(temporary, {recursive: true, force: true});}
+    if (baseline) requireRevertBaseline(root, baseline, proof.baseCommit, reversals.at(-1)!, delivery.trackId);
+    else requireReviewedProductUnchanged(root, reversals.at(-1)!, delivery.trackId);
+    return selected;
 }

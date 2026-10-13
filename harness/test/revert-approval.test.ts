@@ -82,3 +82,33 @@ test("approved blocked revert retains its prerequisite", async (t) => {
   commit(f.root, applyCandidate(input, p.digest)); assert.equal(f.load().autonomousReview.checkpoint, "blocked");
   assert.equal(readExecution(f.root, "sample", f.id).nodes["T1.1"]!.status, "pending");
 });
+
+for (const dirty of ["tracked", "untracked"] as const) test(`revert approved ${dirty} baseline survives partial promotion and stage loss`, async (t) => {
+  const f = await revertFixture(t, "codex", "parallel", {dirty}), input = f.stage(), p = previewCandidateApply(input);
+  const status = git(f.root, "status", "--porcelain"), index = git(f.root, "write-tree"), userIndex = git(f.root, "ls-files", "--stage", "--", "user.txt");
+  assert.throws(() => promoteOperation(f.root, {operationId: p.operationId, kind: "revert", approvalDigest: p.digest,
+    baseCommit: p.baseCommit, inputs: p.recoveryInputs}, p.files, (path) => {if (path.endsWith("/state.json")) throw Error("fixture crash");}), /fixture crash/);
+  assert.equal(git(f.root, "write-tree"), index); assert.equal(read(f.root, "user.txt"), "Retain original user edit\n");
+  rmSync(join(f.root, ".cadre/stage/revert-sample"), {recursive: true});
+  const intentPath = `.cadre/stage/operations/${p.operationId}.json`, intent = read(f.root, intentPath);
+  write(f.root, "user.txt", "Different later user edit\n");
+  assert.throws(() => resumeOperation(f.root, p.operationId, p.digest), /approved reversal baseline/);
+  assert.equal(read(f.root, intentPath), intent); write(f.root, "user.txt", "Retain original user edit\n");
+  commit(f.root, resumeOperation(f.root, p.operationId, p.digest));
+  assert.equal(read(f.root, "user.txt"), "Retain original user edit\n"); assert.equal(git(f.root, "ls-files", "--stage", "--", "user.txt"), userIndex);
+  assert.ok(status.includes("user.txt")); assert.ok(git(f.root, "status", "--porcelain").includes("user.txt"));
+  // Explicit fixture user decision resolves their preserved edit before delivery
+  // and clean review; the runtime itself never commits or discards it.
+  git(f.root, "add", "user.txt"); git(f.root, "commit", "-m", "approved user edit");
+  await finishCurrent(f.root, f.call, f.id); await reviewAndArchive(f);
+  assert.equal(read(f.root, "user.txt"), "Retain original user edit\n");
+});
+
+test("revert baseline uses canonical identity for nested owned-track staging", async (t) => {
+  const f = await revertFixture(t, "zed", "parallel", {dirty: "untracked", nested: true});
+  const input = f.stage(), p = previewCandidateApply(input); commit(f.root, applyCandidate(input, p.digest));
+  assert.equal(read(f.root, "user.txt"), "Retain original user edit\n");
+  assert.equal(readExecution(f.root, "sample", f.id).nodes["T1.1"]!.status, "pending");
+  git(f.root, "add", "user.txt"); git(f.root, "commit", "-m", "explicit fixture user decision");
+  await finishCurrent(f.root, f.call, f.id); await reviewAndArchive(f);
+});

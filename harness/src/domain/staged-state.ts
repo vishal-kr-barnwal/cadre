@@ -7,6 +7,8 @@ import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import { contentHash, readSafeArtifact } from "./memory.js";
 import { candidateArtifactPath, type CandidateFile } from "./staging.js";
 import { validateSpecContent, validateTrackOperation } from "./state.js";
+import { captureRepositoryBasis, repositoryBasisSchema } from "./repository-basis.js";
+import { isDeepStrictEqual } from "node:util";
 
 /** Validate relationships in the proposed state before a digest can be approved. */
 export function validateStagedState(root: string, candidateId: string, files: CandidateFile[],
@@ -18,6 +20,14 @@ export function validateStagedState(root: string, candidateId: string, files: Ca
   const read = (path: string) => overlay.get(path) ?? readSafeArtifact(root, `.cadre/${path}`);
   const parents = new Set<string>();
   for (const file of files) {
+    const baselineMatch = canonical(file.path).match(/^tracks\/([^/]+)\/reverts\/revert-[a-z0-9-]+-baseline\.json$/);
+    if (candidateId.startsWith("revert-") && baselineMatch) {
+      const baseline = repositoryBasisSchema.parse(JSON.parse(file.content));
+      const state = JSON.parse(readSafeArtifact(root, `.cadre/tracks/${baselineMatch[1]}/state.json`));
+      if (state.operation?.action !== "revert" && !isDeepStrictEqual(baseline, captureRepositoryBasis(root, true, baselineMatch[1]))) {
+        throw new Error("Reversal baseline differs from repository inputs before approval");
+      }
+    }
     if (/^tracks\/[^/]+\/spec\.md$/.test(canonical(file.path))) {
       const errors: string[] = [];
       validateSpecContent(file.content, file.path, errors);

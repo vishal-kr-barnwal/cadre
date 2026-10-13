@@ -3,8 +3,11 @@ import { readExecution } from "../../src/domain/execution.js";
 import { fixture, read, write, json, git } from "./revision-fixture.js";
 
 export async function revertFixture(t: Parameters<typeof fixture>[0], clientName = "codex", requestedMode = "sequential",
-  options: {empty?: boolean; blocked?: boolean} = {}) {
+  options: {empty?: boolean; blocked?: boolean; dirty?: "tracked" | "untracked"; nested?: boolean} = {}) {
   const f = await fixture(t, clientName), {root, call, load} = f;
+  if (options.dirty === "tracked") {
+    write(root, "user.txt", "Initial unrelated user file\n"); git(root, "add", "user.txt"); git(root, "commit", "-m", "unrelated user baseline");
+  }
   await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode});
   const id = load().operation.executionId, scope = {projectRoot: root, trackId: "sample", executionId: id};
   await call("execution_checkpoint", {scope: {...scope, nodeId: "P1"}, action: {event: "start"}});
@@ -24,6 +27,14 @@ export async function revertFixture(t: Parameters<typeof fixture>[0], clientName
   reset.checkpoint = "reverted:T1.1";
   const files: Record<string, string> = {"state.json": json(original), [path]: json(reset),
     "reverts/revert-task-execution-before.json": before, "reverts/revert-task.md": "# Approved reversal\nReverse T1.1 only, preserve other nodes and original authority.\n"};
+  if (options.dirty) {
+    write(root, "user.txt", "Retain original user edit\n");
+    const prepared = await call("candidate_stage_prepare", {projectRoot: root, candidateId: "revert-sample"});
+    files["reverts/revert-task-baseline.json"] = json(prepared.revertBaseline);
+  }
+  if (options.nested) for (const [path, body] of Object.entries(files)) {
+    delete files[path]; files[`tracks/sample/${path}`] = body;
+  }
   const stage = () => {
     prepareCandidateStage(root, "revert-sample", Object.keys(files));
     for (const [file, body] of Object.entries(files)) write(root, `.cadre/stage/revert-sample/${file}`, body);
@@ -35,7 +46,8 @@ export async function revertFixture(t: Parameters<typeof fixture>[0], clientName
     expectedCommit: "cadre(revert): reconcile sample", commits: [product], revertCommits: [] as string[],
     originalExecutionPath: "reverts/revert-task-execution-before.json", approvedArtifacts: Object.keys(files),
     approvedArtifactHashes: inspected.files as Array<{path: string; sha256: string}>, artifactProgress: [],
-    approvalDigest: inspected.digest as string, approvedAt: new Date().toISOString()};
+    approvalDigest: inspected.digest as string, approvedAt: new Date().toISOString(),
+    ...(options.dirty ? {repositoryBaselinePath: "reverts/revert-task-baseline.json"} : {})};
   const temporary = {...original, operation, lastExecution: {executionId: id, journal: path, planRevision: journal.planRevision,
     graphDigest: journal.graphDigest, headCommit: journal.headCommit, completedAt: journal.completedAt,
     approvalMode: journal.approvalMode, approvalPolicyVersion: journal.approvalPolicyVersion}};

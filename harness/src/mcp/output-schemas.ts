@@ -2,6 +2,7 @@ import { handoffSchema } from "../domain/memory.js";
 import { nextStepSchema } from "../domain/next-step.js";
 import { listingSchema } from "../domain/status-views.js";
 import { z } from "zod/v4";
+import { repositoryBasisSchema } from "../domain/repository-basis.js";
 import {
   EXECUTION_APPROVAL_MODES,
   EXECUTION_CHECKPOINT_EVENTS,
@@ -35,7 +36,8 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 // Detail views share the standalone graph/execution contracts. Validate those
 // strictly at runtime without duplicating their large schemas in the catalog.
 function sharedDetail(schema: z.ZodType) {
-  return jsonObjectSchema.superRefine((value, context) => {
+  // JSON object keys are strings already; omit redundant propertyNames metadata.
+  return z.object({}).catchall(z.unknown()).superRefine((value, context) => {
     if (!schema.safeParse(value).success) context.addIssue({ code: "custom", message: "Invalid shared detail contract" });
   });
 }
@@ -321,7 +323,8 @@ const stagePrepareSchema = z.strictObject({
   stagePath: pathSchema,
   gitignorePath: pathSchema,
   retainedFiles: stringArray,
-  removedFiles: stringArray
+  removedFiles: stringArray,
+  revertBaseline: sharedDetail(repositoryBasisSchema).optional()
 });
 const candidateInspectSchema = z.strictObject({
   learning: z.array(learningInspectionSchema),

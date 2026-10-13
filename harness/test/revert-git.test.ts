@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requireRevertGitProof } from "../src/domain/revert-git.js";
+import { captureRepositoryBasis } from "../src/domain/repository-basis.js";
 import type { ExecutionNode } from "../src/domain/execution.js";
 import { git, write } from "./helpers/revision-fixture.js";
 
@@ -15,8 +16,8 @@ function repository(t: {after: (fn: () => void) => void}) {
 }
 const head = (root: string) => git(root, "rev-parse", "HEAD");
 function delivered(commits: string[]) {
-  const nodes: Record<string, Pick<ExecutionNode, "id" | "kind" | "workerCommit" | "mergeCommit">> = {P1: {id: "P1", kind: "phase", workerCommit: null, mergeCommit: null}};
-  commits.forEach((commit, i) => {nodes[`T1.${i + 1}`] = {id: `T1.${i + 1}`, kind: "task", workerCommit: commit, mergeCommit: null};});
+  const nodes: Record<string, Pick<ExecutionNode, "id" | "kind" | "phaseId" | "workerCommit" | "mergeCommit">> = {P1: {id: "P1", phaseId: "P1", kind: "phase", workerCommit: null, mergeCommit: null}};
+  commits.forEach((commit, i) => {nodes[`T1.${i + 1}`] = {id: `T1.${i + 1}`, phaseId: "P1", kind: "task", workerCommit: commit, mergeCommit: null};});
   return {trackId: "sample", nodes};
 }
 const approve = (baseCommit: string, commits: string[], revertCommits: string[]) => ({baseCommit, commits, revertCommits, targetKind: "phase", targetId: "P1"});
@@ -79,4 +80,56 @@ test("conflict resolution requires an exact approved tree and bounded target pat
   assert.equal(git(root, "rev-parse", "HEAD^{tree}"), extraTree);
   assert.throws(() => requireRevertGitProof(root, {...input, revertCommits: [head(root)], conflictResolutionTrees: {[target]: extraTree}}, delivered([target])), /outside the reversal target/);
   assert.notEqual(head(root), combined);
+});
+
+test("reversal follows a later rename without changing the source Git store", (t) => {
+  const root = repository(t); write(root, "product.txt", "start\nafter\nend\n"); git(root, "add", "."); git(root, "commit", "-m", "feature"); const target = head(root);
+  git(root, "mv", "product.txt", "moved.txt"); git(root, "commit", "-m", "later rename"); const base = head(root);
+  git(root, "revert", "--no-edit", target); const reversal = head(root), index = git(root, "write-tree"), objects = git(root, "count-objects", "-v");
+  requireRevertGitProof(root, approve(base, [target], [reversal]), delivered([target]));
+  assert.equal(readFileSync(join(root, "moved.txt"), "utf8"), "start\nbefore\nend\n");
+  assert.equal(git(root, "write-tree"), index); assert.equal(git(root, "count-objects", "-v"), objects);
+});
+
+test("approved rename/delete resolution uses the renamed target path only", (t) => {
+  const root = repository(t); write(root, "added.txt", "new file\n"); git(root, "add", "."); git(root, "commit", "-m", "add file"); const target = head(root);
+  git(root, "mv", "added.txt", "moved.txt"); git(root, "commit", "-m", "later rename"); const base = head(root);
+  assert.throws(() => git(root, "revert", "--no-edit", target)); git(root, "rm", "moved.txt"); git(root, "revert", "--continue"); const reversal = head(root);
+  const input = {...approve(base, [target], [reversal]), conflictResolutionTrees: {[target]: git(root, "rev-parse", "HEAD^{tree}")}};
+  requireRevertGitProof(root, input, delivered([target]));
+});
+
+test("reversal commits must belong to the selected task and complete phase", (t) => {
+  const root = repository(t); write(root, "first.txt", "first\n"); git(root, "add", "."); git(root, "commit", "-m", "first"); const first = head(root);
+  write(root, "second.txt", "second\n"); git(root, "add", "."); git(root, "commit", "-m", "second"); const second = head(root);
+  git(root, "revert", "--no-edit", second); const reversal = head(root), delivery = delivered([first, second]);
+  assert.throws(() => requireRevertGitProof(root, {...approve(second, [second], [reversal]), targetKind: "task", targetId: "T1.1"}, delivery), /outside its named/);
+  assert.throws(() => requireRevertGitProof(root, approve(second, [second], [reversal]), delivery), /omits delivered/);
+  delivery.nodes.P2 = {id: "P2", kind: "phase", phaseId: "P2", workerCommit: null, mergeCommit: null}; delivery.nodes["T1.2"]!.phaseId = "P2";
+  assert.throws(() => requireRevertGitProof(root, approve(second, [second], [reversal]), delivery), /outside its named/);
+});
+
+for (const kind of ["tracked", "untracked"]) test(`reversal retains approved ${kind} user files and detects drift`, (t) => {
+  const root = repository(t); write(root, "user.txt", "initial\n"); git(root, "add", "."); git(root, "commit", "-m", "unrelated baseline");
+  write(root, "product.txt", "start\nafter\nend\n"); git(root, "add", "product.txt"); git(root, "commit", "-m", "feature"); const target = head(root);
+  const path = kind === "tracked" ? "user.txt" : "untracked.txt"; write(root, path, "Retain original user edit\n");
+  const baseline = captureRepositoryBasis(root, true, "sample"); git(root, "revert", "--no-edit", target); const reversal = head(root), status = git(root, "status", "--porcelain"), index = git(root, "write-tree");
+  requireRevertGitProof(root, approve(target, [target], [reversal]), delivered([target]), baseline);
+  assert.equal(git(root, "status", "--porcelain"), status); assert.equal(git(root, "write-tree"), index);
+  write(root, path, "Unapproved later edit\n");
+  assert.throws(() => requireRevertGitProof(root, approve(target, [target], [reversal]), delivered([target]), baseline), /approved reversal baseline/);
+  write(root, path, "Retain original user edit\n"); write(root, ".cadre/product.md", "Unapproved policy drift\n");
+  assert.throws(() => requireRevertGitProof(root, approve(target, [target], [reversal]), delivered([target]), baseline), /approved reversal baseline/);
+});
+
+test("phase integration reverses introduced tasks once without discarding earlier phases", (t) => {
+  const root = repository(t); git(root, "checkout", "-b", "phase");
+  write(root, "first.txt", "first\n"); git(root, "add", "."); git(root, "commit", "-m", "first"); const first = head(root);
+  write(root, "second.txt", "second\n"); git(root, "add", "."); git(root, "commit", "-m", "second"); const second = head(root);
+  git(root, "checkout", "main"); write(root, "other.txt", "canonical unrelated\n"); git(root, "add", "."); git(root, "commit", "-m", "other work");
+  git(root, "merge", "--no-ff", "phase", "-m", "integrate phase"); const integration = head(root), delivery = delivered([first, second]);
+  delivery.nodes.P1!.mergeCommit = integration; delivery.nodes.P1!.workerCommit = second;
+  git(root, "revert", "--no-edit", "-m", "1", integration);
+  requireRevertGitProof(root, {...approve(integration, [integration], [head(root)]), mainlineParents: {[integration]: 1}}, delivery);
+  assert.equal(readFileSync(join(root, "other.txt"), "utf8"), "canonical unrelated\n");
 });
