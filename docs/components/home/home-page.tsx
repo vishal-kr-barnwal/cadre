@@ -72,6 +72,9 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
             <Link className="hover:text-foreground" href="https://github.com/vishal-kr-barnwal/cadre">
               GitHub
             </Link>
+            <Link className="hover:text-cadre-teal" href="https://www.npmjs.com/package/cadre-ai">
+              npm
+            </Link>
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <SearchCommand docs={docs} mode="responsive" />
@@ -102,6 +105,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
                   <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/architecture">Contributor Guide</Link>
                   <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="/workflow-reference">Reference</Link>
                   <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="https://github.com/vishal-kr-barnwal/cadre">GitHub</Link>
+                  <Link className="rounded-lg px-3 py-3 hover:bg-muted" href="https://www.npmjs.com/package/cadre-ai">npm package</Link>
                 </nav>
               </SheetContent>
             </Sheet>
@@ -110,7 +114,7 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
       </header>
 
       <main>
-        <section className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1fr_0.86fr] lg:px-8">
+        <section className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-16 sm:px-6 lg:min-h-[min(56rem,calc(100vh-4rem))] lg:grid-cols-[1fr_0.86fr] lg:px-8">
           <div className="flex max-w-3xl flex-col gap-8">
             <div className="flex flex-col gap-5">
               <h1 className="max-w-3xl text-5xl leading-[1.03] font-semibold tracking-normal text-cadre-ink sm:text-6xl lg:text-7xl">

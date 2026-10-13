@@ -53,6 +53,8 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate documentation content
+        run: pnpm --filter cadre-docs check:content
       - name: Lint docs
         run: pnpm --filter cadre-docs lint
       - name: Typecheck docs
@@ -61,6 +63,8 @@ jobs:
         env:
           GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
         run: pnpm --filter cadre-docs build
+      - name: Validate exported SEO and links
+        run: pnpm --filter cadre-docs check:seo
       - name: Ensure Cloudflare Pages project
         working-directory: docs
         env:

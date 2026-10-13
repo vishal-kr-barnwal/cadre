@@ -49,6 +49,9 @@ export function DocsShell({ docs, headings = [], children }: DocsShellProps) {
             <Link className="transition-colors hover:text-cadre-teal" href="/architecture">
               Contributor Guide
             </Link>
+            <Link className="transition-colors hover:text-cadre-teal" href="https://www.npmjs.com/package/cadre-ai">
+              npm
+            </Link>
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
@@ -123,6 +126,9 @@ function DocsNav({
 }) {
   return (
     <nav aria-label="Documentation" className="flex flex-col gap-7">
+      <Link className="px-2 text-sm font-medium hover:text-cadre-teal" href="https://www.npmjs.com/package/cadre-ai" onClick={onNavigate}>
+        npm package
+      </Link>
       {DOC_NAVIGATION.map((group) => {
         const items = group.slugs
           .map((slug) => docs.find((doc) => doc.slug === slug))
