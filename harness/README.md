@@ -1,6 +1,9 @@
 # Cadre
 
-**Cadre 4.0.0 (unreleased)** uses one receipt-based mutation path and ships only the current template catalog. Existing 3.9.0/3.9.1/3.9.2 projects with schema-2 state and template v5 continue without a project migration or version-only refresh. Older formats receive upgrade instructions through Cadre 3.9.0 before returning to 4.0. Historical evidence and all ten workflows remain supported; Codex, Claude Code and Zed remain stable integrations.
+**Cadre 4.0.0** simplifies the runtime around one receipt-based mutation path
+and the current v6 template catalog. All ten workflows, four approval modes,
+both scheduling modes, and stable Codex, Claude Code and Zed integrations remain
+available. Release documentation is ready; package publication is pending.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. All three integrations are stable as of Cadre 3.9.1.
@@ -18,6 +21,29 @@ templates. A project keeps only approved, mutable delivery state under
 [Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Release notes](https://cadre-docs.pages.dev/release-notes/)
 
+## What changes in 4.0.0
+
+- **One recovery contract:** initialization, implementation completion, clean
+  review and archive use immutable operation receipts. Commit each operation
+  once, then reconcile its receipt; no follow-up commit is needed to record its SHA.
+- **Smaller public surface:** 22 MCP tools and only template v6 in the installed
+  payload. Direct integrations must stop calling `archive_batch_record`,
+  `setup_record_commit` and `setup_record_git_initialized`.
+- **Existing projects:** 3.9.0/3.9.1/3.9.2 projects with schema-2 state and v5
+  templates continue without a project migration or version-only refresh.
+  Historical journals, approval evidence and interrupted receipt recovery remain
+  supported.
+- **Older formats:** `PROJECT_UPGRADE_REQUIRED` provides the bridge route:
+  install Cadre 3.9.0, reconcile interrupted work and run its approved refresh to
+  schema-2/v5, then install 4.0.0 and reload the client. Never change version labels
+  by hand. See the [release notes](https://cadre-docs.pages.dev/release-notes/).
+
+Verification passed 480 harness tests and a dummy-project lifecycle across 14
+fresh Codex sessions: brownfield create, interrupted track drafting, active
+revision, review/remediation, manual-edit freshness checks, archive recovery and
+refresh. The dummy app passed 26 tests and 200,020 arithmetic comparisons. Native
+workflow coverage was Autonomous/sequential; it does not establish exhaustive
+coverage of every mode or client. See the [testing and release documentation](https://cadre-docs.pages.dev/testing-and-release/).
 
 ## Capabilities
 

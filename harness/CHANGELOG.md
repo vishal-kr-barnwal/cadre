@@ -2,6 +2,11 @@
 
 ## [4.0.0] - Unreleased
 
+Cadre 4.0.0 is a breaking runtime/API release that removes parallel legacy
+mutation paths while preserving supported project state and delivery workflows.
+The package, runtime, docs and native plugin manifests are versioned together at
+4.0.0. Publication is pending; this entry records the prepared release.
+
 ### One active mutation contract
 
 - Use operation receipts for initialization, implementation completion, clean review and archive. Remove legacy direct-write completion paths and the `archive_batch_record`, `setup_record_commit` and `setup_record_git_initialized` tools. The MCP surface now has 22 tools.
@@ -11,6 +16,30 @@
 - Warn on unsupported older formats with `PROJECT_UPGRADE_REQUIRED` and prevent delivery mutations. Do not silently translate approval authority or change old version labels.
 - Clarify active revision drafting: use the combined revision preparation path, exact completed-task commit markers, and sequential task ordinals. Preserve completed IDs and renumber only pending work; do not compare a proposed graph against its unsuperseded execution through separate candidate inspection. This addresses rejected proposals observed in a native Codex interruption/revision test.
 - Keep scope, retained-context tokens and knowledge arguments stable across context pages; adding `knownSources` midway invalidates the cursor. Native testing exercised the rejection and recovery, and the shared workflow guidance now states this constraint.
+
+### Compatibility and verification
+
+All ten skills, four approval modes, sequential/parallel scheduling, schema-2
+project/track state, historical journals and approval evidence remain supported.
+Direct MCP consumers must replace the three removed setup/archive tools with
+receipt-based initialization and archive operations plus `candidate_apply`
+reconciliation. New template requests use v6; older template catalogs are no
+longer shipped. Compatible 3.9.x/v5 projects do not need a migration.
+
+Verification passed **480/480 harness tests**, type checking, package validation,
+pack dry run and the full documentation check. A disposable brownfield project
+completed **14 real Codex sessions** through interrupted track drafting, revision
+during implementation, a seeded defect and review/remediation cycle, stale
+completion rejection after a manual edit, clean completion, interrupted archive
+recovery and refresh. Its **26 tests** and **200,020 independent arithmetic
+comparisons** passed. All nine operation receipts mapped to exactly one commit;
+original authority, completed-task evidence and archived history were preserved.
+
+The native run used Autonomous approval and sequential scheduling with labelled
+synthetic fixture approvals. It does not establish exhaustive native coverage of
+every client/mode. Three-client installer, discovery and activation checks remain
+required before publishing 4.0.0; previous 3.9.x installation checks do not replace
+those release gates.
 
 ### Older-project upgrade route
 

@@ -103,14 +103,15 @@ Cadre revision promotion requires proposed state, a matching revision record,
 and reassessed spec/plan/learning/dependency context before approval. Its preview
 includes an active old journal's superseded disposition and the resulting
 Autonomous scope reference. Reconciliation preserves the approved receipt; it
-does not synthesize omitted state. Use `candidate_apply` prepare for this v5
-transition rather than legacy `candidate_inspect` against the old binding.
+does not synthesize omitted state. Use `candidate_apply` prepare for this receipt-based
+transition rather than separate `candidate_inspect` against the old binding.
 The same derivation applies to active scope cascades in `workflow: "refresh"`,
 including fresh per-track revision records in its exact manifest. Context-only
 refresh preserves current execution and scope authority. Quiescence checks use
 actual worker worktrees, paths, and branches while retaining cleaned historical
 provenance. Record-only revision proposals and inconsistent counters fail before
-promotion. Legacy contract/policy migration precedes a later v5 scope revision.
+promotion. Unsupported legacy formats must complete the approved 3.9.0 bridge
+before returning to 4.0 for a scope revision.
 Context refresh preserves the complete existing Autonomous loop and approval
 policy. Imported `drafting-plan` specification revisions retain the previous spec
 approval and leave the draft plan unapproved. Pending resume checks fingerprints
@@ -126,7 +127,7 @@ Explicit full diagnostic access after a bounded error: `diagnosticId`, optional 
 
 Validates the approved canonical plan graph. Implementation preflight normally receives this through implementation status view.
 
-For finding-bearing reviews, use `candidate_inspect` with target status `in_progress`. It validates the proposed transition while the canonical track remains `ready_for_review`, checking the existing execution against its original plan. Scope revisions can similarly target `in_progress` or `planned`. Included staged states must agree with their declared plan target; active execution checks remain mandatory, and terminal tracks cannot be reopened. Completed former final verification phases remain historical evidence when new remediation and final verification phases are appended.
+For finding-bearing reviews, use `candidate_inspect` with target status `in_progress`. It validates the proposed transition while the canonical track remains `ready_for_review`, checking the existing execution against its original plan. For active scope revisions, use `candidate_apply` prepare with `workflow: "revise"` so the runtime derives journal supersession before validating the new graph. Included staged states must agree with their declared plan target; active execution checks remain mandatory, and terminal tracks cannot be reopened. Completed former final verification phases remain historical evidence when new remediation and final verification phases are appended.
 
 ## review_complete
 
@@ -142,7 +143,7 @@ of subsequent product changes; it does not approve those later changes.
 
 Approval-aware staged archive batch. Prepare consumes body-free update descriptors and returns the full manifest/moves. `stateChanges` identifies each source and destination state path, final SHA-256, and exact field-level set/append operations, including project history. Preview and apply share the same deterministic derivation. Apply re-reads exact bytes and returns changed paths/counts. A committed retry verifies the original receipt before checking archive eligibility or reading removed stages; it returns that receipt with zero changed paths/counts.
 
-Pending v5 archive promotion recovers with `candidate_apply` resume using the
+Pending receipt-based archive promotion recovers with `candidate_apply` resume using the
 original operation ID and approval digest, then one receipt commit and
 reconciliation. Repeating archive apply while its intent is pending returns
 `COMMIT_PENDING`; the original archive token provides zero-change replay after

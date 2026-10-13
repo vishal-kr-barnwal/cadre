@@ -25,6 +25,18 @@ A target project keeps only approved mutable delivery state under `.cadre/`;
 runtime code, workflow skills, worker definitions, and templates stay in the
 installed payload.
 
+## Cadre 4.0.0
+
+The 4.0.0 release consolidates state mutations around immutable operation receipts
+and ships only template v6 with 22 MCP tools. All ten workflows and the existing
+approval/scheduling modes remain available. Compatible 3.9.0/3.9.1/3.9.2 projects
+using schema-2 state and v5 need no migration or version-only refresh. Older
+formats receive an explicit Cadre 3.9.0 bridge route.
+
+See [release notes](/release-notes) for breaking API changes, verification results
+and publication status, and [getting started](/getting-started) for installation
+and upgrade instructions.
+
 ## What Cadre Solves
 
 | Need | Cadre's approach |

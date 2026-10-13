@@ -73,6 +73,22 @@ There is no current `install --check` mode. Native listing and a real skill/MCP
 smoke test are the verification path. Zed has no plugin-list CLI, so verify its
 Skills and MCP Server pages and run `/cadre-status` in a native Zed Agent thread.
 
+## 4.0.0 Verification Record
+
+The local 4.0.0 implementation passed 480 harness tests, type checking, package
+validation, pack dry run and the complete documentation check. A native Codex
+fixture completed 14 fresh sessions covering brownfield setup, interrupted track
+drafting, revision during implementation, review and remediation, manual product
+changes invalidating clean completion, archive interruption/recovery and refresh.
+Its 26 tests passed, including 200,020 arithmetic oracle comparisons. All nine
+receipts had exactly one verified commit and historical evidence was preserved.
+
+The native workflow test used Autonomous approval and sequential execution with
+synthetic fixture approvals. It did not change global installations and does not
+replace the three-client installer/discovery/activation gate above. The detailed
+record is `docs/development/cadre-4.0.0-native-flow.md` in the source repository.
+Publication remains pending.
+
 ## Release Sequence
 
 1. Update runtime, package, and both plugin manifest versions together; Zed

@@ -20,8 +20,8 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
   path/hash manifest, Git disposition, digest, commits, and provenance. Full
   defaults remain available on request.
 - **Primary MCP:** template bundle, styleguide resolution,
-  adaptive `project_init_candidate`, setup checkpoint tools, validation,
-  and derived tracks index.
+  adaptive `project_init_candidate`, receipt reconciliation through
+  `candidate_apply`, validation, and derived tracks index.
 - **Proposal transport:** rendered files live under `.cadre/stage/create/`;
   MCP receives only their paths and metadata. Base files are staged directly as
   `product.md`, `guidelines.md`, `tech-stack.md`, `workflow.md`, and
@@ -57,7 +57,7 @@ Invoke a skill as `$cadre:<name>` in Codex, `/cadre:<name>` in Claude Code, or
 - **Writes:** execution journal, task commits, plan/learning provenance, and
   one product commit per cohesive change. After `execution_finish`, one final
   `cadre(implement): complete <track-id>` commit contains only the completed
-  journal, plan markers, track state, and derived index.
+  journal, plan markers, track state, derived index, and immutable receipt.
 - **Implementation handoff:** `ready_for_review`; never `completed`. Autonomous
   automatically invokes review after bookkeeping and continues in-scope remediation.
   It returns to the author only after a clean review or a blocker.
