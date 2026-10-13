@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requireRevertGitProof } from "../src/domain/revert-git.js";
 import { captureRepositoryBasis } from "../src/domain/repository-basis.js";
+import { requireRevertScope } from "../src/domain/revert-scope.js";
 import type { ExecutionNode } from "../src/domain/execution.js";
 import { git, write } from "./helpers/revision-fixture.js";
 
@@ -132,4 +133,37 @@ test("phase integration reverses introduced tasks once without discarding earlie
   git(root, "revert", "--no-edit", "-m", "1", integration);
   requireRevertGitProof(root, {...approve(integration, [integration], [head(root)]), mainlineParents: {[integration]: 1}}, delivery);
   assert.equal(readFileSync(join(root, "other.txt"), "utf8"), "canonical unrelated\n");
+});
+
+for (const integration of ["direct", "fast-forward"]) for (const targetKind of ["phase", "track"]) {
+  test(`${integration} ${targetKind} reversal must cover every task delta`, (t) => {
+    const root = repository(t);
+    if (integration === "fast-forward") git(root, "checkout", "-b", "phase");
+    write(root, "first.txt", "first\n"); git(root, "add", "."); git(root, "commit", "-m", "first"); const first = head(root);
+    write(root, "second.txt", "second\n"); git(root, "add", "."); git(root, "commit", "-m", "second"); const second = head(root);
+    if (integration === "fast-forward") {git(root, "checkout", "main"); git(root, "merge", "--ff-only", "phase");}
+    const delivery = delivered([first, second]); Object.assign(delivery.nodes.P1!, {workerCommit: second, mergeCommit: second});
+    git(root, "revert", "--no-edit", second); const reversedSecond = head(root);
+    const scope = {targetKind, targetId: targetKind === "track" ? "sample" : "P1"};
+    assert.throws(() => requireRevertGitProof(root, {...approve(second, [second], [reversedSecond]), ...scope}, delivery), /omits delivered/);
+    assert.equal(readFileSync(join(root, "first.txt"), "utf8"), "first\n");
+    git(root, "revert", "--no-edit", first);
+    requireRevertGitProof(root, {...approve(second, [second, first], [reversedSecond, head(root)]), ...scope}, delivery);
+  });
+}
+
+test("merge coverage excludes tasks already in its mainline and prevents double reversal", (t) => {
+  const root = repository(t);
+  write(root, "first.txt", "already canonical\n"); git(root, "add", "."); git(root, "commit", "-m", "first"); const first = head(root);
+  git(root, "checkout", "-b", "phase"); write(root, "second.txt", "phase work\n"); git(root, "add", "."); git(root, "commit", "-m", "second"); const second = head(root);
+  git(root, "checkout", "main"); write(root, "other.txt", "unrelated\n"); git(root, "add", "."); git(root, "commit", "-m", "unrelated");
+  git(root, "merge", "--no-ff", "phase", "-m", "phase integration"); const merge = head(root), delivery = delivered([first, second]);
+  Object.assign(delivery.nodes.P1!, {workerCommit: second, mergeCommit: merge});
+  const operation = {...approve(merge, [merge], []), mainlineParents: {[merge]: 1}};
+  assert.throws(() => requireRevertScope(root, operation, delivery, [merge]), /omits delivered/);
+  assert.throws(() => requireRevertScope(root, operation, delivery, [merge, second, first]), /twice/);
+  git(root, "revert", "--no-edit", "-m", "1", merge); const reverseMerge = head(root);
+  git(root, "revert", "--no-edit", first);
+  requireRevertGitProof(root, {...operation, commits: [merge, first], revertCommits: [reverseMerge, head(root)]}, delivery);
+  assert.equal(readFileSync(join(root, "other.txt"), "utf8"), "unrelated\n");
 });

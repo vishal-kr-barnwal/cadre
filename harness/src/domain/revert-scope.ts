@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import type { ExecutionNode, ExecutionJournal } from "./execution.js";
 import type { OperationState } from "./state.js";
 import { resolveGitCommit, isGitAncestor } from "./git.js";
+import { spawnSync } from "node:child_process";
+import { countGitProcess } from "./inspection.js";
 
 type ScopeNode = Pick<ExecutionNode, "id" | "kind" | "phaseId" | "workerCommit" | "mergeCommit">;
 export interface RevertDelivery {trackId: string; nodes: Record<string, ScopeNode>}
@@ -29,14 +31,30 @@ export function requireRevertScope(root: string, operation: OperationState, deli
   const eligible = new Set(selected.filter((node) => node.kind !== "manual-verification")
     .flatMap((node) => [node.workerCommit, node.mergeCommit]).filter((value): value is string => Boolean(value)).map((value) => resolveGitCommit(root, value)));
   if (commits.some((commit) => !eligible.has(commit))) throw new Error("Revert commit lies outside its named task/phase scope or retained execution commit provenance");
-  // A task-worker commit integrated by a merge is reversed once at the integration boundary.
+  // A completion/fast-forward HEAD is not a merge delta covering all its ancestors.
+  const covers = (boundary: string, commit: string): boolean => {
+    const resolved = resolveGitCommit(root, boundary);
+    if (!commits.includes(resolved)) return false;
+    countGitProcess();
+    const result = spawnSync("git", ["show", "-s", "--format=%P", resolved], {cwd: root, encoding: "utf8"});
+    if (result.status !== 0) throw new Error("Cannot inspect reversal integration parents");
+    const parents = result.stdout.trim().split(" ").filter(Boolean);
+    const choices = operation.mainlineParents as Record<string, number> | undefined;
+    const named = Object.entries(choices ?? {}).find(([name]) => resolveGitCommit(root, name) === resolved);
+    const mainline = named?.[1];
+    return parents.length > 1 && Number.isInteger(mainline) && mainline! > 0 && mainline! <= parents.length
+      && isGitAncestor(root, commit, resolved) && !isGitAncestor(root, commit, parents[mainline! - 1]!);
+  };
   const required = new Set(selected.filter((node) => node.kind !== "manual-verification").flatMap((node) => {
     const commit = node.mergeCommit ?? node.workerCommit;
     if (!commit) return [];
     const boundary = selected.find((phase) => phase.kind === "phase" && phase.id === node.phaseId && phase.mergeCommit);
-    // The phase integration reverses its introduced task commits once. Later phases
-    // do not subsume earlier phase reversals merely because they share ancestry.
-    if (node.kind !== "phase" && boundary?.mergeCommit && isGitAncestor(root, commit, boundary.mergeCommit)) return [];
+    if (node.kind !== "phase" && boundary?.mergeCommit && covers(boundary.mergeCommit, commit)) {
+      if (commits.includes(resolveGitCommit(root, commit)) && resolveGitCommit(root, commit) !== resolveGitCommit(root, boundary.mergeCommit)) {
+        throw new Error("Revert cannot reverse a task twice through its covering phase merge");
+      }
+      return [];
+    }
     return [resolveGitCommit(root, commit)];
   }));
   if ([...required].some((commit) => !commits.includes(commit))) throw new Error("Revert omits delivered commits from its named target scope");
