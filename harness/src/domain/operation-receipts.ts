@@ -1,6 +1,7 @@
 import { readGitBlobs } from "./git.js";
 import { recordedRecoveryInputs, mergeRecoveryInputs, type RecoveryInput } from "./recovery-inputs.js";
 import { requireReviewFreshness } from "./review-freshness.js";
+import { requireRevertFreshness, revertApprovalProofSchema } from "./revert-freshness.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -24,7 +25,9 @@ export const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), opera
 export type OperationReceipt = z.infer<typeof receiptSchema>;
 export interface ReceiptFile { path: string; content: string | null }
 export type OperationPromotionInput = Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts"> & { inputs?: RecoveryInput[] };
-const recoverySchema = z.strictObject({ receipt: receiptSchema, inputs: z.array(z.strictObject({ path: z.string(), sha256: digest })).optional(), files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
+const recoverySchema = z.strictObject({ receipt: receiptSchema, inputs: z.array(z.strictObject({ path: z.string(), sha256: digest })).optional(),
+  revertApproval: revertApprovalProofSchema.optional(), reviewBeforeState: z.string().max(1024 * 1024).optional(),
+  files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
 type Recovery = z.infer<typeof recoverySchema>;
 function parseRecovery(body: string): Recovery {
   const recovery = recoverySchema.parse(JSON.parse(body));
@@ -109,17 +112,25 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
       if (readFileSync(target(root, receiptPath(input.operationId)), "utf8") !== receiptBody) throw new Error("Operation ID is already used by a different receipt");
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
     }
-    requireReviewFreshness(root, input.kind, files);
+    const reviewBeforeState = requireReviewFreshness(root, input.kind, files);
+    const revertApproval = requireRevertFreshness(root, input.kind, input.operationId, files);
     requireUnchangedInputs(root, inputs ?? recorded);
-    recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
+    recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), ...(revertApproval ? {revertApproval} : {}),
+      ...(reviewBeforeState ? {reviewBeforeState} : {}), files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
     write(root, { path, content: json(recovery) });
     afterWrite?.(path);
   }
-  requireReviewFreshness(root, recovery.receipt.kind, recovery.files);
+  const reviewBeforeState = requireReviewFreshness(root, recovery.receipt.kind, recovery.files, recovery.reviewBeforeState, recovery.receipt.baseCommit);
+  const revertApproval = requireRevertFreshness(root, recovery.receipt.kind, recovery.receipt.operationId, recovery.files, recovery.revertApproval);
   requireUnchangedInputs(root, recovery.inputs ?? recordedRecoveryInputs(recovery.files));
   for (const file of recovery.files) {
     const actual = currentHash(root, file.path), expected = file.content === null ? null : receiptHash(file.content);
     if (actual !== file.before && actual !== expected) throw new CadreError("OPERATION_PROMOTION_DRIFT", "An artifact changed during operation recovery", { path: file.path });
+  }
+  if (revertApproval && !recovery.revertApproval || reviewBeforeState && !recovery.reviewBeforeState) {
+    if (revertApproval) recovery.revertApproval = revertApproval;
+    if (reviewBeforeState) recovery.reviewBeforeState = reviewBeforeState;
+    write(root, {path, content: json(recovery)});
   }
   for (const file of recovery.files) { write(root, file); afterWrite?.(file.path); }
   write(root, { path: receiptPath(input.operationId), content: receiptBody });

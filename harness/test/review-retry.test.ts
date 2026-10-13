@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { prepareCandidateStage } from "../src/domain/staging.js";
 import { previewCandidateApply } from "../src/domain/candidate-apply.js";
 import { requireReviewProgress, validateAutonomousRemediation } from "../src/domain/autonomous-review.js";
 import { validateProject } from "../src/domain/state.js";
 import { parsePlanContent } from "../src/domain/plan.js";
-import { promoteOperation } from "../src/domain/operation-receipts.js";
+import { promoteOperation, resumeOperation, receiptHash } from "../src/domain/operation-receipts.js";
 import { reviewAndArchive } from "./helpers/complete-fixture.js";
 import { fixture, finishCurrent, read, write, git, commit, json } from "./helpers/revision-fixture.js";
 
@@ -46,7 +48,7 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
     await reviewAndArchive(f); assert.deepEqual(validateProject(root).errors, []);
   });
 }
-async function remediation(f: Fixture, interrupted = false) {
+async function prepareRemediation(f: Fixture) {
   const {root, call, load} = f, state = load(), graph = parsePlanContent(read(root, parent + "plan.md"), "plan.md");
   const n = graph.phases.length + 1, revision = graph.planRevision! + 1;
   const loop = {...state.autonomousReview, checkpoint: "remediating", reviewedExecutionId: state.lastExecution.executionId,
@@ -59,10 +61,14 @@ async function remediation(f: Fixture, interrupted = false) {
     [`reviews/loop-${state.reviewCycles.length + 1}.json`]: json(loop)};
   prepareCandidateStage(root, "review-sample", Object.keys(files));
   for (const [path, body] of Object.entries(files)) write(root, `.cadre/stage/review-sample/${path}`, body);
-  const p = await call("candidate_apply", {request: {mode: "prepare", projectRoot: root, candidateId: "review-sample", workflow: "review", files: Object.keys(files)}});
+  const input = {projectRoot: root, candidateId: "review-sample", workflow: "review" as const, files: Object.keys(files)};
+  return {input, proposal: await call("candidate_apply", {request: {mode: "prepare", ...input}})};
+}
+async function remediation(f: Fixture, interrupted = false) {
+  const {root, call, load} = f, {input, proposal: p} = await prepareRemediation(f);
   let a;
   if (interrupted) {
-    const preview = previewCandidateApply({projectRoot: root, candidateId: "review-sample", workflow: "review", files: Object.keys(files)});
+    const preview = previewCandidateApply(input);
     assert.throws(() => promoteOperation(root, {operationId: preview.operationId, kind: "review", approvalDigest: preview.digest,
       baseCommit: preview.baseCommit, inputs: preview.recoveryInputs}, preview.files, () => {throw Error("fixture crash");}), /fixture crash/);
     const original = read(root, "second.txt"), intentPath = `.cadre/stage/operations/${preview.operationId}.json`, intent = read(root, intentPath);
@@ -77,6 +83,40 @@ async function remediation(f: Fixture, interrupted = false) {
   done.autonomousReview.findings[0].attemptExecutionIds.push(id); write(root, parent + "state.json", json(done));
   return id;
 }
+
+test("legacy review resume cannot bypass persisted blocked authority", async (t) => {
+  const f = await fixture(t), {root, call, load} = f;
+  await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode: "sequential"});
+  await finishCurrent(root, call, load().operation.executionId);
+  const state = load(); state.autonomousReview.findings = [{id: "persistent", summary: "Defect", status: "open", attemptExecutionIds: []}];
+  write(root, parent + "state.json", json(state)); const {input} = await prepareRemediation(f), p = previewCandidateApply(input);
+  state.autonomousReview.checkpoint = "blocked"; state.autonomousReview.blocker = "Prerequisite not approved";
+  write(root, parent + "state.json", json(state)); git(root, "add", ".cadre"); git(root, "commit", "-m", "cadre: persist blocked review");
+  // Materialize the older runtime's unsafe pending promotion with internally consistent receipt hashes.
+  const files = p.files.map((file) => ({...file, before: existsSync(join(root, file.path)) ? receiptHash(read(root, file.path)) : null}));
+  const intent = {receipt: {schemaVersion: 1, status: "completed", operationId: p.operationId, kind: "review", approvalDigest: p.digest,
+    baseCommit: git(root, "rev-parse", "HEAD"), artifacts: p.manifest.slice().sort((a, b) => a.path.localeCompare(b.path))}, files, inputs: p.recoveryInputs};
+  const path = `.cadre/stage/operations/${p.operationId}.json`; write(root, path, json(intent));
+  const before = read(root, parent + "state.json"), recorded = read(root, path);
+  assert.throws(() => resumeOperation(root, p.operationId, p.digest), /Autonomous review is blocked/);
+  assert.equal(read(root, parent + "state.json"), before); assert.equal(read(root, path), recorded);
+});
+
+test("review resume retains original authority after state promotion and stage loss", async (t) => {
+  const f = await fixture(t), {root, call, load} = f;
+  await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode: "parallel"});
+  await finishCurrent(root, call, load().operation.executionId);
+  const state = load(); state.autonomousReview.findings = [{id: "persistent", summary: "Defect", status: "open", attemptExecutionIds: []}];
+  write(root, parent + "state.json", json(state)); const {input} = await prepareRemediation(f), p = previewCandidateApply(input);
+  assert.throws(() => promoteOperation(root, {operationId: p.operationId, kind: "review", approvalDigest: p.digest,
+    baseCommit: p.baseCommit, inputs: p.recoveryInputs}, p.files, (path) => {if (path.endsWith("/state.json")) throw Error("fixture crash");}), /fixture crash/);
+  rmSync(join(root, ".cadre/stage/review-sample"), {recursive: true});
+  assert.ok(JSON.parse(read(root, `.cadre/stage/operations/${p.operationId}.json`)).reviewBeforeState);
+  commit(root, resumeOperation(root, p.operationId, p.digest));
+  await call("execution_start", {projectRoot: root, trackId: "sample"}); await finishCurrent(root, call, load().operation.executionId);
+  const resolved = load(); resolved.autonomousReview.findings[0].status = "resolved"; write(root, parent + "state.json", json(resolved));
+  await reviewAndArchive(f); assert.deepEqual(validateProject(root).errors, []);
+});
 test("explicit stalled retry grants two new attempts without losing the first two", async (t) => {
   const f = await fixture(t), {root, call, load} = f;
   await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode: "parallel"});
@@ -112,3 +152,27 @@ test("finding-bearing review recovery checks the reviewed product before promoti
   const resolved = load(); resolved.autonomousReview.findings[0].status = "resolved"; write(root, parent + "state.json", json(resolved));
   await reviewAndArchive(f); assert.deepEqual(validateProject(root).errors, []);
 });
+
+for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMode of ["sequential", "parallel"]) {
+  test(`blocked review cannot authorize remediation without a retry: ${clientName}/${requestedMode}`, async (t) => {
+    const f = await fixture(t, clientName), {root, call, load} = f;
+    await call("execution_start", {projectRoot: root, trackId: "sample", approvalMode: "autonomous", requestedMode});
+    await finishCurrent(root, call, load().operation.executionId);
+    const state = load();
+    state.autonomousReview = {...state.autonomousReview, checkpoint: "blocked", blocker: "Human prerequisite unavailable",
+      findings: [{id: "persistent", summary: "Verified defect", status: "open", attemptExecutionIds: []}]};
+    write(root, parent + "state.json", json(state));
+    git(root, "add", ".cadre"); git(root, "commit", "-m", "cadre: retain blocked authority");
+    const before = read(root, parent + "state.json"), head = git(root, "rev-parse", "HEAD");
+    await assert.rejects(remediation(f), /Autonomous review is blocked/);
+    assert.equal(read(root, parent + "state.json"), before);
+    assert.equal(git(root, "rev-parse", "HEAD"), head);
+    const {proposal} = await retry(f, "Explicit approval: prerequisite available, retry this finding.");
+    const applied = await call("candidate_apply", {request: {mode: "apply", proposalToken: proposal.proposalToken}});
+    commit(root, {operationId: applied.operationId, trailers: applied.trailers});
+    await remediation(f);
+    const resolved = load(); resolved.autonomousReview.findings[0].status = "resolved";
+    write(root, parent + "state.json", json(resolved));
+    await reviewAndArchive(f); assert.deepEqual(validateProject(root).errors, []);
+  });
+}

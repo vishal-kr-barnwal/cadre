@@ -37,7 +37,7 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
     const operation = {action: "revert", checkpoint: "approved", targetKind, targetId, baseCommit: product,
       expectedCommit: "cadre(revert): reconcile sample", commits: [product], revertCommits: [] as string[],
       originalExecutionPath: "reverts/revert-task-execution-before.json", approvedArtifacts: Object.keys(files),
-      approvedArtifactHashes: inspected.manifest, artifactProgress: [], approvalDigest: inspected.digest, approvedAt: new Date().toISOString()};
+      approvedArtifactHashes: inspected.files, artifactProgress: [], approvalDigest: inspected.digest, approvedAt: new Date().toISOString()};
     const temporary = {...original, operation, lastExecution: {executionId: id, journal: path, planRevision: journal.planRevision,
       graphDigest: journal.graphDigest, headCommit: journal.headCommit, completedAt: journal.completedAt,
       approvalMode: journal.approvalMode, approvalPolicyVersion: journal.approvalPolicyVersion}};
@@ -56,8 +56,7 @@ for (const clientName of ["codex", "claude-code", "zed"]) for (const requestedMo
       const blocked = {...original.autonomousReview, checkpoint: "blocked", blocker: "Retain external prerequisite"};
       write(root, ".cadre/tracks/sample/state.json", json({...temporary, operation, autonomousReview: blocked}));
       files["state.json"] = json({...original, autonomousReview: blocked});
-      const blockedPreview = previewCandidateApply(stage());
-      assert.equal(JSON.parse(blockedPreview.files.find((file) => file.path === ".cadre/tracks/sample/state.json")!.content!).autonomousReview.checkpoint, "blocked");
+      assert.throws(() => previewCandidateApply(stage()), /artifact differs from its original approval/);
       write(root, ".cadre/tracks/sample/state.json", json({...temporary, operation})); files["state.json"] = json(original);
     }
     const record = files["reverts/revert-task.json"]!;

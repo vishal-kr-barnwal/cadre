@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
-import { isGitAncestor } from "./git.js";
+import { requireRevertApproval } from "./revert-approval.js";
+import { requireRevertGitProof } from "./revert-git.js";
 import { requireUnchangedAutonomousReview } from "./autonomous-review.js";
 import { requireQuiescentExecution } from "./execution-quiescence.js";
 import type { ExecutionJournal } from "./execution.js";
@@ -24,6 +25,7 @@ export function deriveRevertCandidate(root: string, previous: TrackState, propos
     || proposed.operation.approvalPolicyVersion !== binding.approvalPolicyVersion) {
     throw new Error("Revert must restore the retained execution's original implement binding");
   }
+  const recordPath = requireRevertApproval(previous, artifacts);
   const journal = JSON.parse(read(`${parent}/${binding.journal}`)) as ExecutionJournal;
   requireQuiescentExecution(root, journal);
   if (!artifacts.has(`${parent}/state.json`) || !artifacts.has(`${parent}/${binding.journal}`)
@@ -32,20 +34,13 @@ export function deriveRevertCandidate(root: string, previous: TrackState, propos
     || artifacts.get(`${parent}/${operation.originalExecutionPath}`) !== read(`${parent}/${binding.journal}`)) {
     throw new Error("Revert requires proposed state/journal and the exact original execution snapshot");
   }
-  const receipts = [...artifacts].filter(([path]) => path.startsWith(`${parent}/reverts/`)
-    && /^revert-[a-z0-9-]+\.json$/.test(path.split("/").at(-1)!) && !path.endsWith("-execution-before.json"));
+  const receipts = [...artifacts].filter(([path]) => path === recordPath);
   if (!receipts.some(([, body]) => {
     const record = JSON.parse(body) as Record<string, unknown>;
     return record.reconciliationCommit === null
       && Object.entries(operation).every(([key, value]) => isDeepStrictEqual(record[key], value));
   })) throw new Error("Revert requires the exact durable reversal record from its persisted approval");
-  for (const commit of operation.revertCommits) {
-    if (typeof commit !== "string" || !/^[0-9a-f]{7,40}$/.test(commit)
-      || !isGitAncestor(root, commit) || typeof operation.baseCommit !== "string"
-      || !isGitAncestor(root, operation.baseCommit, commit) || commit === operation.baseCommit) {
-      throw new Error("Revert requires reachable additive reversal commits after the approved base");
-    }
-  }
+  requireRevertGitProof(root, operation, journal);
   return { ...proposed, ...(previous.autonomousReview ? {
     autonomousReview: {...previous.autonomousReview,
       checkpoint: previous.autonomousReview.checkpoint === "blocked" ? "blocked" as const : "implementing" as const}

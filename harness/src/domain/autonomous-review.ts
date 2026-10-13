@@ -70,6 +70,7 @@ export function requireCleanAutonomousReview(value: AutonomousReview, execution:
 /** Candidate snapshots bind review evidence without embedding their own digest. */
 export function validateAutonomousRemediation(previous: AutonomousReview, candidate: unknown,
   execution: { executionId?: string; headCommit?: string }): AutonomousReview {
+  requireReviewProgress(previous);
   const next = requireReviewProgress(autonomousReviewSchema.parse(candidate));
   for (const field of ["originExecutionId", "authorizedAt", "initialBaseCommit", "specCommit"] as const) {
     if (next[field] !== previous[field]) throw new Error(`Autonomous remediation cannot change ${field}; obtain explicit scope authorization`);
