@@ -1,6 +1,6 @@
 {
   "name": "cadre-ai",
-  "version": "3.9.2",
+  "version": "4.0.0",
   "description": "Cross-agent, human-governed software delivery harness",
   "author": {
     "name": "Vishal Kumar",
@@ -39,7 +39,7 @@
     "marketplace/",
     "README.md",
     "skills/",
-    "templates/"
+    "templates/v6/"
   ],
   "scripts": {
     "build": "node --import tsx scripts/build.ts",

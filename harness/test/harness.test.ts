@@ -1,3 +1,4 @@
+import { reconcileOperation } from "../src/domain/operation-receipts.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -25,8 +26,8 @@ import {
   previewWorktreeCleanup, previewWorktreeCreate, previewWorktreeIntegration
 } from "../src/domain/worktrees.js";
 import {
-  applyArchiveBatchCandidate, applyArchiveBatchRecord, applyReviewComplete,
-  deriveReviewCompleteInput, previewArchiveBatchCandidate, previewArchiveBatchRecord, previewReviewComplete
+  applyArchiveBatchCandidate, applyReviewComplete,
+  deriveReviewCompleteInput, previewArchiveBatchCandidate, previewReviewComplete
 } from "../src/domain/governance.js";
 import {
   CLAUDE_APPROVAL,
@@ -49,13 +50,13 @@ import {
 import { ProposalTokenStore } from "../src/mcp/proposals.js";
 import { prepareCandidateStage } from "../src/domain/staging.js";
 import {
-  applyProjectInitCandidate, previewProjectInitCandidate, recordGitInitialized, recordSetupCommit
+  applyProjectInitCandidate, previewProjectInitCandidate
 } from "../src/domain/init.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const templateRoot = join(root, "templates", "v4", "init");
+const templateRoot = join(root, "templates", "v5", "init");
 const legacyTemplateRoot = join(root, "templates", "v1", "init");
-const providerRoot = join(root, "templates", "v5");
+const providerRoot = join(root, "templates", "v6");
 
 test("published v1 templates remain byte-for-byte immutable", () => {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true })
@@ -98,6 +99,7 @@ function fixture() {
   );
   const projectPath = join(projectRoot, ".cadre", "project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
+  project.schemaVersion = 2;
   project.runtimeVersion = "3.9.0";
   project.templateSetVersion = "v5";
   project.project.name = "Fixture";
@@ -422,11 +424,18 @@ function gitText(projectRoot: string, args: string[]): string {
   return execFileSync("git", args, { cwd: projectRoot, encoding: "utf8" }).trim();
 }
 
+function commitOperation(projectRoot: string, receipt: {operationId: string; trailers: string[]}) {
+  gitText(projectRoot, ["add", ".cadre"]);
+  gitText(projectRoot, ["commit", "-m", receipt.operationId, "-m", receipt.trailers.join("\n")]);
+  return reconcileOperation(projectRoot, receipt.operationId);
+}
+
 function gitFixture(): { projectRoot: string; head: string } {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-worktree-"));
   mkdirSync(join(projectRoot, ".cadre"), { recursive: true });
   writeFileSync(join(projectRoot, ".cadre", ".gitignore"), "/.worktrees/\n/wisps/\n");
   writeFileSync(join(projectRoot, ".cadre", "project.json"), `${JSON.stringify({
+    schemaVersion: 2,
     runtimeVersion: "3.9.0",
     templateSetVersion: "v5"
   }, null, 2)}\n`);
@@ -552,19 +561,18 @@ test("setup commit recording verifies the approved file manifest against Git", (
   gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
   gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
   gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
-  recordGitInitialized(projectRoot);
   writeFileSync(join(projectRoot, ".cadre", "product.md"), "# Changed product\n");
   gitText(projectRoot, ["add", ".cadre"]);
   gitText(projectRoot, ["commit", "-m", "cadre(create): initialize wrong content"]);
   assert.throws(
-    () => recordSetupCommit(projectRoot, gitText(projectRoot, ["rev-parse", "HEAD"])),
+    () => reconcileOperation(projectRoot, applied.receipt!.operationId),
     /commit_pending/
   );
   writeFileSync(join(projectRoot, ".cadre", "product.md"), "# Product\n");
   gitText(projectRoot, ["add", ".cadre/product.md"]);
   gitText(projectRoot, ["commit", "-m", "cadre(create): initialize project harness", ...applied.receipt!.trailers.flatMap((trailer) => ["-m", trailer])]);
   const approvedCommit = gitText(projectRoot, ["rev-parse", "HEAD"]);
-  recordSetupCommit(projectRoot, approvedCommit);
+  assert.equal(reconcileOperation(projectRoot, applied.receipt!.operationId), approvedCommit);
   const state = JSON.parse(readFileSync(join(projectRoot, ".cadre", "project.json"), "utf8"));
   assert.equal(state.setup.commit, `op:${applied.receipt!.operationId}`);
   assert.equal(gitText(projectRoot, ["status", "--porcelain"]), "");
@@ -1020,6 +1028,15 @@ test("execution start and finish resume while keeping the derived index current"
 - [ ] T2.1 User Manual Verification
 - Phase completion commit: pending
 `);
+  gitText(projectRoot, ["init", "-b", "main"]);
+  gitText(projectRoot, ["config", "user.name", "Cadre Test"]);
+  gitText(projectRoot, ["config", "user.email", "cadre@example.test"]);
+  gitText(projectRoot, ["config", "commit.gpgsign", "false"]);
+  gitText(projectRoot, ["add", ".cadre"]); gitText(projectRoot, ["commit", "-m", "fixture: approved plan"]);
+  const head = gitText(projectRoot, ["rev-parse", "HEAD"]);
+  for (const path of [join(trackRoot, "state.json"), join(projectRoot, ".cadre/project.json")]) {
+    writeFileSync(path, readFileSync(path, "utf8").replace(/1111111|aaaaaaa|bbbbbbb/g, head));
+  }
   const startInput = {
     projectRoot,
     trackId: "checkpoint-track",
@@ -1027,7 +1044,7 @@ test("execution start and finish resume while keeping the derived index current"
     requestedMode: "sequential" as const,
     effectiveMode: "sequential" as const,
     maxWorkers: 1,
-    baseCommit: "1111111",
+    baseCommit: head,
     approvedAt: "2026-07-28T03:00:00.000Z"
   };
   const start = previewExecutionStart(startInput);
@@ -1037,8 +1054,8 @@ test("execution start and finish resume while keeping the derived index current"
   for (const [nodeId, commit] of [["T1.1", "abcdef1"], ["T1.2", "abcdef2"], ["P1", "abcdef2"],
     ["T2.1", "abcdef3"], ["P2", "abcdef3"]] as const) {
     completedJournal.nodes[nodeId].status = "completed";
-    completedJournal.nodes[nodeId].workerCommit = commit;
-    completedJournal.nodes[nodeId].mergeCommit = nodeId.startsWith("P") ? commit : null;
+    completedJournal.nodes[nodeId].workerCommit = head;
+    completedJournal.nodes[nodeId].mergeCommit = nodeId.startsWith("P") ? head : null;
     completedJournal.nodes[nodeId].verification = "verified";
     completedJournal.nodes[nodeId].approval = "authorized";
   }
@@ -1048,7 +1065,7 @@ test("execution start and finish resume while keeping the derived index current"
     projectRoot,
     trackId: startInput.trackId,
     executionId: startInput.executionId,
-    headCommit: "ccccccc",
+    headCommit: head,
     completedAt: "2026-07-28T04:00:00.000Z"
   };
   const finish = previewExecutionFinish(finishInput);
@@ -1060,8 +1077,10 @@ test("execution start and finish resume while keeping the derived index current"
   assert.throws(() => applyExecutionFinish(finishInput, resumedFinish.digest), /proposal is stale/);
   writeFileSync(resumedFinish.tracksPath, currentTracks);
   const freshFinish = previewExecutionFinish(finishInput);
-  applyExecutionFinish(finishInput, freshFinish.digest);
-  assert.match(readFileSync(join(trackRoot, "plan.md"), "utf8"), /\[x\] T2\.1.*commit: abcdef3/);
+  const finished = applyExecutionFinish(finishInput, freshFinish.digest);
+  assert.ok(validateProject(projectRoot).errors.some(error => error.includes("commit_pending")));
+  commitOperation(projectRoot, finished.receipt!);
+  assert.match(readFileSync(join(trackRoot, "plan.md"), "utf8"), new RegExp(`\\[x\\] T2\\.1.*commit: ${head}`));
   const state = JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8"));
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.operation, null);
@@ -1105,7 +1124,8 @@ test("clean review completion previews and applies its exact state and derived i
   assert.throws(() => applyReviewComplete(input, preview.digest), /proposal is stale/);
   runState(projectRoot, "render");
   const fresh = previewReviewComplete(input);
-  applyReviewComplete(input, fresh.digest);
+  const reviewed = applyReviewComplete(input, fresh.digest);
+  commitOperation(projectRoot, reviewed.receipt);
   assert.equal(JSON.parse(readFileSync(join(trackRoot, "state.json"), "utf8")).status, "completed");
   assert.equal(runState(projectRoot, "validate").status, 0);
   writeFileSync(fresh.tracksPath, "# stale index\n");
@@ -1117,6 +1137,8 @@ test("clean review completion previews and applies its exact state and derived i
   assert.equal(retriedState.reviewCycles[0].approvalConfirmation.status, "approved");
   assert.equal(retriedState.reviewCycles[0].approvalConfirmation.proposalDigest, fresh.digest);
   assert.equal(retriedState.reviewCycles[0].approval, undefined);
+  assert.equal(readFileSync(fresh.tracksPath, "utf8"), "# stale index\n", "committed replay must not rewrite later drift");
+  runState(projectRoot, "render");
   assert.match(readFileSync(fresh.tracksPath, "utf8"), /reviewed-track.*completed/);
 });
 
@@ -1162,13 +1184,13 @@ test("clean review derives its range from the completed execution base", () => {
   assert.equal(derived.reviewedHead, commits[2]);
   assert.equal(derived.commitRange, `${base}..${commits[2]}`);
   const proposal = previewReviewComplete(derived);
-  applyReviewComplete(derived, proposal.digest);
+  commitOperation(projectRoot, applyReviewComplete(derived, proposal.digest).receipt);
   const retried = deriveReviewCompleteInput({ projectRoot, trackId, approval: "approved" });
   assert.equal(retried.reviewedAt, derived.reviewedAt);
   assert.equal(retried.commitRange, derived.commitRange);
 });
 
-test("archive candidate proposals reject changed content and record provenance", () => {
+test("archive proposals reject drift and direct older interrupted batches to the upgrade bridge", () => {
   const projectRoot = fixture();
   writeFinalizedTrack(projectRoot, "archive-candidate", "completed");
   runState(projectRoot, "render");
@@ -1211,31 +1233,10 @@ test("archive candidate proposals reject changed content and record provenance",
     join(projectRoot, ".cadre", "tracks", "archive-candidate"),
     join(projectRoot, ".cadre", "archive", "archive-candidate")
   );
-  const interrupted = previewArchiveBatchCandidate(input);
-  assert.equal(interrupted.resuming, true);
-  writeFileSync(
-    join(projectRoot, ".cadre", "archive", "archive-candidate", "state.json"),
-    `${JSON.stringify(fresh.moves[0]!.state, null, 2)}\n`
-  );
-  assert.equal(previewArchiveBatchCandidate(input).resuming, true);
-  applyArchiveBatchCandidate(input, fresh.digest);
-  const canonicalPatternPath = join(projectRoot, ".cadre", "patterns", "candidate-pattern.md");
-  assert.equal(readFileSync(canonicalPatternPath, "utf8"), pattern);
-  writeFileSync(canonicalPatternPath, `${pattern}\ntampered after promotion\n`);
-  assert.ok(validateProject(projectRoot).errors.some((error) => (
-    error.includes("promoted artifact differs from its approved hash: patterns/candidate-pattern.md")
-  )));
-  writeFileSync(canonicalPatternPath, pattern);
-  assert.equal(existsSync(candidateRoot), true, "candidate files remain available through the commit checkpoint");
-  const recordInput = { projectRoot, batchId: input.batchId, archiveCommit: "eeeeeee" };
-  const record = previewArchiveBatchRecord(recordInput);
-  applyArchiveBatchRecord(recordInput, record.digest);
-  const state = JSON.parse(readFileSync(
-    join(projectRoot, ".cadre", "archive", "archive-candidate", "state.json"),
-    "utf8"
-  ));
-  assert.equal(state.commits.archive, "eeeeeee");
-  assert.equal(runState(projectRoot, "validate").status, 0);
+  const before = readFileSync(join(projectRoot, ".cadre/archive/archive-candidate/state.json"), "utf8");
+  assert.throws(() => previewArchiveBatchCandidate(input), /reconciled with Cadre 3.9.0/);
+  assert.equal(readFileSync(join(projectRoot, ".cadre/archive/archive-candidate/state.json"), "utf8"), before);
+
 });
 
 test("worktree tools integrate task-to-phase and phase-to-main, then clean up safely", () => {
@@ -1689,8 +1690,8 @@ test("installer prepares a shared three-client payload", async () => {
   assert.equal(codexManifest.version, `${CADRE_RUNTIME_VERSION}+codex.test-build`);
   assert.equal(claudeManifest.version, `${CADRE_RUNTIME_VERSION}+claude.test-build`);
   assert.ok(existsSync(join(pluginRoot, "dist", "cadre-mcp.mjs")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v4", "track", "spec.md")));
-  assert.ok(existsSync(join(pluginRoot, "templates", "v4", "init", "gitignore.template")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v6", "track", "spec.md")));
+  assert.ok(existsSync(join(pluginRoot, "templates", "v6", "init", "gitignore.template")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-phase-worker.md")));
   assert.ok(existsSync(join(pluginRoot, "agents", "cadre-task-worker.md")));
   assert.equal(existsSync(join(pluginRoot, "scripts")), false);
@@ -1715,7 +1716,7 @@ test("installer prepares a shared three-client payload", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 25);
+    assert.equal(tools.tools.length, 22);
     assert.deepEqual(Object.keys(CADRE_MCP_OUTPUT_SCHEMAS).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
@@ -1724,7 +1725,7 @@ test("installer prepares a shared three-client payload", async () => {
     assert.ok(tools.tools.some((tool) => tool.name === "project_status"));
     const resources = await client.listResources();
     assert.deepEqual(
-      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v5/", "")),
+      resources.resources.map((resource) => resource.uri.replace("cadre://templates/v6/", "")),
       [...TEMPLATE_IDS]
     );
   } finally {
@@ -1991,14 +1992,14 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 25);
+    assert.equal(tools.tools.length, 22);
     assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 80 * 1024);
     for (const name of [
       "workflow_elicit", "template_get_many", "styleguide_resolve", "context_read", "project_status",
       "state_validate", "candidate_stage_prepare", "candidate_inspect", "project_init_candidate",
-      "setup_record_git_initialized", "setup_record_commit", "tracks_render",
+      "tracks_render",
       "execution_graph_validate",
-      "review_complete", "archive_batch_record", "archive_batch_candidate",
+      "review_complete", "archive_batch_candidate",
       "execution_start", "execution_checkpoint", "execution_status", "execution_finish", "worktree_create",
       "integration", "worktree_cleanup"
     ]) {
@@ -2071,22 +2072,22 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     );
     agentVisibleResult(fallback);
     const resources = await client.listResources();
-    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v5/track/spec"));
+    assert.ok(resources.resources.some((resource) => resource.uri === "cadre://templates/v6/track/spec"));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v5/track/revise-operation"
+      (resource) => resource.uri === "cadre://templates/v6/track/revise-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v5/project/refresh-operation"
+      (resource) => resource.uri === "cadre://templates/v6/project/refresh-operation"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v5/project/gitignore"
+      (resource) => resource.uri === "cadre://templates/v6/project/gitignore"
     ));
     assert.ok(resources.resources.some(
-      (resource) => resource.uri === "cadre://templates/v5/track/revert-operation"
+      (resource) => resource.uri === "cadre://templates/v6/track/revert-operation"
     ));
 
-    const workflow = await client.readResource({ uri: "cadre://templates/v5/project/workflow" });
-    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v5/project/workflow");
+    const workflow = await client.readResource({ uri: "cadre://templates/v6/project/workflow" });
+    assert.equal(workflow.contents[0]?.uri, "cadre://templates/v6/project/workflow");
     assert.match((workflow.contents[0] as { text?: string }).text ?? "", /^# Cadre Workflow/);
 
     const bundle = await client.callTool({
@@ -2543,14 +2544,15 @@ test("compiled MCP exposes versioned templates and initializes projects without 
     assert.equal(visibleLegacyError.error?.details?.targetRuntimeVersion, CADRE_RUNTIME_VERSION);
     assert.equal(
       (agentVisibleResult(rejectedLegacyMutation) as { error?: { code?: string } }).error?.code,
-      "PROJECT_REFRESH_REQUIRED"
+      "PROJECT_UPGRADE_REQUIRED"
     );
     const legacyStage = await client.callTool({
       name: "candidate_stage_prepare",
       arguments: { projectRoot: legacyRoot, candidateId: "refresh-legacy" }
     });
-    assert.equal(legacyStage.isError, undefined);
+    assert.equal(legacyStage.isError, true);
     agentVisibleResult(legacyStage);
+    writeFileSync(join(legacyRoot, ".cadre/.gitignore"), readFileSync(join(providerRoot, "init/gitignore.template"), "utf8"));
     legacyProject.runtimeVersion = "3.9.0";
     legacyProject.templateSetVersion = "v5";
     writeFileSync(legacyProjectPath, `${JSON.stringify(legacyProject, null, 2)}\n`);
@@ -2964,7 +2966,7 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
       }
       assert.equal(readFileSync(join(projectRoot, "app.txt"), "utf8"), `${approvalMode} integration\n`);
       if (approvalMode === "phase") {
-        // Simulate a crash after Git merged but before its journal receipt, then a runtime upgrade.
+        // Simulate installing 4.0 on a 3.9.1 project after Git merged but before its journal checkpoint.
         const journalPath = join(projectRoot, ".cadre", "tracks", trackId, "executions", `execution-${executionId}.json`);
         const interrupted = JSON.parse(readFileSync(journalPath, "utf8"));
         interrupted.nodes["T1.1"].status = "committed";
@@ -2973,10 +2975,10 @@ test("compiled MCP integration pauses only when the execution is governed", asyn
         writeFileSync(journalPath, JSON.stringify(interrupted));
         const projectPath = join(projectRoot, ".cadre/project.json");
         const project = JSON.parse(readFileSync(projectPath, "utf8"));
-        project.runtimeVersion = "3.6.0"; project.templateSetVersion = "v2";
+        project.runtimeVersion = "3.9.1"; project.templateSetVersion = "v5";
         writeFileSync(projectPath, JSON.stringify(project));
         gitText(projectRoot, ["add", ".cadre/project.json"]);
-        gitText(projectRoot, ["commit", "-m", "cadre(test): preserve legacy project version"]);
+        gitText(projectRoot, ["commit", "-m", "cadre(test): preserve compatible 3.9.1 project version"]);
         const beforeRecovery = gitText(projectRoot, ["rev-parse", "HEAD"]);
         const recovered = await client.callTool({ name: "integration", arguments: { request: { mode: "prepare", ...scope } } });
         assert.equal(recovered.isError, undefined, JSON.stringify(recovered));
@@ -3092,8 +3094,10 @@ test("interactive workflows prefer bounded client-native forms with one chat fal
 test("proposal workflows validate staged plan files without transporting their content", () => {
   for (const skill of ["track", "review", "revise", "refresh", "revert"]) {
     const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
-    assert.match(body, /candidate_inspect/, `${skill} must inspect and validate staged artifacts once`);
-    assert.match(body, /planValidations/, `${skill} must validate staged plan Markdown when present`);
+    if (skill !== "revise") {
+      assert.match(body, /candidate_inspect/, `${skill} must inspect and validate staged artifacts once`);
+      assert.match(body, /planValidations/, `${skill} must validate staged plan Markdown when present`);
+    }
     assert.match(body, /\.cadre\/stage/, `${skill} must use the project-local candidate stage`);
     if (["track", "review", "revise"].includes(skill)) {
       assert.match(body, /temporary project copy/, `${skill} must prohibit the filesystem workaround`);
@@ -3103,13 +3107,13 @@ test("proposal workflows validate staged plan files without transporting their c
 
   const track = readFileSync(join(root, "skills", "track", "SKILL.md"), "utf8");
   const review = readFileSync(join(root, "skills", "review", "SKILL.md"), "utf8");
-  const revise = readFileSync(join(root, "skills", "revise", "SKILL.md"), "utf8");
   const refresh = readFileSync(join(root, "skills", "refresh", "SKILL.md"), "utf8");
   const revert = readFileSync(join(root, "skills", "revert", "SKILL.md"), "utf8");
   const implement = readFileSync(join(root, "skills", "implement", "SKILL.md"), "utf8");
   assert.match(track, /candidate_apply.*mode: "prepare"/);
   assert.match(review, /candidate_apply/);
-  for (const [name, body] of [["revise", revise], ["refresh", refresh], ["revert", revert]] as const) {
+  assert.match(readFileSync(join(root, "skills", "revise", "SKILL.md"), "utf8"), /candidate_apply.*workflow: "revise"/);
+  for (const [name, body] of [["refresh", refresh], ["revert", revert]] as const) {
     assert.match(body, /every staged root or nested `plan\.md`/, `${name} must cover nested plans`);
     assert.match(body, /exact candidate-relative path/, `${name} must identify each plan exactly`);
   }
@@ -3248,7 +3252,7 @@ test("create bootstraps Git only when no worktree exists", () => {
   assert.match(create, /git rev-parse --show-toplevel/);
   assert.match(create, /git init/);
   assert.match(create, /never initialize a nested repository/);
-  assert.match(create, /setup_record_git_initialized/);
+  assert.doesNotMatch(create, /setup_record_git_initialized/);
 
   const project = JSON.parse(readFileSync(join(templateRoot, "project.json"), "utf8"));
   assert.ok(project.setup.operation.repositoryRoot);

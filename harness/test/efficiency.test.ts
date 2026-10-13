@@ -55,17 +55,18 @@ function plan(grouped = false) {
   return `# Plan\n- Spec revision: 1\n- Plan revision: 1\n## Phase 1: Deliver\n- Phase dependencies: none\n- [ ] T1.1 First behavior\n  - Task dependencies: none\n  - Commit group: behavior\n${grouped ? "- [ ] T1.2 Second behavior\n  - Task dependencies: T1.1\n  - Commit group: behavior\n" : ""}- [ ] T1.${grouped ? 3 : 2} User Manual Verification\n- Phase completion commit: pending\n## Phase 2: Track-level User Manual Verification\n- [ ] T2.1 User Manual Verification\n- Phase completion commit: pending\n`;
 }
 
-for (const runtimeVersion of ["3.9.0", "3.9.1"]) test(`${runtimeVersion} projects continue through the patch upgrade without refresh or project mutation`, async (t) => {
+for (const runtimeVersion of ["3.9.0", "3.9.1", "3.9.2"]) test(`${runtimeVersion} projects continue on 4.0 without refresh or project mutation`, async (t) => {
   const root = fixture(t); initialize(root);
   const projectPath = join(root, ".cadre/project.json");
   const project = JSON.parse(readFileSync(projectPath, "utf8"));
   project.runtimeVersion = runtimeVersion;
+  project.templateSetVersion = "v5";
   write(root, ".cadre/project.json", json(project));
   git(root, "add", ".cadre/project.json"); git(root, "commit", "-m", `fixture: existing ${runtimeVersion} project`);
   track(root);
   const before = readFileSync(projectPath, "utf8"), validation = validateProject(root);
   assert.deepEqual(validation.errors, []);
-  assert.ok(!validation.warnings.some((warning) => warning.startsWith("PROJECT_REFRESH_REQUIRED:")));
+  assert.ok(!validation.warnings.some((warning) => warning.startsWith("PROJECT_UPGRADE_REQUIRED:")));
   assert.equal(isCompatibleRuntimeVersion(CADRE_RUNTIME_VERSION), true);
   for (const version of ["3.8.0", "3.9.3", "3.9.0+unapproved", undefined]) assert.equal(isCompatibleRuntimeVersion(version), false);
   const server = createCadreServer(), client = new Client({ name: "codex", version: "1.0.0" });
@@ -334,34 +335,22 @@ test("context checks approval, section identity, real expiry and Unicode page/er
   do { const part = readContext({ projectRoot: root, trackId: "sample", maxBytes: 4096, ...(cursor ? { cursor } : {}) }); assert.ok(Buffer.byteLength(JSON.stringify(part)) <= 4096); cursor = part.nextCursor ?? undefined; } while (cursor);
 });
 
-test("legacy refresh migrates once at quiescence and preserves execution and historical evidence", (t) => {
+test("older formats require the 3.9.0 bridge before refresh and leave project files unchanged", (t) => {
   const root = fixture(t); initialize(root); track(root);
-  const projectPath = ".cadre/project.json", statePath = ".cadre/tracks/sample/state.json";
-  const project = JSON.parse(readFileSync(join(root, projectPath), "utf8")), state = JSON.parse(readFileSync(join(root, statePath), "utf8"));
-  project.schemaVersion = 1; project.templateSetVersion = "v4";
-  project.setup.commit = resolveOperation(root, project.setup.commit); state.schemaVersion = 1;
-  for (const key of Object.keys(state.commits)) state.commits[key] = resolveOperation(root, state.commits[key]);
-  write(root, projectPath, json(project)); write(root, statePath, json(state));
-  git(root, "add", ".cadre"); git(root, "commit", "-m", "test: legacy state baseline");
-  const { scope } = startExecution(root, "legacy-run");
-  const journalPath = `.cadre/tracks/sample/executions/execution-${scope.executionId}.json`, journalBefore = readFileSync(join(root, journalPath), "utf8");
-  assert.equal(JSON.parse(journalBefore).executionContract, undefined);
-  const files = ["project.json", "tracks/sample/state.json", "tracks/sample/dependency-context.json", "refreshes/refresh-migration.md"];
+  const project = JSON.parse(readFileSync(join(root, ".cadre/project.json"), "utf8"));
+  project.runtimeVersion = "3.8.0"; project.schemaVersion = 1; project.templateSetVersion = "v4";
+  write(root, ".cadre/project.json", json(project));
+  const files = ["project.json", "refreshes/refresh-migration.md"];
   prepareCandidateStage(root, "refresh-migration", files);
-  for (const path of files) write(root, `.cadre/stage/refresh-migration/${path}`, path === "refreshes/refresh-migration.md"
-    ? "# Approved migration\nPreserve execution and historical evidence.\n" : readFileSync(join(root, ".cadre", path), "utf8"));
-  const input = { projectRoot: root, candidateId: "refresh-migration", workflow: "refresh" as const, files };
-  const preview = previewCandidateApply(input), explained = structuredClone(project);
-  for (const change of preview.stateChanges.find((item) => item.path === projectPath)!.changes) {
-    if (change.action === "append") explained[change.field].push(...change.value as unknown[]);
-    else explained[change.field] = change.value;
-  }
-  assert.equal(receiptHash(json(explained)), preview.manifest.find((file) => file.path === projectPath)!.sha256);
-  commitReceipt(root, applyCandidate(input, preview.digest));
-  const migrated = JSON.parse(readFileSync(join(root, projectPath), "utf8"));
-  assert.equal(migrated.templateSetVersion, "v5"); assert.equal(migrated.schemaVersion, 2); assert.deepEqual(migrated.setup, project.setup);
-  assert.deepEqual(migrated.history.slice(0, -1), project.history); assert.equal(readFileSync(join(root, journalPath), "utf8"), journalBefore);
-  assert.deepEqual(validateProject(root).errors, []);
+  write(root, ".cadre/stage/refresh-migration/project.json", json(project));
+  write(root, ".cadre/stage/refresh-migration/refreshes/refresh-migration.md", "# Refresh\nUpgrade.\n");
+  const before = readFileSync(join(root, ".cadre/project.json"), "utf8"), head = git(root, "rev-parse", "HEAD");
+  const input = {projectRoot: root, candidateId: "refresh-migration", workflow: "refresh" as const, files};
+  assert.throws(() => previewCandidateApply(input), /Install cadre-ai@3\.9\.0/);
+  assert.equal(readFileSync(join(root, ".cadre/project.json"), "utf8"), before);
+  assert.equal(git(root, "rev-parse", "HEAD"), head);
+  const warnings = validateProject(root).warnings.join("\n");
+  assert.match(warnings, /PROJECT_UPGRADE_REQUIRED/); assert.match(warnings, /Then install cadre-ai@4\.0\.0/);
 });
 
 test("archive rebases approved active dependency context without rewriting historical learning", (t) => {

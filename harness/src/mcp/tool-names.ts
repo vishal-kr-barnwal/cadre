@@ -12,7 +12,6 @@ export const CADRE_MCP_TOOLS = {
   executionGraphValidate: "execution_graph_validate",
   reviewComplete: "review_complete",
   archiveBatchCandidate: "archive_batch_candidate",
-  archiveBatchRecord: "archive_batch_record",
   executionStart: "execution_start",
   executionCheckpoint: "execution_checkpoint",
   executionStatus: "execution_status",
@@ -21,8 +20,6 @@ export const CADRE_MCP_TOOLS = {
   integration: "integration",
   worktreeCleanup: "worktree_cleanup",
   projectInitCandidate: "project_init_candidate",
-  setupRecordCommit: "setup_record_commit",
-  setupRecordGitInitialized: "setup_record_git_initialized",
   tracksRender: "tracks_render"
 } as const;
 

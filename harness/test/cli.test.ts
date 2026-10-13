@@ -84,7 +84,7 @@ test("npm package carries every workflow and immutable template asset", () => {
     ".claude-plugin/plugin.json", ".mcp.codex.json", ".mcp.json",
     "CHANGELOG.md",
     "agents/cadre-phase-worker.md", "agents/cadre-task-worker.md",
-    "templates/v5/init/wisps/.gitkeep"
+    "templates/v6/init/wisps/.gitkeep"
   ]) {
     assert.ok(files.has(path), `npm package is missing ${path}`);
   }
@@ -94,8 +94,9 @@ test("npm package carries every workflow and immutable template asset", () => {
   ]) {
     assert.ok(files.has(`skills/${skill}/SKILL.md`), `npm package is missing the ${skill} workflow`);
   }
+  assert.ok([...files].filter((path): path is string => typeof path === "string" && path.startsWith("templates/")).every(path => path.startsWith("templates/v6/")), "historical template sets must not ship");
   for (const template of templateCatalog()) {
-    const path = `templates/v5/${template.relativePath}`;
+    const path = `templates/v6/${template.relativePath}`;
     assert.ok(files.has(path), `npm package is missing template ${template.id} at ${path}`);
   }
 });
@@ -105,7 +106,7 @@ test("doctor and installer reject an incomplete immutable template catalog", () 
   for (const entry of ["dist", ".codex-plugin", ".claude-plugin", "skills", "templates"]) {
     cpSync(join(root, entry), join(packageRoot, entry), { recursive: true });
   }
-  unlinkSync(join(packageRoot, "templates", "v5", "init", "gitignore.template"));
+  unlinkSync(join(packageRoot, "templates", "v6", "init", "gitignore.template"));
 
   const doctor = spawnSync(process.execPath, [join(packageRoot, "dist", "cadre-cli.mjs"), "doctor"], {
     cwd: packageRoot,

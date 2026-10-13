@@ -1,4 +1,5 @@
-import { CADRE_RUNTIME_VERSION, isCompatibleRuntimeVersion, LEGACY_RUNTIME_VERSIONS, LEGACY_TEMPLATE_SET_VERSIONS, TEMPLATE_SET_VERSION } from "./version.js";
+import { PROJECT_UPGRADE_INSTRUCTIONS, supportsProjectFormat } from "./project-format.js";
+import { isCompatibleRuntimeVersion, isCompatibleTemplateSet, LEGACY_RUNTIME_VERSIONS, LEGACY_TEMPLATE_SET_VERSIONS } from "./version.js";
 import { isCommitRef } from "./operation-receipts.js";
 import type { ProjectState } from "./state.js";
 
@@ -8,18 +9,19 @@ export function validateProjectConfig(project: ProjectState, ignore: string | un
   const ignored = new Set(ignore?.split(/\r?\n/) ?? []);
   if (ignore !== undefined) for (const path of ["/.worktrees/", "/wisps/"]) if (!ignored.has(path)) errors.push(`${ignorePath}: must ignore ${path}`);
   if (!ignored.has("/stage/")) {
-    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) warnings.push("PROJECT_REFRESH_REQUIRED: .cadre/.gitignore must ignore /stage/");
+    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) warnings.push("PROJECT_UPGRADE_REQUIRED: .cadre/.gitignore must ignore /stage/");
     else errors.push(`${ignorePath}: must ignore /stage/`);
   }
   if (![1, 2].includes(project.schemaVersion)) errors.push("project.json: unsupported schemaVersion");
   if (!isCompatibleRuntimeVersion(project.runtimeVersion)) {
-    if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) warnings.push(`PROJECT_REFRESH_REQUIRED: runtimeVersion ${project.runtimeVersion} must be refreshed to ${CADRE_RUNTIME_VERSION}`);
+    if ((LEGACY_RUNTIME_VERSIONS as readonly string[]).includes(project.runtimeVersion ?? "")) warnings.push(`PROJECT_UPGRADE_REQUIRED: legacy runtimeVersion ${project.runtimeVersion}`);
     else errors.push(`project.json: unsupported runtimeVersion ${String(project.runtimeVersion)}`);
   }
-  if (project.templateSetVersion !== TEMPLATE_SET_VERSION) {
-    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) warnings.push(`PROJECT_REFRESH_REQUIRED: templateSetVersion ${project.templateSetVersion} must be refreshed to ${TEMPLATE_SET_VERSION}`);
+  if (!isCompatibleTemplateSet(project.templateSetVersion)) {
+    if ((LEGACY_TEMPLATE_SET_VERSIONS as readonly string[]).includes(project.templateSetVersion ?? "")) warnings.push(`PROJECT_UPGRADE_REQUIRED: legacy templateSetVersion ${project.templateSetVersion}`);
     else errors.push(`project.json: unsupported templateSetVersion ${String(project.templateSetVersion)}`);
   }
+  if (!supportsProjectFormat(project)) warnings.push(`PROJECT_UPGRADE_REQUIRED: ${PROJECT_UPGRADE_INSTRUCTIONS}`);
   if (!project.project?.context || !["greenfield", "brownfield"].includes(project.project.context)) errors.push("project.json: project context must be greenfield or brownfield");
   if (!project.setup?.checkpoint) errors.push("project.json: setup checkpoint is required");
   if (!Array.isArray(project.setup?.artifactProgress)) errors.push("project.json: setup artifactProgress must be an array");

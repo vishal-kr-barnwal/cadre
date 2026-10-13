@@ -124,7 +124,7 @@ differ, the repair must name the journal's original graph digest and reachable
 plan commit under `Recovery evidence`; the runtime verifies that committed
 baseline before proposing supersession.
 
-Cadre 3.9.2 requires the complete revision state and record before approval. At a safe
+Cadre requires the complete revision state and record before approval. At a safe
 boundary it includes the old execution as superseded history and starts a new
 execution for the revised graph, retaining modes and completed work. This
 behavior fixes the active-revision gap in 3.9.1. Update both the global CLI and
@@ -134,7 +134,7 @@ track still requires the explicitly approved repair described above.
 ## Revise Or Refresh Stops After Worker Cleanup
 
 Completed journals retain worker branch names and paths, including provenance
-carried into later executions. Cadre 3.9.2 checks registered worktrees, remaining
+carried into later executions. Cadre checks registered worktrees, remaining
 directories, and actual Git branches instead of treating those historical strings
 as active workers. Finish supported cleanup of integrated workers before preparing
 a revision or refresh; preserve the journal evidence. A remaining worker branch,
@@ -250,3 +250,7 @@ pnpm --filter cadre-ai validate
 
 Edit TypeScript sources, workflow skill files, agents, templates, manifests,
 and marketplace catalogs. Do not edit ignored `harness/dist/` bundles as source.
+
+## Older Project Format Warning
+
+`PROJECT_UPGRADE_REQUIRED` leaves project files unchanged. Use `npm install -g cadre-ai@3.9.0`, then `cadre-ai install --target all --scope user` and reload the client. Reconcile interrupted operations and perform the explicitly approved refresh to schema-2/v5 in 3.9.0. After that succeeds, install 4.0.0, reinstall the client integration and reload again. Compatible 3.9.0/3.9.1/3.9.2 schema-2/v5 projects do not need this bridge or a version-only refresh. Never fix the warning by changing version labels or deleting pending approval evidence.

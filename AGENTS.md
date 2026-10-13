@@ -3,7 +3,7 @@
 > Agent context for **OpenAI Codex** when working on this repository.
 > Claude Code reads `CLAUDE.md`, which mirrors these root-level conventions.
 
-This repository is the **Cadre 3.x harness/package repository**, not a target
+This repository is the **Cadre 4.x harness/package repository**, not a target
 project initialized with Cadre. Do not create or operate on a root `.cadre/`
 control plane here unless the user explicitly asks to test setup behavior in a
 fixture.
@@ -36,7 +36,7 @@ harness/
 ├── src/domain/              # State, plans, execution, governance, templates
 ├── src/mcp/                 # Typed stdio MCP server
 ├── scripts/                 # TypeScript build, CLI, installer, and validation
-├── templates/v1/            # Immutable project and track templates
+├── templates/v6/            # Active immutable project and track templates
 ├── test/                    # CLI and integration tests
 ├── .codex-plugin/           # Codex source manifest
 ├── .claude-plugin/          # Claude source manifest
@@ -100,7 +100,7 @@ installer changes.
 - Preserve human governance. Deterministic state and Git mutations must remain
   previewed, explicitly approved, digest-gated where the API provides a digest,
   and resumable after interruption.
-- Keep templates immutable and versioned under `harness/templates/v1/`. Do not
+- Keep templates immutable and versioned under `harness/templates/<version>/`. Do not
   add project-local runtime or template copies under `.cadre/`.
 - Keep the MCP surface purpose-built. It may manage Cadre state and derived
   worktrees, but it must not become an arbitrary shell, file-editing, conflict

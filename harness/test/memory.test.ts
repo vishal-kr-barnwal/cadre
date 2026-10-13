@@ -31,7 +31,7 @@ function git(root: string, ...args: string[]) { return execFileSync("git", args,
 function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) {
   const projectRoot = mkdtempSync(join(tmpdir(), "cadre-memory-"));
   t.after(() => rmSync(projectRoot, { recursive: true, force: true }));
-  cpSync(join(root, "templates/v4/init"), join(projectRoot, ".cadre"), { recursive: true });
+  cpSync(join(root, "templates/v5/init"), join(projectRoot, ".cadre"), { recursive: true });
   renameSync(join(projectRoot, ".cadre/gitignore.template"), join(projectRoot, ".cadre/.gitignore"));
   for (const file of ["workflow.md", "product.md", "guidelines.md", "tech-stack.md", "styleguides/general.md"]) write(join(projectRoot, ".cadre", file), `# ${file}\nRequired constraint: preserve approval and evidence.\n`);
   const base = join(projectRoot, ".cadre/tracks/sample");
@@ -47,7 +47,7 @@ function fixture(t: { after: (fn: () => void) => void }, phases = 1, tasks = 1) 
   write(join(base, "learning.md"), learning() + Array.from({ length: phases }, (_, i) => `\n## Phase ${i + 1}: Deliver ${i + 1}\n${`Phase ${i + 1} decision with evidence.\n`.repeat(160)}`).join(""));
   const state = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", revision: 1,
     checkpoint: "ready", dependencies: [] as string[], commits: { spec: "1111111", plan: "1111111" }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
-  const project = { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
+  const project = { schemaVersion: 2, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Memory fixture", context: "brownfield" },
     setup: { status: "completed", checkpoint: "completed", commit: "1111111", artifactProgress: [], operation: null }, lastRefresh: null, history: [] };
   write(join(base, "state.json"), JSON.stringify(state)); write(join(projectRoot, ".cadre/project.json"), JSON.stringify(project));
   git(projectRoot, "init", "-b", "main"); git(projectRoot, "config", "user.name", "Cadre Test"); git(projectRoot, "config", "user.email", "cadre@example.test"); git(projectRoot, "config", "commit.gpgsign", "false");
@@ -360,8 +360,8 @@ test("MCP context and status preserve structured/text clients, filtering, and up
   try {
     assert.equal(payload(await c.client.callTool({ name: "project_status", arguments: { projectRoot: f.projectRoot } })).upgradeRequired, true);
     assert.equal((await c.client.callTool({ name: "execution_start", arguments: { projectRoot: f.projectRoot, trackId: "sample" } })).isError, true);
-    payload(await c.client.callTool({ name: "candidate_stage_prepare", arguments: { projectRoot: f.projectRoot, candidateId: "refresh-memory" } }));
-    payload(await c.client.callTool({ name: "tracks_render", arguments: { projectRoot: f.projectRoot } }));
+    assert.equal((await c.client.callTool({ name: "candidate_stage_prepare", arguments: { projectRoot: f.projectRoot, candidateId: "refresh-memory" } })).isError, true);
+    assert.equal((await c.client.callTool({ name: "tracks_render", arguments: { projectRoot: f.projectRoot } })).isError, true);
   } finally { await c.close(); }
 });
 
@@ -457,7 +457,7 @@ test("audit: archived execution reads and full project detail retain state and g
   const c = await connected("claude-code");
   try {
     const full = payload(await c.client.callTool({ name: "project_status", arguments: { projectRoot: f.projectRoot, detail: "full" } }));
-    assert.equal(full.projectState.schemaVersion, 1);
+    assert.equal(full.projectState.schemaVersion, 2);
     assert.ok(full.trackDetails.find((entry: any) => entry.trackId === "dependency").execution.nodes);
     const focused = payload(await c.client.callTool({ name: "project_status", arguments: { projectRoot: f.projectRoot, view: "implementation", trackId: "dependency" } }));
     assert.equal(focused.execution.execution.status, "completed");

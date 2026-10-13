@@ -1,16 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
+  existsSync, lstatSync, readFileSync, readdirSync
 } from "node:fs";
-import { dirname } from "node:path";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { buildTracks } from "./state.js";
-import { candidateStageRoot, listCandidatePaths, readCandidateFiles } from "./staging.js";
+import { listCandidatePaths, readCandidateFiles } from "./staging.js";
 import { describeTemplate, getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
-import { readGitFileAtCommit, gitRoot } from "./git.js";
-import { operationRef, promoteOperation, reconcileOperation, committedReceiptForDigest, pendingOperationForDigest, resumeOperation } from "./operation-receipts.js";
+import { gitRoot } from "./git.js";
+import { operationRef, promoteOperation, committedReceiptForDigest, pendingOperationForDigest, resumeOperation } from "./operation-receipts.js";
 import { captureRepositoryBasis, type RepositoryBasis } from "./repository-basis.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
@@ -283,49 +282,6 @@ function assertInitializationBootstrap(projectRootInput: string, proposal: Proje
   }
 }
 
-function targetWithin(root: string, relativePath: string): string {
-  const target = resolve(root, relativePath);
-  const relation = relative(root, target);
-  if (relation.startsWith("..") || isAbsolute(relation)) throw new Error(`Path escapes initialization root: ${relativePath}`);
-  return target;
-}
-
-function assertNoSymlinkPath(root: string, target: string): void {
-  let current = target;
-  while (current !== root) {
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
-      throw new Error(`Refusing symbolic link inside initialization stage: ${current}`);
-    }
-    current = dirname(current);
-  }
-}
-
-function applyProjectInitAtRoot(
-  input: MaterializedProjectInit,
-  proposal: ProjectInitProposal
-): ProjectInitProposal {
-  const projectRoot = safeProjectRoot(input.projectRoot);
-  const cadreRoot = join(projectRoot, ".cadre");
-  for (const file of proposal.files) {
-    const target = targetWithin(cadreRoot, file.path);
-    assertNoSymlinkPath(cadreRoot, target);
-    mkdirSync(dirname(target), { recursive: true });
-    if (existsSync(target)) {
-      const current = readFileSync(target, "utf8");
-      if (current !== file.content) throw new Error(`Interrupted initialization disagrees at ${file.path}`);
-      continue;
-    }
-    const temporaryPath = join(dirname(target), `.cadre-init-${process.pid}-${randomUUID()}.tmp`);
-    try {
-      writeFileSync(temporaryPath, file.content, { flag: "wx" });
-      renameSync(temporaryPath, target);
-    } finally {
-      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-    }
-  }
-  return proposal;
-}
-
 export function applyProjectInitCandidate(
   input: ProjectInitCandidateInput,
   proposalDigest: string
@@ -339,85 +295,8 @@ export function applyProjectInitCandidate(
   if (proposal.digest !== proposalDigest) {
     throw new Error("Initialization candidate changed after preview; preview it again");
   }
-  if (proposal.operationId) return { ...proposal, receipt: promoteOperation(input.projectRoot, {
-    operationId: proposal.operationId, kind: "create", approvalDigest: proposalDigest, baseCommit: materialized.repositoryBasis!.head,
+  return { ...proposal, receipt: promoteOperation(input.projectRoot, {
+    operationId: proposal.operationId!, kind: "create", approvalDigest: proposalDigest, baseCommit: materialized.repositoryBasis!.head,
     createBasis: materialized.repositoryBasis!
   }, proposal.files.map((file) => ({ path: `.cadre/${file.path}`, content: file.content }))) };
-  return applyProjectInitAtRoot(materialized, proposal);
-}
-
-export function recordSetupCommit(projectRootInput: string, commit: string): string {
-  if (!/^[0-9a-f]{7,40}$/.test(commit)) throw new Error("commit must be a hexadecimal Git commit SHA");
-  const root = safeProjectRoot(projectRootInput);
-  const path = join(root, ".cadre", "project.json");
-  const project = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
-    setup?: Record<string, unknown> & {
-      operation?: (Record<string, unknown> & {
-        approvedArtifactHashes?: Array<{ path: string; sha256: string }>;
-      }) | null;
-    };
-    history?: unknown[];
-  };
-  if (project.schemaVersion === 2 && typeof project.setup?.commit === "string" && project.setup.commit.startsWith("op:")) {
-    const actual = reconcileOperation(root, project.setup.commit.slice(3));
-    if (actual !== commit) throw new Error("Setup commit differs from verified operation commit");
-    return path;
-  }
-  if (project.setup?.status !== "in_progress" || project.setup.operation?.action !== "create") {
-    throw new Error("Project setup is not awaiting its create commit");
-  }
-  if (project.setup.checkpoint !== "commit-pending") {
-    throw new Error(`Project setup checkpoint is ${String(project.setup.checkpoint)}, not commit-pending`);
-  }
-  for (const artifact of project.setup.operation.approvedArtifactHashes ?? []) {
-    const artifactPath = targetWithin(join(root, ".cadre"), normalizeCadrePath(artifact.path));
-    if (!existsSync(artifactPath) || lstatSync(artifactPath).isSymbolicLink()) {
-      throw new Error(`Approved setup artifact is unavailable: ${artifact.path}`);
-    }
-    if (hash(readFileSync(artifactPath, "utf8")) !== artifact.sha256) {
-      throw new Error(`Approved setup artifact changed before commit recording: ${artifact.path}`);
-    }
-    if (hash(readGitFileAtCommit(root, commit, `.cadre/${artifact.path}`)) !== artifact.sha256) {
-      throw new Error(`Setup commit does not contain the approved artifact: ${artifact.path}`);
-    }
-  }
-  project.setup.status = "completed";
-  project.setup.checkpoint = "completed";
-  project.setup.commit = commit;
-  project.setup.operation = null;
-  project.history = [...(project.history ?? []), { action: "create", commit }];
-  writeFileSync(path, `${JSON.stringify(project, null, 2)}\n`);
-  return path;
-}
-
-export function recordGitInitialized(projectRootInput: string): string {
-  const root = safeProjectRoot(projectRootInput);
-  const path = join(root, ".cadre", "project.json");
-  const project = JSON.parse(readFileSync(path, "utf8")) as ProjectStateForSetup;
-  if (project.schemaVersion === 2 && project.setup?.status === "completed") return path;
-  if (project.setup?.status !== "in_progress" || project.setup.operation?.action !== "create") {
-    throw new Error("Project setup is not in an active create operation");
-  }
-  if (project.setup.operation.gitDisposition !== "initialize") {
-    throw new Error("Project setup was not approved to initialize Git");
-  }
-  if (resolve(String(project.setup.operation.repositoryRoot)) !== root) {
-    throw new Error("Approved Git repository root does not match projectRoot");
-  }
-  project.setup.checkpoint = "commit-pending";
-  writeFileSync(path, `${JSON.stringify(project, null, 2)}\n`);
-  return path;
-}
-
-interface ProjectStateForSetup {
-  setup?: {
-    status?: string;
-    checkpoint?: string;
-    operation?: {
-      action?: string;
-      gitDisposition?: string;
-      repositoryRoot?: string;
-    } | null;
-  };
-  [key: string]: unknown;
 }

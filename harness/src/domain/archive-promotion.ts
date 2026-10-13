@@ -10,9 +10,9 @@ export function deriveArchivePromotion(project: ProjectState, batchId: string, s
   const operationId = archiveOperationId(batchId), reference = operationRef(operationId);
   return {
     operationId,
-    project: { ...project, history: [...(project.history ?? []), { action: "archive", selectedTracks, commit: reference }] },
+    project: { ...project, schemaVersion: 2, history: [...(project.history ?? []), { action: "archive", selectedTracks, commit: reference }] },
     states: new Map(moves.map((move) => [move.trackId, {
-      ...move.state, checkpoint: "archived",
+      ...move.state, schemaVersion: 2, checkpoint: "archived",
       history: [...(Array.isArray(move.state.history) ? move.state.history : []), { action: "archive", commit: reference }]
     }]))
   };

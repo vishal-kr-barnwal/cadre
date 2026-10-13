@@ -1,6 +1,6 @@
 # Cadre
 
-**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work, cumulative review authority and original receipts remain preserved. Resume rejects changed approval inputs, and imported draft-spec revisions leave the plan unapproved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
+**Cadre 4.0.0 (unreleased)** uses one receipt-based mutation path and ships only the current template catalog. Existing 3.9.0/3.9.1/3.9.2 projects with schema-2 state and template v5 continue without a project migration or version-only refresh. Older formats receive upgrade instructions through Cadre 3.9.0 before returning to 4.0. Historical evidence and all ten workflows remain supported; Codex, Claude Code and Zed remain stable integrations.
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. All three integrations are stable as of Cadre 3.9.1.
@@ -341,7 +341,7 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v4/...` and 23 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 22 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
@@ -355,7 +355,6 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 | `execution_graph_validate` | No | Parse and validate phase/task dependencies, cycles, and derived manual-verification barriers. |
 | `review_complete` | Adaptive | Derive the full execution-base review range, then prepare/apply an idempotent clean completion. |
 | `archive_batch_candidate` | Adaptive | Read staged pattern/seed files, return the complete batch for approval, then apply its unchanged token. |
-| `archive_batch_record` | Atomic | Record the resulting archive commit in track, project, and batch provenance without a second decision. |
 | `execution_start` | Atomic | Create the authorized execution journal and enter `in_progress` in one call. |
 | `execution_checkpoint` | Atomic | Apply one strict `scope` + event-specific `action` with required evidence. |
 | `execution_status` | No | Return a compact ready/active/blocked scheduler view, with optional focused node detail. |
@@ -364,8 +363,6 @@ The `cadre` stdio server exposes active immutable resources at `cadre://template
 | `integration` | Adaptive | Merge and record integration; require a second call only in governed mode. |
 | `worktree_cleanup` | Atomic | Remove a verified integrated worktree and record completion. |
 | `project_init_candidate` | Adaptive | Generate defaults around staged authored context and apply after approval. |
-| `setup_record_git_initialized` | Yes | Record the verified Git-initialization checkpoint. |
-| `setup_record_commit` | Yes | Record the already-created setup commit SHA and complete setup state. |
 | `tracks_render` | Atomic | Validate and write deterministic `tracks.md` from current track state. |
 
 The four adaptive tools use a strict `request` union: prepare accepts only its
@@ -433,7 +430,7 @@ pnpm --filter cadre-ai validate
 
 ### Memory format upgrade
 
-The current source uses template set v5. Existing 3.9.0/3.9.1 projects using v5 need no routine project refresh for this patch; older template contracts require an approved refresh before delivery. It preserves v1/v2/v3/v4 templates and terminal learning. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
+The current package ships template set v6. Existing 3.9.0/3.9.1/3.9.2 schema-2/v5 projects need no project migration or version-only refresh. Older formats must use Cadre 3.9.0 for an approved refresh to schema-2/v5 before installing 4.0. Published v1–v5 templates remain unchanged in source, and terminal learning remains historical evidence. Active Pattern Seeds record revisions and exact pattern fingerprints; changed guidance requires reassessment. Task handoffs preserve decisions, failed approaches, uncertainty, and next actions alongside existing checkpoints. Use all `context_read` pages before acting, and retain source inspection and approval gates. Routine `project_status` uses summaries; request `detail: "full"` for history/graph diagnostics. Filtered/paged listings never narrow validation coverage.
 
 Release preparation includes regression tests, package inspection, and documentation checks. Publishing still requires native installer/discovery/activation checks for Codex, Claude Code, and Zed. Local model tests and byte benchmarks do not establish universal token savings or semantic correctness of generated learning.
 

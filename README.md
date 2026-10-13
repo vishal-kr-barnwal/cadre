@@ -17,7 +17,7 @@ provenance without asking an agent to invent workflow state.
 [Start the quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Review release notes](https://cadre-docs.pages.dev/release-notes/)
 
-**Cadre 3.9.2** fixes active revision loops, including Autonomous scope mismatches after an approved revision. Revision and scope-refresh approvals now bind state, scope authority, and execution disposition together. Cleaned worker provenance no longer blocks these transitions; incomplete revision records are rejected before promotion. Completed work, cumulative review authority and original receipts remain preserved. Resume rejects changed approval inputs, and imported draft-spec revisions leave the plan unapproved. Existing 3.9.0/3.9.1 projects using v5 need no routine refresh or schema migration. Already inconsistent tracks require an explicitly approved repair. Codex, Claude Code, and native Zed Agent remain stable integrations.
+**Cadre 4.0.0 (unreleased)** uses one receipt-based mutation path and ships only the current template catalog. Existing 3.9.0/3.9.1/3.9.2 projects with schema-2 state and template v5 continue without a project migration or version-only refresh. Older formats receive upgrade instructions through Cadre 3.9.0 before returning to 4.0. Historical evidence and all ten workflows remain supported; Codex, Claude Code and Zed remain stable integrations.
 
 
 ## What Cadre Provides

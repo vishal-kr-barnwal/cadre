@@ -1,10 +1,11 @@
+import { requireSupportedProjectFormat, supportsProjectFormat } from "../domain/project-format.js";
 import { requireTrackExecutionAuthority } from "../domain/execution.js";
 import { deriveNextStep } from "../domain/next-step.js";
 import { contextInputSchema, readContext } from "../domain/context.js";
 import { applyCandidate, previewCandidateApply, type CandidateApplyInput } from "../domain/candidate-apply.js";
 import { requireCommittedOperations, reconcileOperation, resumeOperation } from "../domain/operation-receipts.js";
 import { reviewRetrySchema } from "../domain/review-retry.js";
-import { handoffSchema, requireFreshTrackMemory } from "../domain/memory.js";
+import { handoffSchema, readSafeArtifact, requireFreshTrackMemory } from "../domain/memory.js";
 import { inspectStagedMemory } from "../domain/staged-memory.js";
 import { validateStagedState } from "../domain/staged-state.js";
 import { captureRepositoryBasis } from "../domain/repository-basis.js";
@@ -20,8 +21,6 @@ import { z } from "zod/v4";
 import {
   applyProjectInitCandidate,
   previewProjectInitCandidate,
-  recordGitInitialized,
-  recordSetupCommit,
   safeProjectRoot,
   type ProjectInitCandidateInput
 } from "../domain/init.js";
@@ -38,7 +37,7 @@ import {
   TEMPLATE_SET_VERSION,
   templateCatalog
 } from "../domain/templates.js";
-import { CADRE_RUNTIME_VERSION, isCompatibleRuntimeVersion } from "../domain/version.js";
+import { CADRE_RUNTIME_VERSION } from "../domain/version.js";
 import { parsePlan, parsePlanContent, validatePlanGraph } from "../domain/plan.js";
 import {
   EXECUTION_APPROVAL_MODES,
@@ -71,17 +70,13 @@ import {
 } from "../domain/worktrees.js";
 import {
   applyArchiveBatchCandidate,
-  applyArchiveBatchRecord,
   applyReviewComplete,
   deriveArchiveBatchCandidateInput,
-  deriveArchiveBatchRecordInput,
   deriveReviewCompleteInput,
   previewArchiveBatchCandidate,
-  previewArchiveBatchRecord,
   previewReviewComplete,
   type ArchiveBatchCandidateInput,
   type ArchiveBatchCandidateRequest,
-  type ArchiveBatchRecordRequest,
   type ReviewCompleteInput,
   type ReviewCompleteRequest
 } from "../domain/governance.js";
@@ -124,30 +119,15 @@ function jsonArtifact(path: string, value: unknown) {
   return artifact(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function requireCurrentProject(projectRoot: string, continuingExecution = false): string {
-  requireCommittedOperations(projectRoot);
+function requireCompatibleProject(projectRoot: string): string {
   const root = safeProjectRoot(projectRoot);
-  const path = join(root, ".cadre", "project.json");
-  const project = JSON.parse(readFileSync(path, "utf8")) as {
-    runtimeVersion?: string;
-    templateSetVersion?: string;
-  };
-  if (continuingExecution && (isCompatibleRuntimeVersion(project.runtimeVersion) || project.runtimeVersion === "3.8.0") && project.templateSetVersion === "v4") return root;
-  if (
-    !isCompatibleRuntimeVersion(project.runtimeVersion)
-    || project.templateSetVersion !== TEMPLATE_SET_VERSION
-  ) {
-    throw new CadreError(
-      "PROJECT_REFRESH_REQUIRED",
-      `Cadre project refresh required before mutation: current ${project.runtimeVersion ?? "unknown"}/${project.templateSetVersion ?? "unknown"}, target ${CADRE_RUNTIME_VERSION}/${TEMPLATE_SET_VERSION}.`,
-      {
-        currentRuntimeVersion: project.runtimeVersion ?? null,
-        currentTemplateSetVersion: project.templateSetVersion ?? null,
-        targetRuntimeVersion: CADRE_RUNTIME_VERSION,
-        targetTemplateSetVersion: TEMPLATE_SET_VERSION
-      }
-    );
-  }
+  requireSupportedProjectFormat(JSON.parse(readSafeArtifact(root, ".cadre/project.json")));
+  return root;
+}
+
+function requireCurrentProject(projectRoot: string): string {
+  const root = requireCompatibleProject(projectRoot);
+  requireCommittedOperations(root);
   return root;
 }
 
@@ -237,8 +217,7 @@ function projectStatusView(validation: ReturnType<typeof validateProject>) {
       lastRefresh: validation.project.lastRefresh ?? null
     } : null,
     upgradeRequired: validation.project
-      ? !isCompatibleRuntimeVersion(validation.project.runtimeVersion)
-        || validation.project.templateSetVersion !== TEMPLATE_SET_VERSION
+      ? !supportsProjectFormat(validation.project)
       : false,
     targetRuntimeVersion: CADRE_RUNTIME_VERSION,
     targetTemplateSetVersion: TEMPLATE_SET_VERSION,
@@ -538,8 +517,7 @@ export function createCadreServer(): McpServer {
           kind: "staged_track_candidate" as const,
           valid: validation.errors.length === 0 && stagedCandidate.valid,
           derivedStateCurrent: validation.warnings.length === 0,
-          upgradeRequired: !isCompatibleRuntimeVersion(validation.project?.runtimeVersion)
-            || validation.project?.templateSetVersion !== TEMPLATE_SET_VERSION,
+          upgradeRequired: !supportsProjectFormat(validation.project),
           targetRuntimeVersion: CADRE_RUNTIME_VERSION,
           targetTemplateSetVersion: TEMPLATE_SET_VERSION,
           trackId,
@@ -558,8 +536,7 @@ export function createCadreServer(): McpServer {
         kind: "canonical_track" as const,
         valid: validation.errors.length === 0,
         derivedStateCurrent: validation.warnings.length === 0,
-        upgradeRequired: !isCompatibleRuntimeVersion(validation.project?.runtimeVersion)
-          || validation.project?.templateSetVersion !== TEMPLATE_SET_VERSION,
+        upgradeRequired: !supportsProjectFormat(validation.project),
         targetRuntimeVersion: CADRE_RUNTIME_VERSION,
         targetTemplateSetVersion: TEMPLATE_SET_VERSION,
         track: trackSummary(track),
@@ -629,6 +606,8 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot, candidateId, expectedFiles }) => {
     try {
+      const root = safeProjectRoot(projectRoot), projectPath = join(root, ".cadre/project.json");
+      if (existsSync(projectPath)) requireCompatibleProject(root);
       return result(
         {...prepareCandidateStage(projectRoot, candidateId, expectedFiles),
           ...(candidateId.startsWith("revert-") ? {revertBaseline: captureRepositoryBasis(projectRoot, true, candidateId.slice("revert-".length))} : {})},
@@ -733,12 +712,17 @@ export function createCadreServer(): McpServer {
   }, async ({ request }) => {
     try {
       if (request.mode === "reconcile") return result({ status: "committed" as const, operationId: request.operationId, commit: reconcileOperation(request.projectRoot, request.operationId) });
-      if (request.mode === "resume") return result(resumeOperation(request.projectRoot, request.operationId, request.approvalDigest));
+      if (request.mode === "resume") {
+        const root = safeProjectRoot(request.projectRoot);
+        if (existsSync(join(root, ".cadre/project.json"))) requireCompatibleProject(root);
+        return result(resumeOperation(root, request.operationId, request.approvalDigest));
+      }
       if (request.mode === "apply") {
         const approved = proposalTokens.resolve<CandidateApplyInput>("candidate_apply", request.proposalToken);
         return result(applyCandidate(approved.input, approved.digest));
       }
       const { mode: _mode, ...input } = request;
+      requireCompatibleProject(input.projectRoot);
       const preview = previewCandidateApply(input);
       return proposalResult("candidate_apply", input, { operationId: preview.operationId, files: preview.manifest,
         stateChanges: preview.stateChanges, digest: preview.digest, validation: preview.validation });
@@ -896,39 +880,6 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  const archiveRecordSchema = {
-    projectRoot: z.string().min(1),
-    batchId: z.string().regex(/^archive-[0-9A-Za-z]+(?:-[0-9A-Za-z]+)*$/)
-  };
-
-  registerTool(CADRE_MCP_TOOLS.archiveBatchRecord, {
-    title: "Record archive",
-    description: "Record archive.",
-    inputSchema: archiveRecordSchema,
-    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.archiveBatchRecord],
-    annotations: { destructiveHint: false, openWorldHint: false }
-  }, async (input) => {
-    try {
-      requireCurrentProject(input.projectRoot);
-      const derived = deriveArchiveBatchRecordInput(input as ArchiveBatchRecordRequest);
-      const preview = previewArchiveBatchRecord(derived);
-      const applied = applyArchiveBatchRecord(derived, preview.digest, preview);
-      return result({
-        commandStatus: "applied" as const,
-        batchId: derived.batchId,
-        archiveCommit: derived.archiveCommit,
-        checkpoint: applied.operation.checkpoint,
-        digest: preview.digest,
-        changedPaths: [applied.operationPath, applied.projectPath, ...applied.states.map((state) => state.path)],
-        changedCount: applied.states.length + 2,
-        valid: applied.valid,
-        derivedStateCurrent: applied.derivedStateCurrent
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
   const executionStartSchema = {
     projectRoot: z.string().min(1),
     trackId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
@@ -1033,12 +984,13 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async ({ scope, action }) => {
     try {
+      requireCompatibleProject(scope.projectRoot);
       const recoveryNode = ["complete", "record_integration"].includes(action.event)
         ? executionStatus(scope.projectRoot, scope.trackId, scope.executionId).journal.nodes[scope.nodeId] : undefined;
       const recovery = action.event === "block"
         || action.event === "complete" && ["committed", "integrated"].includes(recoveryNode?.status ?? "")
         || action.event === "record_integration" && recoveryNode?.status === "integrated";
-      if (!recovery) requireCurrentProject(scope.projectRoot, true);
+      if (!recovery) requireCommittedOperations(scope.projectRoot);
       if (["start", "resume", "record_commit", "record_verification"].includes(action.event)) requireFreshTrackMemory(scope.projectRoot, scope.trackId);
       const checkpointInput = { ...scope, ...action } as ExecutionCheckpointInput;
       const preview = previewExecutionCheckpoint(checkpointInput);
@@ -1089,7 +1041,7 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, openWorldHint: false }
   }, async (input) => {
     try {
-      requireCurrentProject(input.projectRoot, true);
+      requireCurrentProject(input.projectRoot);
       requireFreshTrackMemory(input.projectRoot, input.trackId);
       const derived = deriveExecutionFinishInput(input as ExecutionFinishRequest);
       const preview = previewExecutionFinish(derived);
@@ -1133,7 +1085,7 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async (input) => {
     try {
-      requireCurrentProject(input.projectRoot, true);
+      requireCurrentProject(input.projectRoot);
       requireFreshTrackMemory(input.projectRoot, input.trackId);
       requireTrackExecutionAuthority(input.projectRoot, input.trackId, input.executionId);
       const preview = previewWorktreeCreate(input as WorktreeCreateInput);
@@ -1175,12 +1127,13 @@ export function createCadreServer(): McpServer {
       );
       if (adaptive.mode === "apply") {
         const proposal = proposalTokens.resolve<WorktreeIntegrationInput>("worktree_integrate", adaptive.proposalToken);
+        requireCompatibleProject(proposal.input.projectRoot);
         const recoveryPreview = previewWorktreeIntegration(proposal.input);
         if (recoveryPreview.alreadyIntegrated) {
           const applied = applyWorktreeIntegration(proposal.input, recoveryPreview.digest, recoveryPreview);
           return result({ commandStatus: "applied" as const, ...applied, ...recordIntegrationNow(proposal.input, recoveryPreview.targetHead) });
         }
-        requireCurrentProject(proposal.input.projectRoot, true);
+        requireCommittedOperations(proposal.input.projectRoot);
         requireFreshTrackMemory(proposal.input.projectRoot, proposal.input.trackId);
         requireTrackExecutionAuthority(proposal.input.projectRoot, proposal.input.trackId, proposal.input.executionId);
         const applied = applyWorktreeIntegration(proposal.input, proposal.digest);
@@ -1190,12 +1143,13 @@ export function createCadreServer(): McpServer {
         return result({ commandStatus: "applied" as const, ...applied, ...checkpoint }, `Integrated ${proposal.input.nodeId}.`);
       }
       const integrationInput = adaptive.request as unknown as WorktreeIntegrationInput;
+      requireCompatibleProject(integrationInput.projectRoot);
       const preview = previewWorktreeIntegration(integrationInput);
       if (preview.alreadyIntegrated) {
         const applied = applyWorktreeIntegration(integrationInput, preview.digest, preview);
         return result({ commandStatus: "applied" as const, ...applied, ...recordIntegrationNow(integrationInput, preview.targetHead) });
       }
-      requireCurrentProject(integrationInput.projectRoot, true);
+      requireCommittedOperations(integrationInput.projectRoot);
       requireFreshTrackMemory(integrationInput.projectRoot, integrationInput.trackId);
       requireTrackExecutionAuthority(integrationInput.projectRoot, integrationInput.trackId, integrationInput.executionId);
       if (integrationRequiresApproval(integrationInput)) {
@@ -1224,7 +1178,7 @@ export function createCadreServer(): McpServer {
   }, async (input) => {
     try {
       const cleanupInput = input as WorktreeIntegrationInput;
-      // Verified cleanup remains available during an upgrade; its invariants are unchanged.
+      requireCompatibleProject(input.projectRoot);
       const preview = previewWorktreeCleanup(cleanupInput);
       const applied = applyWorktreeCleanup(cleanupInput, preview.digest, preview);
       const journal = executionStatus(input.projectRoot, input.trackId, input.executionId).journal;
@@ -1298,35 +1252,6 @@ export function createCadreServer(): McpServer {
     }
   });
 
-  registerTool(CADRE_MCP_TOOLS.setupRecordCommit, {
-    title: "Record setup commit",
-    inputSchema: { projectRoot: z.string().min(1) },
-    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordCommit],
-    annotations: { destructiveHint: false, openWorldHint: false }
-  }, async ({ projectRoot }) => {
-    try {
-      requireCurrentProject(projectRoot);
-      const commit = resolveGitCommit(projectRoot);
-      return result({ path: recordSetupCommit(projectRoot, commit), commit });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
-  registerTool(CADRE_MCP_TOOLS.setupRecordGitInitialized, {
-    title: "Record Git setup",
-    inputSchema: { projectRoot: z.string().min(1) },
-    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.setupRecordGitInitialized],
-    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ projectRoot }) => {
-    try {
-      requireCurrentProject(projectRoot);
-      return result({ path: recordGitInitialized(projectRoot), checkpoint: "commit-pending" });
-    } catch (error) {
-      return failure(error);
-    }
-  });
-
   registerTool(CADRE_MCP_TOOLS.tracksRender, {
     title: "Render tracks index",
     inputSchema: { projectRoot: z.string().min(1) },
@@ -1334,7 +1259,7 @@ export function createCadreServer(): McpServer {
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ projectRoot }) => {
     try {
-      const input = { projectRoot: safeProjectRoot(projectRoot) };
+      const input = { projectRoot: requireCompatibleProject(projectRoot) };
       const preview = renderTracksPreview(input.projectRoot);
       const path = writeTracks(input.projectRoot, preview.digest, preview);
       return result({

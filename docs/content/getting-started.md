@@ -133,12 +133,9 @@ cadre-ai install
 Use `--replace-marketplace` only when a marketplace already named `cadre`
 points at a different location that you have reviewed and intend to replace.
 
-Cadre 3.9.2 accepts existing 3.9.0/3.9.1 projects using v5 without a refresh
-or state migration. Start a new client session after installation. An interrupted track
-may still need its existing receipt reconciled before continuation. A track
-left inconsistent by an older partial revision requires an explicitly approved
-repair; installation does not rewrite its state or original receipt. Older
-runtime/template contracts retain their approved refresh requirements.
+Cadre 4.0 accepts existing 3.9.0/3.9.1/3.9.2 projects using schema-2 state and v5 without a project refresh or migration. Update the installed runtime and start a new client session. Interrupted work still requires receipt reconciliation; inconsistent approval state requires an explicitly approved repair.
+
+For an older format, status reports `PROJECT_UPGRADE_REQUIRED`. Install `cadre-ai@3.9.0`, run `cadre-ai install --target all --scope user`, and reload the client. Reconcile interrupted operations and use Cadre refresh in 3.9.0 for an approved migration to schema-2/v5 at a quiescent boundary. Then install 4.0, reinstall the client integration and reload again. Never update version labels by hand. See [release notes](/release-notes) for the complete route.
 
 ## Uninstall
 

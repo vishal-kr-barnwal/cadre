@@ -551,7 +551,7 @@ function validateProjectSnapshot(projectRoot: string): ValidationResult {
     );
     if (existsSync(learningPath)) {
       const memory = inspectMemory({ trackId: track.id, path: learningPath, body: readFileSync(learningPath, "utf8"),
-        graph: planGraph, required: ["v3", "v4", "v5"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
+        graph: planGraph, required: ["v3", "v4", "v5", "v6"].includes(project.templateSetVersion ?? "") && !["drafting-spec", "drafting-plan"].includes(track.status),
         historical: ["completed", "archived"].includes(track.status),
         readPattern: (path) => readSafeArtifact(projectRoot, `.cadre/${path}`) });
       errors.push(...memory.errors);

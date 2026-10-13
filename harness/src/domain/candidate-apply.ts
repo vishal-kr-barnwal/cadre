@@ -1,3 +1,4 @@
+import { requireSupportedProjectFormat } from "./project-format.js";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { candidateArtifactPath, listCandidatePaths, readCandidateFiles, type CandidateFile } from "./staging.js";
@@ -10,7 +11,7 @@ import { committedReceiptForDigest, operationRef, promoteOperation, requireCommi
 import { resolveGitCommit } from "./git.js";
 import { safeProjectRoot } from "./paths.js";
 import { buildTracks, type TracksIndexEntry } from "./tracks-index.js";
-import { CADRE_RUNTIME_VERSION } from "./version.js";
+import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { deriveAutonomousReviewCandidate } from "./review-candidate.js";
 import { candidateStateChanges } from "./candidate-state-changes.js";
 import { deriveRevisionCandidate } from "./revision-candidate.js";
@@ -73,7 +74,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     if (errors.length) throw new Error(errors.join("; "));
   }
   const project = JSON.parse(readSafeArtifact(root, ".cadre/project.json"));
-  if (project.templateSetVersion !== "v5" && input.workflow !== "refresh") throw new Error("Refresh to v5 before using cohesive candidate promotion");
+  requireSupportedProjectFormat(project);
   const operationId = `${input.workflow}-${contentHash(JSON.stringify([root, baseCommit, [...original].sort(), ...(input.reviewRetry ? [input.reviewRetry] : [])])).slice(0, 32)}`;
   const reference = operationRef(operationId), overlay = new Map(original), unchanged = new Map<string, string>();
   if (input.workflow === "refresh") requireJournalPreservation(root,
@@ -100,7 +101,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     }
     const next = JSON.parse(overlay.get("project.json")!);
     if (JSON.stringify(next.setup) !== JSON.stringify(project.setup) || JSON.stringify(next.history ?? []) !== JSON.stringify(project.history ?? [])) throw new Error("Refresh must preserve setup approval and project history");
-    next.schemaVersion = 2; next.runtimeVersion = CADRE_RUNTIME_VERSION; next.templateSetVersion = "v5";
+    next.schemaVersion = 2; next.runtimeVersion = CADRE_RUNTIME_VERSION; next.templateSetVersion = TEMPLATE_SET_VERSION;
     const refreshPath = requireRefreshRecord(root, [...original].map(([path, content]) => ({path: `.cadre/${path}`, content})));
     next.lastRefresh = { ...(next.lastRefresh ?? {}), refreshPath, commit: reference };
     next.history = [...(next.history ?? []), { action: "refresh", commit: reference, refreshPath }];
@@ -124,7 +125,6 @@ export function previewCandidateApply(input: CandidateApplyInput) {
       && (recordAuthored || !isDeepStrictEqual(state.dependencies, previous.dependencies) || modified("spec.md") || original.has(`${parent}/plan.md`)
         && (!existsSync(join(root, ".cadre", parent, "plan.md")) || parsePlanContent(original.get(`${parent}/plan.md`)!, `${parent}/plan.md`).digest
           !== parsePlanContent(readSafeArtifact(root, `.cadre/${parent}/plan.md`), `${parent}/plan.md`).digest));
-    if (refreshRevision && project.templateSetVersion !== "v5") throw new Error("Complete legacy refresh migration before revising track scope");
     if (input.workflow === "review" && previous?.autonomousReview) {
       state = deriveAutonomousReviewCandidate(root, previous, original, reference);
       // Bind canonical authority and execution evidence to the promotion digest.

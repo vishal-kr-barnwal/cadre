@@ -1,13 +1,13 @@
 ---
 title: MCP Reference
-description: Immutable v5 resources and the 25 Cadre MCP tools.
+description: Immutable v6 resources and the 22 Cadre MCP tools.
 section: Reference
 order: 210
 ---
 
 # MCP Reference
 
-Cadre exposes immutable template resources and 25 narrow tools. Response format
+Cadre exposes immutable template resources and 22 narrow tools. Response format
 is selected from the MCP initialization client identity. Recognized Codex clients
 and Claude Code 2.0.21+ receive only `structuredContent` with `content: []` and
 advertised output schemas. Zed, older Claude Code, and unknown clients receive
@@ -22,7 +22,7 @@ The prepare token is available in the selected JSON representation; applied resu
 
 ## Template Resources
 
-The active catalog is readable at `cadre://templates/v5/<logical-id>`. Published v1, v2, v3, and v4 templates remain packaged for compatibility; new projects use v5.
+The active catalog is readable at `cadre://templates/v6/<logical-id>`. Only v6 is packaged; existing schema-2/v5 projects remain supported without migration.
 
 ## workflow_elicit
 
@@ -99,7 +99,7 @@ of a committed approval returns the original verified receipt with
 Stale dependency context errors expose `expectedGraphHash` and `expectedSources`
 so the agent can read the required sources and reassess the candidate.
 
-Cadre 3.9.2 revision promotion requires proposed state, a matching revision record,
+Cadre revision promotion requires proposed state, a matching revision record,
 and reassessed spec/plan/learning/dependency context before approval. Its preview
 includes an active old journal's superseded disposition and the resulting
 Autonomous scope reference. Reconciliation preserves the approved receipt; it
@@ -148,10 +148,6 @@ reconciliation. Repeating archive apply while its intent is pending returns
 `COMMIT_PENDING`; the original archive token provides zero-change replay after
 commit/reconciliation. Never re-prepare or redistill an interrupted approved batch.
 
-## archive_batch_record
-
-Legacy SHA-batch provenance recording. V5 batches use their one operation receipt commit and candidate_apply reconciliation, with no record commit.
-
 ## execution_start
 
 Creates one already-authorized execution journal and track operation with persisted scheduling/approval modes. Before starting, the recorded plan commit must contain the approved revision and graph. New journals retain `planSource` for historical provenance checks.
@@ -186,15 +182,7 @@ Removes a verified integrated worktree/branch and records node completion. Retry
 
 ## project_init_candidate
 
-Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v5 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
-
-## setup_record_commit
-
-Records the already-created setup artifact commit and completes setup.
-
-## setup_record_git_initialized
-
-Records verified Git initialization at the exact approved root.
+Approval-aware initialization. Prepare requires staged `product.md`, `guidelines.md`, and `tech-stack.md`, optional workflow/styleguide overrides, and selected logical styleguide IDs. The server generates unchanged v6 workflow/default guides and digest-binds all outputs. Re-prepare and apply may resume when partial canonical files exactly equal the approved proposal; unexpected or differing bytes remain a hard stop.
 
 ## tracks_render
 
@@ -208,12 +196,12 @@ Validates and atomically regenerates deterministic `tracks.md`.
 - Project roots, IDs, paths, timestamps, commits, strict adaptive shapes, and event-specific evidence are validated at the boundary.
 - Multi-file initialization, execution finish, clean review, and archive operations converge after interruption without duplicate cycles or history; byte, HEAD, hash, or journal drift remains a hard failure.
 - `.cadre/stage/` is Git-ignored and never canonical or committed.
-- Legacy v1 status, wisp, and approved refresh remain available; other mutations fail with `PROJECT_REFRESH_REQUIRED`.
+- Older formats remain readable for diagnostics. Delivery and staging fail with `PROJECT_UPGRADE_REQUIRED` and the 3.9.0 bridge instructions.
 - Complete proposal manifests remain in structured proposals/journals; apply receipts stay compact.
 - Errors return one JSON text block containing `{ error: { code, message, details? } }`.
 
 ## Upgrade and recovery
 
-The current source uses template set v5 with schema-2 state and operation receipts. Legacy status/diagnostics and candidate staging remain available, but delivery requires an approved refresh. Quiesce active workers, preserve terminal history, stage workflow and active seed metadata in one envelope, promote the approved context, and record target versions last. Missing historical handoffs must not be invented. Blocking, completion of already committed/integrated nodes, verified cleanup, and validated index rendering remain available for recovery; new delivery and integrations do not bypass the upgrade gate.
+The current source ships template set v6 and retains the schema-2 receipt contract. Existing 3.9.0/3.9.1/3.9.2 schema-2/v5 projects need no project refresh. Older formats receive a warning and must use Cadre 3.9.0 to reconcile interrupted operations and perform an explicitly approved schema-2/v5 refresh at a quiescent boundary. Then install 4.0 and reload the client. Preserve historical evidence and any required explicit approval-policy choice; never change labels by hand.
 
-V5 create, execution finish, clean review and archive return `receipt` with `operationId`, `receiptHash`, exact Git `trailers`, and commit_pending. Include it in the operation's one commit and reconcile before dependent delivery. No separate execution-start, phase-record, final-verification-phase or clean-evidence-only commits are needed. Persist journals on disk throughout execution. An explicit handoff/blocker checkpoint remains available.
+Create, execution finish, clean review and archive return `receipt` with `operationId`, `receiptHash`, exact Git `trailers`, and commit_pending. Include it in the operation's one commit and reconcile before dependent delivery. No separate execution-start, phase-record, final-verification-phase or clean-evidence-only commits are needed. Persist journals on disk throughout execution. An explicit handoff/blocker checkpoint remains available.

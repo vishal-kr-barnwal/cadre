@@ -359,7 +359,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
     }
   }
   const journal: ExecutionJournal = {
-    ...(state.schemaVersion === 2 ? { executionContract: "cohesive-v1" as const } : {}),
+    executionContract: "cohesive-v1",
     schemaVersion: 1,
     executionId: input.executionId,
     trackId: input.trackId,
@@ -410,6 +410,7 @@ export function previewExecutionStart(input: ExecutionStartInput): ExecutionProp
   };
   const proposedState: ExecutionTrackState = {
     ...state,
+    schemaVersion: 2,
     status: "in_progress",
     checkpoint: "executing",
     operation,
@@ -435,7 +436,7 @@ export function applyExecutionStart(
 ): ExecutionProposal & { derivedStatus: ExecutionDerivedStatus } {
   const proposal = preparedProposal ?? previewExecutionStart(input);
   if (proposal.digest !== proposalDigest) throw new Error("execution proposal is stale; preview it again");
-  if (proposal.state.schemaVersion === 2) proposal.buildCachePath = executionBuildCache(input.projectRoot, input.trackId, input.executionId);
+  proposal.buildCachePath = executionBuildCache(input.projectRoot, input.trackId, input.executionId);
   if (lstatSync(proposal.statePath).isSymbolicLink()) throw new Error("refusing to start execution through a state symbolic link");
   mkdirSync(dirname(proposal.journalPath), { recursive: true });
   if (!existsSync(proposal.journalPath)) {
@@ -1185,6 +1186,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
   };
   const completedState: ExecutionTrackState = stateAlreadyCompleted ? state : {
     ...state,
+    schemaVersion: 2,
     status: "ready_for_review",
     checkpoint: "ready_for_review",
     operation: null,
@@ -1201,7 +1203,7 @@ export function previewExecutionFinish(input: ExecutionFinishInput): ExecutionFi
       completedAt: input.completedAt
     }
   };
-  if (state.schemaVersion === 2 && !stateAlreadyCompleted) {
+  if (!stateAlreadyCompleted) {
     const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
     completedState.history = [...(Array.isArray(state.history) ? state.history : []), { action: "implement", commit: operationRef(operationId) }];
   }
@@ -1246,29 +1248,22 @@ export function applyExecutionFinish(
     || lstatSync(proposal.tracksPath).isSymbolicLink()) {
     throw new Error("refusing to complete execution through a symbolic link");
   }
-  if (proposal.state.schemaVersion === 2) {
-    const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
-    const prefix = `.cadre/tracks/${input.trackId}`;
-    if (existsSync(join(safeProjectRoot(input.projectRoot), ".cadre/receipts", `${operationId}.json`))) {
-      return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "implement", input.headCommit, [
-        { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
-        { path: `${prefix}/plan.md`, content: proposal.planContent }
-      ]) };
-    }
-    const files = [
+  const operationId = `implement-${hash([input.trackId, input.executionId, input.headCommit]).slice(0, 32)}`;
+  const prefix = `.cadre/tracks/${input.trackId}`;
+  if (existsSync(join(safeProjectRoot(input.projectRoot), ".cadre/receipts", `${operationId}.json`))) {
+    return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "implement", input.headCommit, [
       { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
-      { path: `${prefix}/state.json`, content: `${JSON.stringify(proposal.state, null, 2)}\n` },
-      { path: `${prefix}/plan.md`, content: proposal.planContent },
-      { path: `${prefix}/learning.md`, content: readSafeArtifact(input.projectRoot, `${prefix}/learning.md`) },
-      { path: ".cadre/tracks.md", content: proposal.tracksContent }
-    ];
-    return { ...proposal, receipt: promoteOperation(input.projectRoot, { operationId, kind: "implement", approvalDigest: proposalDigest, baseCommit: input.headCommit }, files) };
+      { path: `${prefix}/plan.md`, content: proposal.planContent }
+    ]) };
   }
-  writeTextAtomically(proposal.journalPath, `${JSON.stringify(proposal.journal, null, 2)}\n`);
-  writeTextAtomically(proposal.statePath, `${JSON.stringify(proposal.state, null, 2)}\n`);
-  writeTextAtomically(proposal.planPath, proposal.planContent);
-  writeTextAtomically(proposal.tracksPath, proposal.tracksContent);
-  return proposal;
+  const files = [
+    { path: `${prefix}/executions/execution-${input.executionId}.json`, content: `${JSON.stringify(proposal.journal, null, 2)}\n` },
+    { path: `${prefix}/state.json`, content: `${JSON.stringify(proposal.state, null, 2)}\n` },
+    { path: `${prefix}/plan.md`, content: proposal.planContent },
+    { path: `${prefix}/learning.md`, content: readSafeArtifact(input.projectRoot, `${prefix}/learning.md`) },
+    { path: ".cadre/tracks.md", content: proposal.tracksContent }
+  ];
+  return { ...proposal, receipt: promoteOperation(input.projectRoot, { operationId, kind: "implement", approvalDigest: proposalDigest, baseCommit: input.headCommit }, files) };
 }
 
 export function validateExecutionJournal(

@@ -29,13 +29,13 @@ workflow packets.
 
 ## Template Resources
 
-Every file under active `templates/v5/` is registered as an immutable MCP resource:
+Every file under active `templates/v6/` is registered as an immutable MCP resource:
 
 ```text
-cadre://templates/v5/<logical-id>
+cadre://templates/v6/<logical-id>
 ```
 
-Published `templates/v1/` through `templates/v4/` remain byte-stable for legacy reads. The internal
+Published `templates/v1/` through `templates/v5/` remain byte-stable in source history and fixtures, but only v6 is shipped. Existing v5 project artifacts remain supported. The internal
 catalog records provider paths, but public descriptors expose logical ID, URI,
 eventual artifact path, media type, and SHA-256 hash. Template content appears once: inside structured template descriptors for
 recognized structured clients, or as embedded resources/text blocks for text
@@ -60,10 +60,10 @@ operation journal are promoted.
 | Candidate artifacts | `candidate_stage_prepare`, `candidate_inspect`, `candidate_apply` |
 | Plan graph | `execution_graph_validate` |
 | Review governance | `review_complete` |
-| Archive governance | `archive_batch_candidate`, `archive_batch_record` |
+| Archive governance | `archive_batch_candidate` |
 | Execution lifecycle | `execution_start`, `execution_checkpoint`, `execution_status`, `execution_finish` |
 | Worktrees | `worktree_create`, `integration`, `worktree_cleanup` |
-| Project initialization | `project_init_candidate`, `setup_record_git_initialized`, `setup_record_commit` |
+| Project initialization | `project_init_candidate` |
 | Derived index | `tracks_render` |
 
 The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
@@ -78,7 +78,7 @@ clients receive compact JSON text without a structured duplicate. Unknown or
 proxy client identities deliberately use the text fallback; MCP has no standard
 client capability for structured result consumption.
 
-All 25 tools advertise output schemas to structured clients. Text clients do not
+All 22 tools advertise output schemas to structured clients. Text clients do not
 receive output schemas, since MCP requires structured content when a schema is
 advertised. Server-side success-payload validation remains active in both modes.
 Errors retain `isError` and use one JSON text block for every client. This keeps native Claude diagnostics visible without duplicating the payload. No extra prose summary is emitted.

@@ -1,3 +1,4 @@
+import { requireSupportedProjectFormat } from "./project-format.js";
 import { parsePlanContent } from "./plan.js";
 import { inspectDependencyContext } from "./dependency-context.js";
 import { resolveApprovalMode } from "./approval-policy.js";
@@ -7,11 +8,11 @@ import { deriveArchivePromotion, explainArchiveState, type ArchiveStateChanges }
 import { requireCleanAutonomousReview } from "./autonomous-review.js";
 import { inspectStagedMemory } from "./staged-memory.js";
 import type { RecoveryInput } from "./recovery-inputs.js";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync
+  existsSync, readFileSync, readdirSync
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { safeProjectRoot } from "./paths.js";
 import { readCandidateFiles } from "./staging.js";
 import { isGitAncestor, resolveGitCommit, readGitFileAtCommit, requireReviewedProductUnchanged } from "./git.js";
@@ -37,29 +38,11 @@ function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function assertWritableFile(path: string): void {
-  if (existsSync(path) && lstatSync(path).isSymbolicLink()) {
-    throw new Error(`refusing to write through symbolic link ${path}`);
-  }
-}
-
-function writeApprovedFile(path: string, content: string): void {
-  assertWritableFile(path);
-  mkdirSync(dirname(path), { recursive: true });
-  if (existsSync(path) && readFileSync(path, "utf8") === content) return;
-  const temporaryPath = join(dirname(path), `.${randomUUID()}.cadre.tmp`);
-  try {
-    writeFileSync(temporaryPath, content, { flag: "wx" });
-    renameSync(temporaryPath, path);
-  } finally {
-    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-  }
-}
-
 function requireCurrentProject(projectRoot: string) {
   const validation = validateProject(projectRoot);
   if (validation.errors.length) throw new Error(validation.errors.join("\n"));
   if (!validation.project) throw new Error("Cadre project state is unavailable");
+  requireSupportedProjectFormat(validation.project);
   return validation;
 }
 
@@ -181,12 +164,13 @@ export function previewReviewComplete(input: ReviewCompleteInput): {
   if (current.status !== "ready_for_review" && !resuming) throw new Error(`${input.trackId} is not ready for review`);
   const state: TrackState = resuming ? current : {
     ...current,
+    schemaVersion: 2,
     status: "completed",
     checkpoint: "completed",
     ...(current.autonomousReview ? { autonomousReview: { ...current.autonomousReview, checkpoint: "completed" as const } } : {}),
     reviewCycles: [...(current.reviewCycles ?? []), cycle]
   };
-  if (current.schemaVersion === 2 && !resuming) {
+  if (!resuming) {
     const operationId = `review-${hash([input.trackId, input.reviewedHead, cycle.cycle]).slice(0, 32)}`;
     state.history = [...(Array.isArray(current.history) ? current.history : []), { action: "review", commit: operationRef(operationId) }];
   }
@@ -221,24 +205,15 @@ export function applyReviewComplete(input: ReviewCompleteInput, proposalDigest: 
       status: "approved", proposalDigest, confirmedAt: new Date().toISOString(), method: "explicit-apply"
     };
   }
-  if (proposal.state.schemaVersion === 2) {
-    const operationId = `review-${hash([input.trackId, input.reviewedHead, proposal.state.reviewCycles?.at(-1)?.cycle]).slice(0, 32)}`;
-    if (proposal.resuming) return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "review", undefined, [
-      { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) }
-    ]), valid: true, derivedStateCurrent: true };
-    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "review", approvalDigest: proposalDigest, baseCommit: resolveGitCommit(input.projectRoot) }, [
-      { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) },
-      { path: ".cadre/tracks.md", content: proposal.tracksContent }
-    ]);
-    return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
-  }
-  writeApprovedFile(proposal.statePath, json(proposal.state));
-  writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
-  const validation = validateProject(input.projectRoot);
-  if (validation.errors.length || validation.warnings.length) {
-    throw new Error([...validation.errors, ...validation.warnings].join("\n"));
-  }
-  return { ...proposal, valid: true, derivedStateCurrent: true };
+  const operationId = `review-${hash([input.trackId, input.reviewedHead, proposal.state.reviewCycles?.at(-1)?.cycle]).slice(0, 32)}`;
+  if (proposal.resuming) return { ...proposal, receipt: committedOperationReceipt(input.projectRoot, operationId, "review", undefined, [
+    { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) }
+  ]), valid: true, derivedStateCurrent: true };
+  const receipt = promoteOperation(input.projectRoot, { operationId, kind: "review", approvalDigest: proposalDigest, baseCommit: resolveGitCommit(input.projectRoot) }, [
+    { path: `.cadre/tracks/${input.trackId}/state.json`, content: json(proposal.state) },
+    { path: ".cadre/tracks.md", content: proposal.tracksContent }
+  ]);
+  return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
 }
 
 interface MaterializedArchiveUpdate {
@@ -480,7 +455,7 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
   resuming: boolean;
   digest: string;
   stateChanges: ArchiveStateChanges[];
-  promotion: ReturnType<typeof deriveArchivePromotion> | null;
+  promotion: ReturnType<typeof deriveArchivePromotion>;
   recoveryInputs: RecoveryInput[];
 } {
   if (!BATCH_ID.test(input.batchId)) throw new Error("invalid archive batchId");
@@ -492,31 +467,15 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
   if (input.selectedTracks.some((trackId) => !TRACK_ID.test(trackId))) throw new Error("invalid selected track ID");
   const root = safeProjectRoot(input.projectRoot);
   const operationPath = join(cadreRoot(root), "operations", `${input.batchId}.json`);
-  const existingOperation = existsSync(operationPath)
-    ? JSON.parse(readFileSync(operationPath, "utf8")) as ArchiveOperation
-    : null;
-  if (existingOperation && (existingOperation.action !== "archive"
-    || existingOperation.status !== "in_progress"
-    || existingOperation.baseCommit !== input.baseCommit
-    || JSON.stringify(existingOperation.selectedTracks) !== JSON.stringify(input.selectedTracks))) {
-    throw new Error(`archive batch ${input.batchId} does not match the approved input`);
-  }
-  const validation = validateProject(root);
-  const recoverableErrors = existingOperation
-    ? new Set(existingOperation.selectedTracks.map((trackId) => (
-        `${trackId}: status completed requires location tracks/${trackId}`
-      )))
-    : new Set<string>();
-  const blockingErrors = validation.errors.filter((error) => !recoverableErrors.has(error));
-  if (blockingErrors.length) throw new Error(blockingErrors.join("\n"));
-  if (!validation.project) throw new Error("Cadre project state is unavailable");
+  if (existsSync(operationPath)) throw new Error("Legacy archive operation must be reconciled with Cadre 3.9.0 before continuing on 4.0");
+  const validation = requireCurrentProject(root);
   const selected = new Set(input.selectedTracks);
   const updates = input.updates.map((update) => ({ ...update, path: update.path.replaceAll("\\", "/") }));
   if (new Set(updates.map((update) => update.path)).size !== updates.length) {
     throw new Error("archive updates contain duplicate paths");
   }
   for (const update of updates) assertArchiveUpdate(update.path, selected);
-  if (validation.project.schemaVersion === 2) {
+  {
     // Relocation is deterministic; changing constraint text still needs an explicit
     // staged assessment. Both the remapping and its state reference are approved.
     const relocate = (path: string) => path.replace(/^\.cadre\/tracks\/([^/]+)\//, (prefix, id: string) => selected.has(id) ? `.cadre/archive/${id}/` : prefix);
@@ -548,9 +507,6 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     memoryInputs: memory.inputs.filter((input) => input.path.startsWith("patterns/")),
     updates
   });
-  if (existingOperation && existingOperation.approvalDigest !== approvalDigest) {
-    throw new Error(`archive batch ${input.batchId} content differs from its approved journal`);
-  }
   const activeOperations = join(cadreRoot(root), "operations");
   const unfinished = existsSync(activeOperations)
     ? readdirSync(activeOperations).filter((file) => file.endsWith(".json")).find((file) => {
@@ -566,13 +522,10 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     const state = validation.states.get(trackId);
     if (!track || !state) throw new Error(`unknown selected track ${trackId}`);
     const pending = track.status === "completed" && track.location === `tracks/${trackId}`;
-    const partiallyPromoted = existingOperation != null
-      && ["completed", "archived"].includes(track.status)
-      && track.location === `archive/${trackId}`;
-    if ((!pending && !partiallyPromoted) || state.operation != null) {
+    if (!pending || state.operation != null) {
       throw new Error(`${trackId} is not an eligible completed track`);
     }
-    const sourcePath = join(cadreRoot(root), pending ? "tracks" : "archive", trackId);
+    const sourcePath = join(cadreRoot(root), "tracks", trackId);
     const targetPath = join(cadreRoot(root), "archive", trackId);
     if (pending && existsSync(targetPath)) throw new Error(`archive target already exists for ${trackId}`);
     return { trackId, sourcePath, targetPath, state: { ...state, status: "archived" }, needsMove: pending };
@@ -622,12 +575,12 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     }))
   };
   const project = JSON.parse(current.project) as ProjectState;
-  const promotion = project.schemaVersion === 2 ? deriveArchivePromotion(project, input.batchId, input.selectedTracks, moves) : null;
-  const stateChanges = promotion ? [
+  const promotion = deriveArchivePromotion(project, input.batchId, input.selectedTracks, moves);
+  const stateChanges = [
     explainArchiveState(join(cadreRoot(root), "project.json"), join(cadreRoot(root), "project.json"), project, promotion.project),
     ...moves.map((move) => explainArchiveState(join(move.sourcePath, "state.json"), join(move.targetPath, "state.json"),
       JSON.parse(current.sources.find((source) => source.trackId === move.trackId)!.files.find((file) => file.path === "state.json")!.content), promotion.states.get(move.trackId)!))
-  ] : [];
+  ];
   return {
     operationPath,
     initialOperation,
@@ -636,7 +589,7 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
     writes: updates,
     tracksPath: join(cadreRoot(root), "tracks.md"),
     tracksContent,
-    resuming: existingOperation != null,
+    resuming: false,
     stateChanges, promotion, recoveryInputs: memory.inputs.map(({ path, sha256 }) => ({ path: `.cadre/${path}`, sha256 })),
     digest: hash({ current, input, memoryInputs: memory.inputs, initialOperation, operation, moves: moves.map(({ trackId, state, needsMove }) => ({ trackId, state, needsMove })), updates, tracksContent })
   };
@@ -644,176 +597,18 @@ function previewMaterializedArchiveBatch(input: MaterializedArchiveBatch): {
 
 function applyMaterializedArchiveBatch(input: MaterializedArchiveBatch, proposalDigest: string) {
   const proposal = previewMaterializedArchiveBatch(input);
-  if (proposal.digest !== proposalDigest) {
-    const existing = existsSync(proposal.operationPath)
-      ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
-      : null;
-    if (!proposal.resuming || existing?.approvalDigest !== proposal.initialOperation.approvalDigest) {
-      throw new Error("archive batch proposal is stale; preview it again");
-    }
-  }
-  const projectPath = join(cadreRoot(input.projectRoot), "project.json");
-  const project = JSON.parse(readFileSync(projectPath, "utf8"));
-  if (project.schemaVersion === 2) {
-    const { operationId, states, project: archivedProject } = proposal.promotion!;
-    const files: ReceiptFile[] = [];
-    for (const move of proposal.moves) {
-      for (const file of directorySnapshot(move.sourcePath)) {
-        files.push({ path: `.cadre/archive/${move.trackId}/${file.path}`, content: file.path === "state.json"
-          ? json(states.get(move.trackId)!) : file.content });
-        files.push({ path: `.cadre/tracks/${move.trackId}/${file.path}`, content: null });
-      }
-    }
-    for (const update of proposal.writes) files.push({ path: `.cadre/${update.path}`, content: update.content });
-    files.push({ path: ".cadre/project.json", content: json(archivedProject) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
-    const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit, inputs: proposal.recoveryInputs }, files);
-    return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
-  }
-  const currentOperation = existsSync(proposal.operationPath)
-    ? JSON.parse(readFileSync(proposal.operationPath, "utf8")) as ArchiveOperation
-    : proposal.initialOperation;
-  if (!existsSync(proposal.operationPath)) writeApprovedFile(proposal.operationPath, json(currentOperation));
-  mkdirSync(join(cadreRoot(input.projectRoot), "archive"), { recursive: true });
-  const completedTracks = new Set(currentOperation.completedTracks);
-  const artifactProgress = new Set(currentOperation.artifactProgress);
+  if (proposal.digest !== proposalDigest) throw new Error("archive batch proposal is stale; preview it again");
+  const { operationId, states, project: archivedProject } = proposal.promotion!;
+  const files: ReceiptFile[] = [];
   for (const move of proposal.moves) {
-    if (move.needsMove) renameSync(move.sourcePath, move.targetPath);
-    writeApprovedFile(join(move.targetPath, "state.json"), json(move.state));
-    completedTracks.add(move.trackId);
-    artifactProgress.add(`archive/${move.trackId}`);
-    writeApprovedFile(proposal.operationPath, json({
-      ...currentOperation,
-      completedTracks: [...currentOperation.selectedTracks].filter((trackId) => completedTracks.has(trackId)),
-      artifactProgress: [...artifactProgress]
-    }));
-  }
-  for (const update of proposal.writes) {
-    writeApprovedFile(join(cadreRoot(input.projectRoot), update.path), update.content);
-    artifactProgress.add(update.path);
-    writeApprovedFile(proposal.operationPath, json({
-      ...currentOperation,
-      completedTracks: [...currentOperation.selectedTracks].filter((trackId) => completedTracks.has(trackId)),
-      artifactProgress: [...artifactProgress]
-    }));
-  }
-  writeApprovedFile(proposal.tracksPath, proposal.tracksContent);
-  writeApprovedFile(proposal.operationPath, json(proposal.operation));
-  const validation = validateProject(input.projectRoot);
-  if (validation.errors.length || validation.warnings.length) {
-    throw new Error([...validation.errors, ...validation.warnings].join("\n"));
-  }
-  return { ...proposal, valid: true, derivedStateCurrent: true };
-}
-
-export interface ArchiveBatchRecordInput {
-  projectRoot: string;
-  batchId: string;
-  archiveCommit: string;
-}
-
-export type ArchiveBatchRecordRequest = Omit<ArchiveBatchRecordInput, "archiveCommit">;
-
-export function deriveArchiveBatchRecordInput(input: ArchiveBatchRecordRequest): ArchiveBatchRecordInput {
-  return { ...input, archiveCommit: resolveGitCommit(input.projectRoot) };
-}
-
-export function previewArchiveBatchRecord(input: ArchiveBatchRecordInput): {
-  operationPath: string;
-  operation: ArchiveOperation;
-  projectPath: string;
-  project: ProjectState;
-  states: Array<{ path: string; state: TrackState }>;
-  digest: string;
-} {
-  if (!BATCH_ID.test(input.batchId)) throw new Error("invalid archive batchId");
-  if (!SHA.test(input.archiveCommit)) throw new Error("archiveCommit must be a Git commit SHA");
-  const root = safeProjectRoot(input.projectRoot);
-  const operationPath = join(cadreRoot(root), "operations", `${input.batchId}.json`);
-  const operationBody = readFileSync(operationPath, "utf8");
-  const currentOperation = JSON.parse(operationBody) as ArchiveOperation;
-  if (currentOperation.action !== "archive"
-    || !["in_progress", "completed"].includes(currentOperation.status)
-    || (currentOperation.status === "completed" && currentOperation.archiveCommit !== input.archiveCommit)) {
-    throw new Error(`${input.batchId} is not a matching archive batch`);
-  }
-  const projectPath = join(cadreRoot(root), "project.json");
-  const projectBody = readFileSync(projectPath, "utf8");
-  const currentProject = JSON.parse(projectBody) as ProjectState;
-  const states = currentOperation.selectedTracks.map((trackId) => {
-    const path = join(cadreRoot(root), "archive", trackId, "state.json");
-    const body = readFileSync(path, "utf8");
-    const current = JSON.parse(body) as TrackState;
-    if (current.status !== "archived") throw new Error(`${trackId} is not archived`);
-    const existingCommit = (current.commits as Record<string, unknown> | undefined)?.archive;
-    if (existingCommit && existingCommit !== input.archiveCommit) {
-      throw new Error(`${trackId} archive commit differs from the current batch`);
+    for (const file of directorySnapshot(move.sourcePath)) {
+      files.push({ path: `.cadre/archive/${move.trackId}/${file.path}`, content: file.path === "state.json"
+        ? json(states.get(move.trackId)!) : file.content });
+      files.push({ path: `.cadre/tracks/${move.trackId}/${file.path}`, content: null });
     }
-    const existingHistory = (Array.isArray(current.history) ? current.history : []).find((entry) => (
-      typeof entry === "object" && entry !== null
-        && (entry as Record<string, unknown>).action === "archive"
-        && (entry as Record<string, unknown>).batchId === input.batchId
-    ));
-    if (existingHistory && (existingHistory as Record<string, unknown>).commit !== input.archiveCommit) {
-      throw new Error(`${trackId} archive history differs from the current batch`);
-    }
-    return {
-      path,
-      body,
-      state: {
-        ...current,
-        commits: { ...(current.commits ?? {}), archive: input.archiveCommit },
-        history: existingHistory ? current.history : [...(Array.isArray(current.history) ? current.history : []), {
-          action: "archive", batchId: input.batchId, commit: input.archiveCommit
-        }]
-      } as TrackState
-    };
-  });
-  const existingProjectHistory = (currentProject.history ?? []).find((entry) => (
-    typeof entry === "object" && entry !== null
-      && (entry as Record<string, unknown>).action === "archive"
-      && (entry as Record<string, unknown>).batchId === input.batchId
-  ));
-  if (existingProjectHistory && (existingProjectHistory as Record<string, unknown>).commit !== input.archiveCommit) {
-    throw new Error(`project archive history differs for ${input.batchId}`);
   }
-  const project: ProjectState = {
-    ...currentProject,
-    history: existingProjectHistory ? (currentProject.history ?? []) : [...(currentProject.history ?? []), {
-      action: "archive",
-      batchId: input.batchId,
-      tracks: [...currentOperation.selectedTracks],
-      commit: input.archiveCommit
-    }]
-  };
-  const operation: ArchiveOperation = {
-    ...currentOperation,
-    status: "completed",
-    checkpoint: "completed",
-    archiveCommit: input.archiveCommit
-  };
-  return {
-    operationPath,
-    operation,
-    projectPath,
-    project,
-    states: states.map(({ path, state }) => ({ path, state })),
-    digest: hash({ operationBody, projectBody, states: states.map(({ path, body, state }) => ({ path, body, state })), operation, project })
-  };
-}
-
-export function applyArchiveBatchRecord(
-  input: ArchiveBatchRecordInput,
-  proposalDigest: string,
-  preparedProposal?: ReturnType<typeof previewArchiveBatchRecord>
-) {
-  const proposal = preparedProposal ?? previewArchiveBatchRecord(input);
-  if (proposal.digest !== proposalDigest) throw new Error("archive record proposal is stale; preview it again");
-  for (const state of proposal.states) writeApprovedFile(state.path, json(state.state));
-  writeApprovedFile(proposal.projectPath, json(proposal.project));
-  writeApprovedFile(proposal.operationPath, json(proposal.operation));
-  const validation = validateProject(input.projectRoot);
-  if (validation.errors.length || validation.warnings.length) {
-    throw new Error([...validation.errors, ...validation.warnings].join("\n"));
-  }
-  return { ...proposal, valid: true, derivedStateCurrent: true };
+  for (const update of proposal.writes) files.push({ path: `.cadre/${update.path}`, content: update.content });
+  files.push({ path: ".cadre/project.json", content: json(archivedProject) }, { path: ".cadre/tracks.md", content: proposal.tracksContent });
+  const receipt = promoteOperation(input.projectRoot, { operationId, kind: "archive", approvalDigest: proposalDigest, baseCommit: input.baseCommit, inputs: proposal.recoveryInputs }, files);
+  return { ...proposal, receipt, valid: true, derivedStateCurrent: true };
 }

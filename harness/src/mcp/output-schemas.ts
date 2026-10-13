@@ -396,15 +396,6 @@ const archiveAppliedSchema = z.strictObject({
   valid: z.boolean(),
   derivedStateCurrent: z.boolean()
 });
-const archiveRecordSchema = z.strictObject({
-  ...appliedReceiptBase,
-  batchId: z.string(),
-  archiveCommit: commitSchema,
-  checkpoint: z.string(),
-  valid: z.boolean(),
-  derivedStateCurrent: z.boolean()
-});
-
 const executionStartOutputSchema = z.strictObject({
   buildCachePath: pathSchema.optional(),
   commandStatus: z.literal("applied"),
@@ -496,8 +487,6 @@ const initAppliedSchema = z.strictObject({
   runtimeVersion: z.string(),
   templateSetVersion: z.string()
 });
-const setupCommitSchema = z.strictObject({ path: pathSchema, commit: commitSchema });
-const setupGitSchema = z.strictObject({ path: pathSchema, checkpoint: z.literal("commit-pending") });
 const tracksRenderSchema = z.strictObject({
   commandStatus: z.literal("applied"),
   path: pathSchema,
@@ -535,7 +524,6 @@ export const CADRE_MCP_OUTPUT_SCHEMAS = {
   [CADRE_MCP_TOOLS.executionGraphValidate]: compatibleOutputSchema(graphValidationSchema),
   [CADRE_MCP_TOOLS.reviewComplete]: compatibleOutputSchema(reviewPrepareSchema, reviewAppliedSchema),
   [CADRE_MCP_TOOLS.archiveBatchCandidate]: compatibleOutputSchema(archivePrepareSchema, archiveAppliedSchema),
-  [CADRE_MCP_TOOLS.archiveBatchRecord]: compatibleOutputSchema(archiveRecordSchema),
   [CADRE_MCP_TOOLS.executionStart]: compatibleOutputSchema(executionStartOutputSchema),
   [CADRE_MCP_TOOLS.executionCheckpoint]: compatibleOutputSchema(checkpointOutputSchema),
   [CADRE_MCP_TOOLS.executionStatus]: compatibleOutputSchema(executionStatusSchema),
@@ -544,7 +532,5 @@ export const CADRE_MCP_OUTPUT_SCHEMAS = {
   [CADRE_MCP_TOOLS.integration]: compatibleOutputSchema(integrationPrepareSchema, integrationAppliedSchema),
   [CADRE_MCP_TOOLS.worktreeCleanup]: compatibleOutputSchema(cleanupOutputSchema),
   [CADRE_MCP_TOOLS.projectInitCandidate]: compatibleOutputSchema(initPrepareSchema, initAppliedSchema),
-  [CADRE_MCP_TOOLS.setupRecordCommit]: compatibleOutputSchema(setupCommitSchema),
-  [CADRE_MCP_TOOLS.setupRecordGitInitialized]: compatibleOutputSchema(setupGitSchema),
   [CADRE_MCP_TOOLS.tracksRender]: compatibleOutputSchema(tracksRenderSchema)
 } satisfies Record<CadreMcpToolName, z.ZodType>;

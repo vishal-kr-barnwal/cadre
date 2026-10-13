@@ -1,12 +1,12 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { templateCatalog } from "../src/domain/templates.js";
+import { TEMPLATE_SET_VERSION, templateCatalog } from "../src/domain/templates.js";
 import { createZedSkillAdapters } from "./zed.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredEntries = [
-  "skills", "templates", "dist/cadre-mcp.mjs", ".mcp.json", ".mcp.codex.json", "LICENSE", "README.md"
+  "skills", `templates/${TEMPLATE_SET_VERSION}`, "dist/cadre-mcp.mjs", ".mcp.json", ".mcp.codex.json", "LICENSE", "README.md"
 ];
 const optionalEntries = ["hooks", "hooks.json", ".app.json", "assets", "commands", "agents"];
 

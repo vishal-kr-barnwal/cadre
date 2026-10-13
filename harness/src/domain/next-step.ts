@@ -1,3 +1,4 @@
+import { PROJECT_UPGRADE_INSTRUCTIONS } from "./project-format.js";
 import { z } from "zod/v4";
 import { resolveApprovalMode, type ApprovalPolicyReference } from "./approval-policy.js";
 import { requireCleanAutonomousReview, requireReviewProgress } from "./autonomous-review.js";
@@ -43,11 +44,11 @@ export function deriveNextStep(projectRoot: string, state: TrackState | undefine
     }
     return null;
   };
+  if (readiness.upgradeRequired) return blocked(PROJECT_UPGRADE_INSTRUCTIONS);
   try {
     const mode = resolveApprovalMode(reference, active ? undefined : state.approvalModeMigration);
     if (mode !== "autonomous" && !state.autonomousReview) return null;
     if (readiness.errors?.length) return blocked(`Resolve validation errors: ${readiness.errors.join("; ")}`);
-    if (readiness.upgradeRequired) return blocked("Complete the approved runtime/template refresh before continuing.");
     if (readiness.staleMemory) return blocked("Reassess stale track or dependency guidance before continuing.");
     if (mode !== "autonomous" || !state.autonomousReview) return blocked("Autonomous routing requires matching persisted mode and loop authority.");
     const loop = requireReviewProgress(state.autonomousReview);

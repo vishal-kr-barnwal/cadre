@@ -1,3 +1,4 @@
+import { reconcileOperation } from "../src/domain/operation-receipts.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createCadreServer } from "../src/mcp/server.js";
@@ -25,7 +26,7 @@ const write = (path: string, body: unknown) => { mkdirSync(dirname(path), { recu
 function fixture(t: { after(fn: () => void): void }) {
   const root = mkdtempSync(join(tmpdir(), "cadre-policy-")), track = join(root, ".cadre/tracks/sample");
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  cpSync(join(harness, "templates/v4/init"), join(root, ".cadre"), { recursive: true });
+  cpSync(join(harness, "templates/v5/init"), join(root, ".cadre"), { recursive: true });
   renameSync(join(root, ".cadre/gitignore.template"), join(root, ".cadre/.gitignore"));
   write(join(track, "spec.md"), "# Specification\n## Functional Requirements\nImplement.\n## Non-Functional Requirements\nResume.\n## Acceptance Criteria\nVerify.\n## Dependencies\nNone.\n## Additional Information\nNone.\n## Dependent-track impact\nNone.\n");
   write(join(track, "plan.md"), "# Plan\n- Spec revision: 1\n- Plan revision: 1\n\n## Phase 1: Deliver\n- Phase dependencies: none\n- [ ] T1.1 Implement\n  - Task dependencies: none\n- [ ] T1.2 User Manual Verification\n- Phase completion commit: pending\n\n## Phase 2: Track-level User Manual Verification\n- [ ] T2.1 User Manual Verification\n- Phase completion commit: pending\n");
@@ -36,7 +37,7 @@ function fixture(t: { after(fn: () => void): void }) {
   const state: TrackState = { schemaVersion: 1, trackId: "sample", title: "Sample", type: "feature", status: "planned", checkpoint: "ready", revision: 1,
     dependencies: [], commits: { spec: base, plan: base }, artifactProgress: [], operation: null, lastExecution: null, reviewCycles: [], history: [] };
   write(join(track, "state.json"), state);
-  write(join(root, ".cadre/project.json"), { schemaVersion: 1, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
+  write(join(root, ".cadre/project.json"), { schemaVersion: 2, runtimeVersion: "3.9.0", templateSetVersion: "v5", project: { name: "Policy", context: "brownfield" }, setup: { status: "completed", checkpoint: "completed", commit: base, artifactProgress: [], operation: null }, history: [] });
   const render = () => writeTracks(root, renderTracksPreview(root).digest);
   render(); git(root, "add", ".cadre"); git(root, "commit", "-m", "test: record approved context");
   const load = () => JSON.parse(readFileSync(join(track, "state.json"), "utf8")) as TrackState;
@@ -66,7 +67,8 @@ function fixture(t: { after(fn: () => void): void }) {
     }
     const input = { projectRoot: root, trackId: "sample", executionId, headCommit: git(root, "rev-parse", "HEAD"), completedAt: new Date().toISOString() };
     const result = applyExecutionFinish(input, previewExecutionFinish(input).digest);
-    git(root, "add", ".cadre"); git(root, "commit", "-m", `cadre(implement): complete sample ${executionId}`);
+    git(root, "add", ".cadre"); git(root, "commit", "-m", `cadre(implement): complete sample ${executionId}`, "-m", result.receipt!.trailers.join("\n"));
+    reconcileOperation(root, result.receipt!.operationId);
     assert.deepEqual(validateProject(root).errors, []);
     return result;
   };
@@ -103,7 +105,11 @@ test("Autonomous finishes verification without completion; clean approval remain
   assert.throws(() => applyReviewComplete(input, proposal.digest), /verification policy changed/);
   write(workflowPath, workflow);
   write(join(f.root, ".cadre/review-evidence.md"), "Only bookkeeping\n"); git(f.root, "add", ".cadre"); git(f.root, "commit", "-m", "cadre(review): record clean evidence");
-  applyReviewComplete(input, proposal.digest); applyReviewComplete(input, proposal.digest);
+  const applied = applyReviewComplete(input, proposal.digest);
+  assert.throws(() => applyReviewComplete(input, proposal.digest), /commit_pending/);
+  git(f.root, "add", ".cadre"); git(f.root, "commit", "-m", "cadre(review): complete sample", "-m", applied.receipt.trailers.join("\n"));
+  reconcileOperation(f.root, applied.receipt.operationId);
+  applyReviewComplete(input, proposal.digest);
   assert.equal(f.load().status, "completed"); assert.equal(f.load().autonomousReview?.checkpoint, "completed");
   assert.equal(f.load().reviewCycles!.length, 1); assert.ok(f.load().reviewCycles![0]!.approvalConfirmation);
 });
@@ -243,7 +249,7 @@ test("Autonomous next steps route persisted recovery and block unsafe continuati
   const route = deriveNextStep(f.root, reviewed)!;
   assert.deepEqual(nextStepSchema.parse(route), {
     action: "invoke_skill", plugin: "cadre", skill: "review", projectRoot: f.root, trackId: "sample",
-    executionId: "routing", prerequisite: "implementation_bookkeeping_commit",
+    executionId: "routing", prerequisite: null,
     reason: "Review the complete accumulated implementation in the same task."
   });
   for (const readiness of [{ errors: ["invalid graph"] }, { upgradeRequired: true }, { staleMemory: true }]) {
@@ -312,7 +318,7 @@ for (const name of ["codex", "claude-code", "zed"]) {
     const receipt = await call("execution_finish", { executionId: "handoff" });
     assert.equal(receipt.nextStep.skill, "review");
     assert.deepEqual((await call("project_status", { view: "implementation", executionId: null })).nextStep, receipt.nextStep);
-    assert.equal(receipt.nextStep.prerequisite, "implementation_bookkeeping_commit");
+    assert.equal(receipt.nextStep.prerequisite, null);
     for (const view of ["track", "implementation"]) {
       for (const detail of ["summary", "full"]) {
         const status = await call("project_status", { view, detail });

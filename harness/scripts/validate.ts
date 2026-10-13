@@ -52,15 +52,15 @@ if (packageManifest.private === true) errors.push("package: publishable CLI must
 if (packageManifest.bin?.["cadre-ai"] !== "dist/cadre-cli.mjs" || Object.keys(packageManifest.bin).length !== 1) {
   errors.push("package: cadre-ai must be the sole bin and point at dist/cadre-cli.mjs");
 }
-for (const entry of ["dist/", "skills/", "templates/", ".codex-plugin/", ".claude-plugin/"]) {
+for (const entry of ["dist/", "skills/", `templates/${TEMPLATE_SET_VERSION}/`, ".codex-plugin/", ".claude-plugin/"]) {
   if (!packageManifest.files?.includes(entry)) errors.push(`package: files must include ${entry}`);
 }
 if (packageManifest.dependencies && Object.keys(packageManifest.dependencies).length > 0) {
   errors.push("package: self-contained runtime must not have production dependencies");
 }
 if (!packageManifest.keywords?.includes("zed")) errors.push("package: keywords must include zed");
-if (CADRE_MCP_TOOL_NAMES.length !== 25 || new Set(CADRE_MCP_TOOL_NAMES).size !== 25) {
-  errors.push("MCP tools: expected 25 unique centralized tool names");
+if (CADRE_MCP_TOOL_NAMES.length !== 22 || new Set(CADRE_MCP_TOOL_NAMES).size !== 22) {
+  errors.push("MCP tools: expected 22 unique centralized tool names");
 }
 
 interface Marketplace {
@@ -95,8 +95,9 @@ for (const skill of skills) {
 
 for (const skill of ["track", "review", "revise", "refresh", "revert"]) {
   const body = readFileSync(join(root, "skills", skill, "SKILL.md"), "utf8");
-  if (!body.includes("planValidations")) {
-    errors.push(`${skill}: staged plan guidance must use planValidations`);
+  const validationInterface = skill === "revise" ? "candidate_apply" : "planValidations";
+  if (!body.includes(validationInterface)) {
+    errors.push(`${skill}: staged plan guidance must use ${validationInterface}`);
   }
 }
 for (const skill of ["create", "track", "review", "revise", "archive", "refresh", "revert"]) {
@@ -306,7 +307,7 @@ try {
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const tools = await client.listTools();
   const catalogBytes = Buffer.byteLength(JSON.stringify(tools.tools));
-  if (tools.tools.length !== 25) errors.push(`MCP catalog: expected 25 tools, found ${tools.tools.length}`);
+  if (tools.tools.length !== 22) errors.push(`MCP catalog: expected 25 tools, found ${tools.tools.length}`);
   if (catalogBytes > 80 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 80 KiB limit`);
   for (const tool of tools.tools) {
     if (!tool.outputSchema) errors.push(`MCP catalog: ${tool.name} has no output schema`);

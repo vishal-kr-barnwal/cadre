@@ -1,11 +1,31 @@
 ---
 title: Release Notes
-description: Cadre 3.x release changes and migration guidance.
+description: Cadre release changes and migration guidance.
 section: Reference
 order: 230
 ---
 
 # Release Notes
+
+## 4.0.0 - Unreleased
+
+### One active mutation contract
+
+- Use operation receipts for initialization, implementation completion, clean review and archive. Remove legacy direct-write completion paths and the `archive_batch_record`, `setup_record_commit` and `setup_record_git_initialized` tools. The MCP surface now has 22 tools.
+- Ship only immutable template set v6. Published v1–v5 source bytes remain unchanged for historical fixtures; they are excluded from the npm and installed plugin payloads.
+- Keep schema-2 project/track state, schema-1 execution journals and receipts, approval policy v2, retained-context reuse, all ten workflows, four approval modes and both schedules.
+- Continue existing 3.9.0/3.9.1/3.9.2 schema-2/v5 projects without rewriting metadata or requiring a project refresh. Install the new runtime and reload the client. Receipt recovery and historical evidence remain supported.
+- Warn on unsupported older formats with `PROJECT_UPGRADE_REQUIRED` and prevent delivery mutations. Do not silently translate approval authority or change old version labels.
+- Clarify active revision drafting: use the combined revision preparation path, exact completed-task commit markers, and sequential task ordinals. Preserve completed IDs and renumber only pending work; do not compare a proposed graph against its unsuperseded execution through separate candidate inspection. This addresses rejected proposals observed in a native Codex interruption/revision test.
+- Keep scope, retained-context tokens and knowledge arguments stable across context pages; adding `knownSources` midway invalidates the cursor. Native testing exercised the rejection and recovery, and the shared workflow guidance now states this constraint.
+
+### Older-project upgrade route
+
+1. Install the bridge: `npm install -g cadre-ai@3.9.0`, then `cadre-ai install --target all --scope user`. Reload the client.
+2. In 3.9.0, complete or reconcile interrupted operations and run Cadre refresh for an explicitly approved migration to schema-2 project/active-track state and template v5 at a quiescent boundary. Preserve historical records. Make any required approval-policy choice explicitly.
+3. Once 4.0.0 is published, install `cadre-ai@4.0.0`, run `cadre-ai install --target all --scope user`, reload the client and continue. For a local candidate, install its built package instead.
+
+This bridge is unnecessary for compatible 3.9.x/v5 projects. An already inconsistent track still requires its existing approved recovery; installation never repairs approval records by changing labels.
 
 ## 3.9.2 - Unreleased
 
