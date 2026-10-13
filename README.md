@@ -51,7 +51,8 @@ cadre-ai install
 `cadre-ai install` auto-detects installed clients. Use `--target codex`,
 `--target claude`, `--target zed`, or `--target all` to choose explicitly.
 Start a new client conversation after installation; in Claude Code, run
-`/reload-plugins` first.
+`/reload-plugins` first. In Zed, run `workspace: reload` from the command palette,
+then open a new Agent thread.
 
 ## Use Cadre
 

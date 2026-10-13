@@ -220,5 +220,6 @@ export function runInstall(args: string[]): number {
   }
   process.stdout.write(`Installed Cadre for ${clients.join(", ")}.\n`);
   process.stdout.write("Start a new client conversation; in Claude Code, run /reload-plugins first.\n");
+  if (clients.includes("zed")) process.stdout.write("In Zed, run workspace: reload from the command palette, then open a new Agent thread.\n");
   return 0;
 }

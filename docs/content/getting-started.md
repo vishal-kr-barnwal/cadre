@@ -57,8 +57,9 @@ After installing or updating:
 
 - Start a new Codex conversation.
 - In Claude Code, run `/reload-plugins` or start a new session.
-- In Zed, open a new Agent thread and confirm Cadre is active under AI → MCP
-  Servers. Zed reloads global skills live.
+- In Zed, run `workspace: reload` from the command palette, then open a new
+  Agent thread. Confirm all ten Cadre skills and the active MCP server below.
+  An already-open workspace can retain stale skill discovery after an update.
 
 Confirm installation with the native clients:
 

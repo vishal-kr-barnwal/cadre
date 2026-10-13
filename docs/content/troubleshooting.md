@@ -30,7 +30,8 @@ claude plugin list --json
 ```
 
 Then start a new Codex conversation or run `/reload-plugins` in Claude Code.
-For Zed, open a new Agent thread and inspect AI → Skills and AI → MCP Servers.
+For Zed, run `workspace: reload` from the command palette, then open a new
+Agent thread and inspect AI → Skills and AI → MCP Servers.
 Use `--target codex`, `--target claude`, `--target zed`, or `--target all` to
 remove auto-detection ambiguity.
 
@@ -56,6 +57,10 @@ conflicting skill deliberately, then retry. In `~/.config/zed/settings.json`,
 confirm `context_servers.cadre` points to the packaged `cadre-mcp.mjs`; the
 installer preserves unrelated JSONC settings and refuses to replace a
 different server already named `cadre`.
+
+After an update, an already-open Zed workspace can show an empty skill list
+while the links on disk are valid. Run `workspace: reload` to refresh discovery,
+then confirm all ten `cadre-*` skills and the active server.
 
 ## Cadre MCP Is Unavailable
 
