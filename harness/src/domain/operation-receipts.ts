@@ -2,6 +2,8 @@ import { readGitBlobs } from "./git.js";
 import { recordedRecoveryInputs, mergeRecoveryInputs, type RecoveryInput } from "./recovery-inputs.js";
 import { requireReviewFreshness } from "./review-freshness.js";
 import { requireRevertFreshness, revertApprovalProofSchema } from "./revert-freshness.js";
+import { requireInitFreshness } from "./init-freshness.js";
+import { repositoryBasisSchema, type RepositoryBasis } from "./repository-basis.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -24,9 +26,9 @@ export const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), opera
   artifacts: z.array(z.strictObject({ path: z.string(), sha256: digest.nullable() })).min(1) });
 export type OperationReceipt = z.infer<typeof receiptSchema>;
 export interface ReceiptFile { path: string; content: string | null }
-export type OperationPromotionInput = Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts"> & { inputs?: RecoveryInput[] };
+export type OperationPromotionInput = Omit<OperationReceipt, "schemaVersion" | "status" | "artifacts"> & { inputs?: RecoveryInput[]; createBasis?: RepositoryBasis };
 const recoverySchema = z.strictObject({ receipt: receiptSchema, inputs: z.array(z.strictObject({ path: z.string(), sha256: digest })).optional(),
-  revertApproval: revertApprovalProofSchema.optional(), reviewBeforeState: z.string().max(1024 * 1024).optional(),
+  revertApproval: revertApprovalProofSchema.optional(), reviewBeforeState: z.string().max(1024 * 1024).optional(), createBasis: repositoryBasisSchema.optional(),
   files: z.array(z.strictObject({ path: z.string(), content: z.string().nullable(), before: digest.nullable() })).min(1) });
 type Recovery = z.infer<typeof recoverySchema>;
 function parseRecovery(body: string): Recovery {
@@ -94,7 +96,7 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
   const recorded = recordedRecoveryInputs(files);
   const inputs = input.inputs !== undefined ? mergeRecoveryInputs(files, [...input.inputs, ...recorded])
     : stored ? stored.inputs : recorded;
-  const {inputs: _inputs, ...receiptInput} = input;
+  const {inputs: _inputs, createBasis: _createBasis, ...receiptInput} = input;
   const receipt = receiptSchema.parse({ ...receiptInput, schemaVersion: 1, status: "completed", artifacts: files.map((file) => ({ path: file.path, sha256: file.content === null ? null : receiptHash(file.content) })).sort((a, b) => a.path.localeCompare(b.path)) });
   const receiptBody = json(receipt), path = recoveryPath(input.operationId);
   let recovery: Recovery;
@@ -102,6 +104,7 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
     recovery = parseRecovery(readFileSync(target(root, path), "utf8"));
     if (json(recovery.receipt) !== receiptBody || json(recovery.files.map(({ before: _before, ...file }) => file)) !== json(files)) throw new Error("Pending operation differs from approved promotion");
     if (input.inputs !== undefined && json(inputs) !== json(recovery.inputs ?? recorded)) throw new Error("Pending operation inputs differ from approved promotion");
+    if (input.createBasis !== undefined && json(input.createBasis) !== json(recovery.createBasis)) throw new Error("Pending create repository evidence changed");
     try {
       const committed = reconcileOperation(root, input.operationId);
       return { status: "committed" as const, commit: committed, operationId: input.operationId, receiptHash: receiptHash(receiptBody), trailers: trailers(receipt) };
@@ -115,14 +118,17 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
     const reviewBeforeState = requireReviewFreshness(root, input.kind, files);
     const revertApproval = requireRevertFreshness(root, input.kind, input.operationId, files);
     requireUnchangedInputs(root, inputs ?? recorded);
+    if (input.kind === "create") requireInitFreshness(root, files, input.createBasis, false, input.approvalDigest);
     recovery = { receipt, ...(inputs !== undefined ? {inputs} : {}), ...(revertApproval ? {revertApproval} : {}),
-      ...(reviewBeforeState ? {reviewBeforeState} : {}), files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
+      ...(reviewBeforeState ? {reviewBeforeState} : {}), ...(input.createBasis ? {createBasis: input.createBasis} : {}),
+      files: files.map((file) => ({ ...file, before: currentHash(root, file.path) })) };
     write(root, { path, content: json(recovery) });
     afterWrite?.(path);
   }
   const reviewBeforeState = requireReviewFreshness(root, recovery.receipt.kind, recovery.files, recovery.reviewBeforeState, recovery.receipt.baseCommit);
   const revertApproval = requireRevertFreshness(root, recovery.receipt.kind, recovery.receipt.operationId, recovery.files, recovery.revertApproval);
   requireUnchangedInputs(root, recovery.inputs ?? recordedRecoveryInputs(recovery.files));
+  if (recovery.receipt.kind === "create") requireInitFreshness(root, recovery.files, recovery.createBasis, true, recovery.receipt.approvalDigest);
   for (const file of recovery.files) {
     const actual = currentHash(root, file.path), expected = file.content === null ? null : receiptHash(file.content);
     if (actual !== file.before && actual !== expected) throw new CadreError("OPERATION_PROMOTION_DRIFT", "An artifact changed during operation recovery", { path: file.path });
@@ -244,7 +250,21 @@ export function resumeOperation(root: string, id: string, approvalDigest: string
   const recovery = parseRecovery(readFileSync(target(safeProjectRoot(root), recoveryPath(id)), "utf8"));
   const receipt = receiptSchema.parse(recovery.receipt);
   if (receipt.operationId !== id || receipt.approvalDigest !== approvalDigest) throw new Error("Recovery must match the persisted approved operation");
-  return promoteOperation(root, {...receipt, ...(recovery.inputs !== undefined ? {inputs: recovery.inputs} : {})}, recovery.files.map(({ before: _before, ...file }) => file));
+  return promoteOperation(root, {...receipt, ...(recovery.inputs !== undefined ? {inputs: recovery.inputs} : {}),
+    ...(recovery.createBasis ? {createBasis: recovery.createBasis} : {})}, recovery.files.map(({ before: _before, ...file }) => file));
+}
+
+/** Locate only the original matching intent; never mint a new approval on retry. */
+export function pendingOperationForDigest(rootInput: string, kind: OperationReceipt["kind"], approvalDigest: string): string | null {
+  const root = safeProjectRoot(rootInput), directory = target(root, ".cadre/stage/operations");
+  if (!existsSync(directory)) return null;
+  const matches = readdirSync(directory).filter((file) => file.endsWith(".json")).map((file) => {
+    const recovery = parseRecovery(readFileSync(target(root, `.cadre/stage/operations/${file}`), "utf8"));
+    if (file !== `${recovery.receipt.operationId}.json`) throw new Error("Recovery journal identity mismatch");
+    return recovery.receipt;
+  }).filter((receipt) => receipt.kind === kind && receipt.approvalDigest === approvalDigest);
+  if (matches.length > 1) throw new Error("Multiple pending operations claim the same approval");
+  return matches[0]?.operationId ?? null;
 }
 
 /** Read-only recovery gate, including a crash before any canonical state was promoted. */

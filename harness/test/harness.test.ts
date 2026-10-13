@@ -2770,7 +2770,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
       projectRoot,
       projectName: "MCP fixture",
       context: "greenfield",
-      gitDisposition: "existing",
+      gitDisposition: "initialize",
       baseCommit: null,
       approvedAt: "2026-07-28T00:00:00.000Z",
       stagedFiles: files.map((file) => file.path),

@@ -9,8 +9,9 @@ import { candidateStageRoot, listCandidatePaths, readCandidateFiles } from "./st
 import { describeTemplate, getTemplates } from "./templates.js";
 import { CADRE_RUNTIME_VERSION, TEMPLATE_SET_VERSION } from "./version.js";
 import { safeProjectRoot } from "./paths.js";
-import { readGitFileAtCommit } from "./git.js";
-import { operationRef, promoteOperation, reconcileOperation } from "./operation-receipts.js";
+import { readGitFileAtCommit, gitRoot } from "./git.js";
+import { operationRef, promoteOperation, reconcileOperation, committedReceiptForDigest, pendingOperationForDigest, resumeOperation } from "./operation-receipts.js";
+import { captureRepositoryBasis, type RepositoryBasis } from "./repository-basis.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
 export { safeProjectRoot } from "./paths.js";
@@ -21,6 +22,7 @@ interface MaterializedArtifact {
 }
 
 interface MaterializedProjectInit {
+  repositoryBasis?: RepositoryBasis;
   projectRoot: string;
   projectName: string;
   context: "greenfield" | "brownfield";
@@ -47,6 +49,7 @@ export interface ProposedFile extends MaterializedArtifact {
 }
 
 export interface ProjectInitProposal {
+  repositoryBasis?: RepositoryBasis;
   operationId?: string;
   receipt?: ReturnType<typeof promoteOperation>;
   runtimeVersion: string;
@@ -201,7 +204,8 @@ function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitPr
   let digest = hash(JSON.stringify({
     runtimeVersion: CADRE_RUNTIME_VERSION,
     templateSetVersion: TEMPLATE_SET_VERSION,
-    files: files.map((file) => ({ path: file.path, sha256: proposalFileHash(file) }))
+    files: files.map((file) => ({ path: file.path, sha256: proposalFileHash(file) })),
+    ...(input.repositoryBasis ? {repositoryBasis: input.repositoryBasis} : {})
   }));
   const operationId = `create-${digest.slice(0, 32)}`;
   const projectFile = files.find((file) => file.path === "project.json")!;
@@ -211,8 +215,10 @@ function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitPr
   finalState.history = [...(finalState.history ?? []), { action: "create", commit: operationRef(operationId) }];
   projectFile.content = `${JSON.stringify(finalState, null, 2)}\n`;
   projectFile.sha256 = hash(projectFile.content);
-  digest = hash(JSON.stringify({ files: files.map(({ path, sha256 }) => ({ path, sha256 })) }));
-  return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest, operationId };
+  digest = hash(JSON.stringify({ files: files.map(({ path, sha256 }) => ({ path, sha256 })),
+    ...(input.repositoryBasis ? {repositoryBasis: input.repositoryBasis} : {}) }));
+  return { runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION, files, digest, operationId,
+    ...(input.repositoryBasis ? {repositoryBasis: input.repositoryBasis} : {}) };
 }
 
 function loadProjectInitCandidate(input: ProjectInitCandidateInput): MaterializedProjectInit {
@@ -229,9 +235,20 @@ function loadProjectInitCandidate(input: ProjectInitCandidateInput): Materialize
 }
 
 export function previewProjectInitCandidate(input: ProjectInitCandidateInput): ProjectInitProposal {
-  const proposal = buildProjectInitProposal(loadProjectInitCandidate(input));
+  const proposal = buildProjectInitProposal(materializeCurrentInit(input));
   assertInitializationBootstrap(input.projectRoot, proposal);
   return proposal;
+}
+
+function materializeCurrentInit(input: ProjectInitCandidateInput): MaterializedProjectInit {
+  const materialized = loadProjectInitCandidate(input), repositoryBasis = captureRepositoryBasis(input.projectRoot);
+  if (input.gitDisposition === "existing") gitRoot(input.projectRoot);
+  if (input.gitDisposition === "existing" ? repositoryBasis.head
+    ? !input.baseCommit || !repositoryBasis.head.startsWith(input.baseCommit) : input.baseCommit !== null
+    : input.baseCommit !== null || repositoryBasis.head !== null) {
+    throw new Error("Initialization Git disposition/baseCommit differs from the current repository HEAD");
+  }
+  return {...materialized, repositoryBasis};
 }
 
 function assertInitializationBootstrap(projectRootInput: string, proposal: ProjectInitProposal): void {
@@ -313,13 +330,18 @@ export function applyProjectInitCandidate(
   input: ProjectInitCandidateInput,
   proposalDigest: string
 ): ProjectInitProposal {
-  const materialized = loadProjectInitCandidate(input);
+  const committed = committedReceiptForDigest(input.projectRoot, "create", proposalDigest);
+  const pending = committed ? null : pendingOperationForDigest(input.projectRoot, "create", proposalDigest);
+  if (committed || pending) return {runtimeVersion: CADRE_RUNTIME_VERSION, templateSetVersion: TEMPLATE_SET_VERSION,
+    files: [], digest: proposalDigest, receipt: committed ?? resumeOperation(input.projectRoot, pending!, proposalDigest)};
+  const materialized = materializeCurrentInit(input);
   const proposal = buildProjectInitProposal(materialized);
   if (proposal.digest !== proposalDigest) {
     throw new Error("Initialization candidate changed after preview; preview it again");
   }
   if (proposal.operationId) return { ...proposal, receipt: promoteOperation(input.projectRoot, {
-    operationId: proposal.operationId, kind: "create", approvalDigest: proposalDigest, baseCommit: input.baseCommit
+    operationId: proposal.operationId, kind: "create", approvalDigest: proposalDigest, baseCommit: materialized.repositoryBasis!.head,
+    createBasis: materialized.repositoryBasis!
   }, proposal.files.map((file) => ({ path: `.cadre/${file.path}`, content: file.content }))) };
   return applyProjectInitAtRoot(materialized, proposal);
 }
