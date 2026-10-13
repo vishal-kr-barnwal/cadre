@@ -523,3 +523,61 @@ Authoritative logs are `final-tests.log`, `matrix.log`, `cli-final.log`,
 `validate-final.log`, `pack-final.log`, `docs.log`, `skills.log`, `payloads.log`
 and `native-config.log` in the evidence directory above. No additional defect
 was found in the final pass, and no known blockers remain in this tested scope.
+
+## Revision recovery and draft counter audit (2026-10-13)
+
+The next audit reproduced four defects: a fresh metadata revision could promote
+an empty checkpoint and invalidate canonical state; older pending revisions could
+change scope without the required revision record/counters; pending revisions
+could erase prior history; and draft planning could adopt an unapproved
+specification revision counter. Each accepted baseline probe now rejects before
+mutation. Recovery probes also cover operations whose artifacts were partly or
+fully written before interruption.
+
+Basic state checks now run in the shared canonical/overlay validator. A shared
+revision guard binds pending promotion to original history, a fresh record and
+synchronized track/specification/plan counters, including refresh scope revisions.
+Draft planning reads the counter from the reachable specification approval rather
+than the dirty draft. Nineteen maintained regressions cover these failures,
+preservation of invalid intents, valid partial recovery and committed replay.
+Track and revise skill guidance explains the evidence requirements. No published
+receipt schema or immutable template changed; healthy projects need a runtime
+update and server restart, not a project migration. Older invalid pending intents
+remain intact for approved repair rather than being silently rewritten.
+
+The packaged stdio matrix passed **24/24 cases** across three client identities,
+four approval modes and both scheduling modes. Every case rejected invalid
+checkpoint/counter/recovery probes across server restarts, then completed valid
+draft planning, active revision, implementation, review and archive. All 24 tracks
+were archived. The first matrix driver read scheduling mode from track state
+instead of the execution journal; correcting that test-driver assertion resolved
+the failure. The final matrix has no failures, cancellations or skips.
+
+Native installation succeeded with Codex
+`3.9.2+codex.local-20261013T150746Z` installed/enabled and Claude
+`3.9.2+claude.local-20261013T150746Z` enabled at user scope. All three installed
+MCP bundles match SHA-256
+`1324088073794138be6396d6553ba2b2b7a2943a289344749100e677271fc368`
+and initialize as Cadre 3.9.2 with 25 tools. Native Zed 1.23.3 lists all ten
+skills after `workspace: reload` and shows Cadre enabled with a green server
+indicator. Zed PID 95612 owns Node child 96631 running the installed marketplace
+bundle. Narrow Cadre permissions and unrelated settings are preserved. The global
+CLI was updated from the local candidate tarball, reports 3.9.2 and passes doctor
+with all 39 templates and a self-contained runtime.
+
+Evidence and disposable projects are retained under
+`~/.codex/tmp/cadre-revision-boundaries-20261013/`. These are synthetic runtime
+fixtures plus native discovery/activation checks, not exhaustive model-driven
+conversations. No model request, root `.cadre/`, tag, push, npm publication or
+GitHub release was used for this audit.
+
+Final verification passed **439/439 maintained tests** with zero failures,
+cancellations or skips (476,158 ms). The intermediate 437-test run imported the
+runtime before the history fix and failed the two new erased-history regressions;
+the final complete rerun includes that fix and both later draft-counter recovery
+tests. Frozen installation, strict TypeScript, package validation, pack dry run,
+all ten skill validators and full documentation checks passed. Authoritative logs
+are `final-tests.log`, `matrix-final.log`, `check-final.log`, `validate.log`,
+`pack.log`, `skills.log`, `docs.log`, `payloads.log`, `native-config.log` and
+`doctor.log` in the evidence directory above. No additional defect was found in
+the final pass, and no known blockers remain in the tested scope.
