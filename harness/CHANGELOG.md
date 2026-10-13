@@ -1,11 +1,12 @@
 # Changelog
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2026-10-14
 
 Cadre 4.0.0 is a breaking runtime/API release that removes parallel legacy
 mutation paths while preserving supported project state and delivery workflows.
 The package, runtime, docs and native plugin manifests are versioned together at
-4.0.0. Publication is pending; this entry records the prepared release.
+4.0.0. This release also includes the revision, review and recovery hardening
+recorded in the unreleased 3.9.2 development notes below.
 
 ### One active mutation contract
 
@@ -21,6 +22,7 @@ The package, runtime, docs and native plugin manifests are versioned together at
 
 - Reconcile public guides and the package README with the 4.0 receipt/recovery paths, approval modes, archive selection and all 22 MCP tools.
 - Fix documentation heading links containing underscores or punctuation. Add social-preview images, page structured data and export validation for metadata, internal links, sitemap and robots directives.
+- Keep homepage content near the top on tall mobile viewports instead of stretching the hero to the viewport height. Add npm package links to desktop and mobile navigation, and run content/SEO validation before Cloudflare deployment.
 
 All ten skills, four approval modes, sequential/parallel scheduling, schema-2
 project/track state, historical journals and approval evidence remain supported.
@@ -40,9 +42,9 @@ original authority, completed-task evidence and archived history were preserved.
 
 The native run used Autonomous approval and sequential scheduling with labelled
 synthetic fixture approvals. It does not establish exhaustive native coverage of
-every client/mode. Three-client installer, discovery and activation checks remain
-required before publishing 4.0.0; previous 3.9.x installation checks do not replace
-those release gates.
+every client/mode. Final 4.0.0 installation and activation checks passed for
+Codex, Claude Code and Zed, including packaged server parity, narrow approval
+settings and discovery of all ten skills.
 
 ### Upcoming roadmap
 
@@ -64,7 +66,7 @@ are committed. See the [roadmap](https://cadre-docs.pages.dev/team-and-polyrepo/
 
 1. Install the bridge: `npm install -g cadre-ai@3.9.0`, then `cadre-ai install --target all --scope user`. Reload the client.
 2. In 3.9.0, complete or reconcile interrupted operations and run Cadre refresh for an explicitly approved migration to schema-2 project/active-track state and template v5 at a quiescent boundary. Preserve historical records. Make any required approval-policy choice explicitly.
-3. Once 4.0.0 is published, install `cadre-ai@4.0.0`, run `cadre-ai install --target all --scope user`, reload the client and continue. For a local candidate, install its built package instead.
+3. Install `cadre-ai@4.0.0`, run `cadre-ai install --target all --scope user`, reload the client and continue.
 
 This bridge is unnecessary for compatible 3.9.x/v5 projects. An already inconsistent track still requires its existing approved recovery; installation never repairs approval records by changing labels.
 

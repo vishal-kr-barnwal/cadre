@@ -3,7 +3,7 @@
 **Cadre 4.0.0** simplifies the runtime around one receipt-based mutation path
 and the current v6 template catalog. All ten workflows, four approval modes,
 both scheduling modes, and stable Codex, Claude Code and Zed integrations remain
-available. Release documentation is ready; package publication is pending.
+available. Install [cadre-ai from npm](https://www.npmjs.com/package/cadre-ai).
 
 Cadre is a human-governed, Git-aware delivery harness for Codex, Claude Code,
 and Zed Agent. All three integrations are stable as of Cadre 3.9.1.

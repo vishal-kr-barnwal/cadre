@@ -40,7 +40,8 @@ tests, development dependencies, `node_modules`, or a second binary alias.
 pnpm --filter cadre-docs check
 ```
 
-This runs content validation, ESLint, TypeScript, and the static Next.js build.
+This runs content validation, ESLint, TypeScript, the static Next.js build, and
+rendered SEO/internal-link validation.
 The docs package version and release notes must match `harness/package.json`.
 
 ## Native Installer Validation
@@ -87,7 +88,11 @@ The native workflow test used Autonomous approval and sequential execution with
 synthetic fixture approvals. It did not change global installations and does not
 replace the three-client installer/discovery/activation gate above. The detailed
 record is `docs/development/cadre-4.0.0-native-flow.md` in the source repository.
-Publication remains pending.
+Final 4.0.0 user-scope installation and activation passed for all three clients.
+Codex completed a fresh read-only status smoke test; Claude reported a connected
+Cadre server; Zed showed all ten skills and an active server. Packaged MCP bytes
+matched the tested build, and narrow Cadre approval settings were verified.
+See `docs/development/cadre-4.0.0-release.md` for the release validation record.
 
 ## Release Sequence
 

@@ -20,7 +20,7 @@ provenance without asking an agent to invent workflow state.
 **Cadre 4.0.0** simplifies the runtime around one receipt-based mutation path
 and the current v6 template catalog. All ten workflows, four approval modes,
 both scheduling modes, and stable Codex, Claude Code and Zed integrations remain
-available. Release documentation is ready; package publication is pending.
+available. Install [cadre-ai from npm](https://www.npmjs.com/package/cadre-ai).
 
 ## What changes in 4.0.0
 
