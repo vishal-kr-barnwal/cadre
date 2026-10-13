@@ -25,13 +25,20 @@ Cadre 3.9.2 fixes an active-revision bug in 3.9.1 that could strand a revised tr
 - Persist approved unchanged-input fingerprints in the temporary recovery journal. Resume rejects changed pattern, dependency and context inputs before any remaining writes, preserves dirty files and pending intent, and retains zero-change committed replay. Published receipt formats remain unchanged; older pending receipts check fingerprints retained in their proposed artifacts.
 - Support approved-spec revisions in imported `drafting-plan` tracks after refresh. Retain prior spec approval, keep the draft plan unapproved, and return to track planning before implementation. Initial drafts without a plan use explicit previous plan revision 0.
 
+### Review, reversal and retry safeguards
+
+- Reject changed product or verification-policy content before clean completion in every approval mode. Interrupted clean and finding-bearing review recovery checks the reviewed HEAD before remaining writes; already committed approvals retain historical zero-change replay.
+- Constrain revert reconciliation to its persisted approved reversal, reachable additive reversal commits, exact durable reversal record, retained original journal and matching restored execution. Preserve the original Autonomous authorization, cumulative baseline, finding attempts and blockers; reject state-only authority rewrites.
+- Add an explicit `reviewRetry` request to refresh prepare for blocked/stalled policy-v2 Autonomous loops. A new digest-bound approval records the full prior loop and human instructions, retains every attempt and the original cumulative baseline, and grants a new bounded two-attempt budget. Healthy loops cannot silently renew authority.
+- Correct archive interruption guidance: resume the original pending promotion through `candidate_apply`, commit/reconcile once, and use the original archive token only for committed replay. Do not repeat apply or create another batch to bypass `COMMIT_PENDING`.
+
 ### Repairing an already stuck track
 
 Updating the runtime prevents the faulty transition; it does **not** silently rewrite previously approved state. Reconcile the original receipt once, preserve it and the original revision record, and use revise to prepare a fresh, explicitly approved repair from actual canonical counters and verified execution evidence. When the current plan and journal differ, the repair names the original execution graph and reachable plan commit under `Recovery evidence`; the runtime verifies that committed baseline. Do not manually clear operations or rewrite journals to bypass the scope guard.
 
 ### Validation
 
-On 2026-10-12, all 216 maintained harness tests passed, including 45 new regressions for authority preservation, interrupted input drift, and imported draft-spec revision. Fresh external checks passed 24 two-worker cases and 96 approval-mode transitions (78 completed/archived, 18 expected pre-execution gates), across three MCP client formats and both scheduling requests. Packaged stdio server proofs reject the former authority/recovery defects and preserve cumulative review and unapproved draft-plan state. Prior lifecycle/remediation matrices cover Git revert/reimplementation, terminal successors, refresh, and committed replay. Type, package, packaging, and documentation checks pass. These are disposable runtime fixtures with explicit test approvals; exhaustive native AI-session coverage is not claimed. Final patched-payload installation and activation remain publication gates.
+On 2026-10-13, final verification records **279/279 maintained harness tests**, including 63 follow-on cases for review freshness, task/phase/active-track reversal authority, bounded human-approved retries, and archive interruptions. Fresh external checks passed **102/102 matrix cases** and **9/9 packaged stdio server cases**, across representative client, approval and scheduling combinations. Type, package, packaging, and documentation checks pass. These are disposable runtime fixtures with explicit test approvals; exhaustive native AI-session coverage is not claimed. Final patched-payload installation and activation remain publication gates.
 
 ### Upgrade
 

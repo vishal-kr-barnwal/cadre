@@ -77,6 +77,20 @@ Track status reports an exact staged `track-<id>` as a `staged_track_candidate` 
 
 Constrained promotion for track, revise, refresh, review remediation and revert reconciliation. Prepare accepts `request: {mode: "prepare", projectRoot, candidateId, workflow, files}` and returns the exact final manifest/digest and approval token. After the applicable approval, apply accepts only `{mode: "apply", proposalToken}`. It validates proposed state/graphs/memory, binds unchanged source inputs, generates indexes and operation references, journals before promotion, and returns immutable receipt trailers with `commit_pending`. Agent Git tools create the commit. `{mode: "reconcile", projectRoot, operationId}` verifies unique reachable committed receipt/artifacts and removes only ignored recovery state. `{mode: "resume", projectRoot, operationId, approvalDigest}` resumes the exact persisted approved promotion. It never writes product files or executes Git.
 
+A blocked or stalled policy-v2 Autonomous loop can request an explicit retry only
+through refresh prepare, adding `reviewRetry: {trackId, refreshPath, reason}`.
+Stage unchanged current track state, project state, and the named human-instruction
+refresh record. The derived proposal preserves the original review baseline and
+all attempts, records the prior loop in refresh history, and binds a new bounded
+attempt budget to the approved receipt. Scope or plan changes use a separate
+approval; arbitrary authored loop resets remain invalid.
+
+Revert promotion requires the persisted approved reversal operation, actual
+reachable reversal commits, exact durable reversal record/original journal
+snapshot, and matching restored implement ownership. Its approval does not
+replace Autonomous authority, findings, attempt history or cumulative review
+coverage.
+
 Prepare also returns `stateChanges`: exact field-level `set`/`append` operations
 for runtime-derived track/project metadata. Apply these to the inspected source
 JSON to reconstruct the final manifest bytes and verify their hashes. A retry
@@ -118,9 +132,21 @@ For finding-bearing reviews, use `candidate_inspect` with target status `in_prog
 
 Approval-aware clean-review completion. Prepare accepts `projectRoot`, `trackId`, `approval`, and optional `acceptedRisks`; the server derives `<execution.baseCommit>..<lastExecution.headCommit>`, so the first implementation commit is included. The legacy `approval` input stores proposal evidence as `reviewEvidence`; prepare does not record confirmed approval. Apply persists a separate `approvalConfirmation` receipt bound to the proposal digest. There is no caller-supplied range start. Apply returns a compact receipt, recognizes an already-written matching review cycle, and repairs a stale derived index without duplicating history.
 
+Every approval mode checks product and verification-policy content against the
+reviewed HEAD before clean completion. Pending clean or finding-bearing review
+recovery performs the same check before remaining writes, including older intent
+formats. A committed approval replays its original verified receipt independently
+of subsequent product changes; it does not approve those later changes.
+
 ## archive_batch_candidate
 
 Approval-aware staged archive batch. Prepare consumes body-free update descriptors and returns the full manifest/moves. `stateChanges` identifies each source and destination state path, final SHA-256, and exact field-level set/append operations, including project history. Preview and apply share the same deterministic derivation. Apply re-reads exact bytes and returns changed paths/counts. A committed retry verifies the original receipt before checking archive eligibility or reading removed stages; it returns that receipt with zero changed paths/counts.
+
+Pending v5 archive promotion recovers with `candidate_apply` resume using the
+original operation ID and approval digest, then one receipt commit and
+reconciliation. Repeating archive apply while its intent is pending returns
+`COMMIT_PENDING`; the original archive token provides zero-change replay after
+commit/reconciliation. Never re-prepare or redistill an interrupted approved batch.
 
 ## archive_batch_record
 

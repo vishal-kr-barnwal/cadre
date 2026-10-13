@@ -132,3 +132,10 @@ Legacy Autonomous migration records `approvalModeMigration` with the old executi
 ID, chosen Track/Autonomous mode, approval time, and approved `refreshPath`.
 Completed execution journals remain historical; active journals and operations are
 upgraded together to policy v2 under the same refresh envelope.
+
+An explicitly approved blocked/stalled review retry adds optional
+`autonomousReview.retryAuthorization`, containing the approving refresh operation
+reference and each finding’s retained `attemptBaseline`. The refresh history entry
+keeps the full prior loop, instruction record path and reason. Existing attempts
+are never erased; the two-attempt limit counts new attempts beyond that approved
+prefix. Automatic remediation, ordinary refresh and revert cannot replace it.
