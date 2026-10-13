@@ -581,3 +581,65 @@ are `final-tests.log`, `matrix-final.log`, `check-final.log`, `validate.log`,
 `pack.log`, `skills.log`, `docs.log`, `payloads.log`, `native-config.log` and
 `doctor.log` in the evidence directory above. No additional defect was found in
 the final pass, and no known blockers remain in the tested scope.
+
+## Imported draft authority audit (2026-10-13)
+
+This pass reproduced three defects. Draft revise and refresh accepted an edited,
+unapproved specification counter as the next revision's baseline. Recovery of an
+older draft revision could mark its unfinished plan approved. A scope refresh
+failed with `ENOENT` when adding the first draft plan to an approved specification.
+The negative probes and missing-plan matrix failure are retained in the evidence
+folder below.
+
+Track planning and draft revision now share committed specification approval
+lookup. Recovery also preserves the draft status, unapproved plan and prior spec
+approval evidence. Refresh recognizes newly introduced artifacts before reading
+their old bytes. Eleven maintained regressions cover both workflows, interrupted
+invalid intents, the initial missing-plan case and all four two-step revise/refresh
+orders. Valid partial writes and stage loss retain their existing recovery path.
+No published receipt schema or immutable template changed.
+
+The packaged matrix covers three client identities, four approval modes and both
+schedules. It rotates all four revise/refresh orders and drafts with/without an
+initial plan, checks malformed proposal rejection before and after restart, then
+recovers two revisions before planning, implementing, reviewing and archiving.
+Its initial driver incorrectly called resume after reconciliation had removed the
+intent; the corrected driver checks committed reconciliation. A later run exposed
+the real missing-plan refresh bug, which is covered by a maintained regression.
+The superseded full test run was stopped when that runtime fix landed; only the
+final complete rerun is authoritative.
+
+Evidence and retained projects: `~/.codex/tmp/cadre-draft-authority-20261013/`.
+These are synthetic approvals and runtime fixtures, plus native installation
+checks. They do not claim exhaustive model-driven conversations. No root `.cadre/`,
+push, tag, npm publication or GitHub release is part of this audit.
+
+Native candidate validation passed after the final missing-plan fix. Codex reports
+`3.9.2+codex.local-20261013T155950Z` installed/enabled, and Claude reports
+`3.9.2+claude.local-20261013T155950Z` enabled at user scope. All three installed
+MCP bundles match SHA-256
+`9d11ff8b6988a4e80725e237b31b30cafa64ebc407769f05db0845b2c28c1a9d`
+and initialize as Cadre 3.9.2 with 25 tools. Native Zed 1.23.3 visibly lists all
+ten Cadre skills and shows the server enabled with a green indicator after
+`workspace: reload`. Zed PID 4536 owns Node child 5140 running the installed
+marketplace bundle. Narrow permissions and unrelated settings are preserved.
+The global CLI was updated from the local candidate tarball, reports 3.9.2 and
+passes doctor with all 39 templates and a self-contained runtime. No model
+request or project trust change was needed for native verification.
+
+The final packaged matrix passed **24/24 cases** with zero failures, cancellations
+or skips (464,617 ms). It completed 48 interrupted draft revisions and archived
+all 24 tracks after plan approval, implementation and clean review. All three
+clients, four approval modes and two schedules are represented. Sequence and
+initial-plan variants rotate across those combinations rather than claiming the
+full Cartesian product of every possible workflow input.
+
+Final verification passed **450/450 maintained tests** with zero failures,
+cancellations or skips (544,980 ms). Frozen installation, strict TypeScript,
+package validation, pack dry run, all ten skill validators and full docs checks
+passed. Authoritative logs are `final-tests.log`, `matrix-final.log`,
+`check-final.log`, `validate-final.log`, `pack-final.log`, `skills.log`, `docs.log`,
+`payloads-final.log`, `native-config.log` and `doctor.log` in the evidence folder.
+No additional defect appeared in the final pass, and no known blockers remain in
+the tested scope. Healthy projects need the updated runtime and client restart;
+invalid older pending intents retain their evidence for approved repair.
