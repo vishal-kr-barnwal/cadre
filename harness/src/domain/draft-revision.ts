@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { isCommitRef } from "./operation-receipts.js";
-import { isGitAncestor, readGitFileAtCommit, resolveGitCommit } from "./git.js";
+import { draftSpecificationApproval } from "./draft-approval.js";
 import { parsePlanContent, validatePlanGraph } from "./plan.js";
 import type { TrackState } from "./state.js";
 
@@ -16,10 +16,8 @@ export function deriveDraftRevision(root: string, previous: TrackState, proposed
   for (const file of ["spec.md", "plan.md", "learning.md", "dependency-context.json"]) {
     if (!artifacts.has(`${parent}/${file}`)) throw new Error(`Draft specification revision requires reassessed ${file}`);
   }
-  const specCommit = resolveGitCommit(root, previous.commits!.spec!);
-  if (!isGitAncestor(root, specCommit)) throw new Error("Restore reachable original specification approval before revising the draft");
-  const approvedSpec = readGitFileAtCommit(root, specCommit, `.cadre/${parent}/spec.md`);
-  if (artifacts.get(`${parent}/spec.md`) === approvedSpec) {
+  const approved = draftSpecificationApproval(root, previous);
+  if (artifacts.get(`${parent}/spec.md`) === approved.content) {
     throw new Error("Unchanged specification and draft-plan-only edits must use the track drafting flow");
   }
   let specRevision = 1, planRevision = 0;
@@ -27,7 +25,8 @@ export function deriveDraftRevision(root: string, previous: TrackState, proposed
     // The old plan is unapproved; its graph need not be valid, but counters must be known.
     const draft = parsePlanContent(read(`${parent}/plan.md`), `${parent}/plan.md`);
     if (!draft.specRevision || !draft.planRevision) throw new Error("Restore the retained draft revision counters before revising its approved specification");
-    specRevision = draft.specRevision; planRevision = draft.planRevision;
+    if (draft.specRevision !== approved.specRevision) throw new Error("Restore the approved specification revision counter before revising the draft");
+    specRevision = approved.specRevision; planRevision = draft.planRevision;
   } else if (previous.revision !== 1) {
     throw new Error("Restore the retained draft revision counters before revising its approved specification");
   }

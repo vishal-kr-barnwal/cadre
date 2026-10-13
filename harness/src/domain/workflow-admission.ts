@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { promotionEvidence, type BeforeEvidence, type PromotionFile } from "./promotion-evidence.js";
-import { isGitAncestor, readGitBlobs, readGitFileAtCommit, resolveGitCommit } from "./git.js";
+import { draftSpecificationApproval } from "./draft-approval.js";
 import { parsePlanContent } from "./plan.js";
 import { requireRevisionPreservation } from "./revision-preservation.js";
 import type { TrackState } from "./state.js";
@@ -38,15 +38,12 @@ export function requireWorkflowAdmission(root: string, kind: "track" | "revise",
       throw new Error("Planning must preserve approved specification revision and dependencies; use revise for scope changes");
     }
     const path = file.path.replace(/state\.json$/, "spec.md"), spec = files.find((item) => item.path === path);
-    const commit = resolveGitCommit(root, previous.commits.spec);
-    if (!isGitAncestor(root, commit)) throw new Error("Restore reachable specification approval before planning");
-    if (spec?.content !== readGitFileAtCommit(root, commit, path)) {
+    const approved = draftSpecificationApproval(root, previous);
+    if (spec?.content !== approved.content) {
       throw new Error("Planning must preserve the committed approved specification; use revise for scope changes");
     }
     const planPath = file.path.replace(/state\.json$/, "plan.md"), plan = files.find((item) => item.path === planPath);
-    const request = `${commit}:${planPath}`, approvedPlan = readGitBlobs(root, [request]).get(request);
-    const specRevision = approvedPlan ? parsePlanContent(approvedPlan, planPath).specRevision : previous.revision;
-    if (!plan?.content || parsePlanContent(plan.content, planPath).specRevision !== specRevision) {
+    if (!plan?.content || parsePlanContent(plan.content, planPath).specRevision !== approved.specRevision) {
       throw new Error("Planning must preserve the approved specification revision counter; use revise for scope changes");
     }
   }

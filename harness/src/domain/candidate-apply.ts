@@ -119,11 +119,11 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     const previous = existsSync(join(root, ".cadre", path)) ? JSON.parse(readSafeArtifact(root, `.cadre/${path}`)) : null;
     const recordAuthored = [...original.keys()].some((file) => file.startsWith(`${parent}/revisions/`));
     const modified = (file: string) => original.has(`${parent}/${file}`)
-      && original.get(`${parent}/${file}`) !== readSafeArtifact(root, `.cadre/${parent}/${file}`);
+      && (!existsSync(join(root, ".cadre", parent, file)) || original.get(`${parent}/${file}`) !== readSafeArtifact(root, `.cadre/${parent}/${file}`));
     const refreshRevision = input.workflow === "refresh" && previous
       && (recordAuthored || !isDeepStrictEqual(state.dependencies, previous.dependencies) || modified("spec.md") || original.has(`${parent}/plan.md`)
-        && parsePlanContent(original.get(`${parent}/plan.md`)!, `${parent}/plan.md`).digest
-          !== parsePlanContent(readSafeArtifact(root, `.cadre/${parent}/plan.md`), `${parent}/plan.md`).digest);
+        && (!existsSync(join(root, ".cadre", parent, "plan.md")) || parsePlanContent(original.get(`${parent}/plan.md`)!, `${parent}/plan.md`).digest
+          !== parsePlanContent(readSafeArtifact(root, `.cadre/${parent}/plan.md`), `${parent}/plan.md`).digest));
     if (refreshRevision && project.templateSetVersion !== "v5") throw new Error("Complete legacy refresh migration before revising track scope");
     if (input.workflow === "review" && previous?.autonomousReview) {
       state = deriveAutonomousReviewCandidate(root, previous, original, reference);

@@ -5,6 +5,7 @@ import { readSafeArtifact } from "./memory.js";
 import { parsePlanContent } from "./plan.js";
 import type { TrackState } from "./state.js";
 import type { PromotionFile } from "./promotion-evidence.js";
+import { draftSpecificationApproval } from "./draft-approval.js";
 
 /** Pending revisions retain the same record/counter contract as fresh approvals. */
 export function requireRevisionPreservation(root: string, previous: TrackState, proposed: TrackState,
@@ -29,6 +30,21 @@ export function requireRevisionPreservation(root: string, previous: TrackState, 
   const graphChanged = graph?.digest !== oldGraph?.digest;
   const changed = specChanged || graphChanged || !isDeepStrictEqual(previous.dependencies, proposed.dependencies);
   if (!changed && proposed.revision === previous.revision && !records.length) return;
+  if (previous.status === "drafting-plan") {
+    if (previous.commits?.plan || proposed.status !== "drafting-plan" || proposed.checkpoint !== "drafting-plan"
+      || proposed.commits?.plan || proposed.operation || proposed.lastExecution || proposed.autonomousReview || proposed.reviewCycles?.length
+      || history.at(-1)?.previousSpecCommit !== previous.commits?.spec || proposed.commits?.spec !== history.at(-1)?.commit) {
+      throw new Error("Draft revision must preserve its unapproved plan and specification approval evidence");
+    }
+    const approved = draftSpecificationApproval(root, previous);
+    if (oldGraph && oldGraph.specRevision !== approved.specRevision || graph?.specRevision !== approved.specRevision + 1) {
+      throw new Error("Draft revision must retain the approved specification revision counter");
+    }
+    if (!spec?.content || spec.content === approved.content
+      || ["plan.md", "learning.md", "dependency-context.json"].some((path) => !files.some((file) => file.path === parent + path && file.content !== null))) {
+      throw new Error("Draft revision requires a changed approved specification and reassessed draft artifacts");
+    }
+  }
   if (proposed.revision !== Number(previous.revision) + 1 || records.length !== 1 || !records[0]!.content?.trim()) {
     throw new Error("Revision changes require the next track revision and one fresh revision record; retain intent for approved repair");
   }

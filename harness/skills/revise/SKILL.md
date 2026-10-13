@@ -25,6 +25,8 @@ Call `project_status` first with `view: "implementation"` and `trackId` for acti
 
 Pending recovery enforces the original history, fresh revision record and synchronized counters before further writes. If an older intent lacks that evidence, retain it for an explicitly approved repair; do not repeatedly reconcile it or fabricate missing approval fields. Already-committed receipt replay remains historical and unchanged.
 
+For an imported draft, derive the specification counter from its committed approval, not an edited draft plan. Revision and its recovery keep `drafting-plan` with no plan approval or execution; obtain plan approval through track before implementation.
+
 ## Route by current status
 
 - No canonical track: use `track`; revision cannot create its own approved baseline, including when resuming an older pending operation.
