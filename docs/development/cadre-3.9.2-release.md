@@ -454,3 +454,72 @@ inspected in the already-trusted harness repository window without executing a
 workflow or creating a root `.cadre/` directory. No model request was sent.
 The native gate is complete, and there are no known release blockers in the
 verified scope. No tag, push, npm publication or GitHub release was performed.
+
+## Workflow routing and refresh audit follow-up (2026-10-13)
+
+This pass reproduced four additional runtime defects in disposable projects:
+refresh accepted a missing audit record, refresh could overwrite an earlier
+record, revise could create a new track without an approved baseline, and track
+planning could replace an already-approved draft specification without revision.
+All four formerly accepted probes now reject before mutation.
+
+New shared guards run before preview/promotion and during interrupted recovery.
+Every new refresh retains fresh nonempty records and binds its primary record to
+project metadata/history. Multiple fresh migration records remain valid. Revision
+requires an existing approved active baseline; draft planning compares the spec
+against its reachable committed approval and preserves revision/dependencies.
+Original before-images support valid partial recovery after candidate-stage loss;
+invalid older pending operations preserve their intent and files for approved
+repair. Already-committed receipts still replay without changes. Published receipt
+schemas and immutable templates remain unchanged; healthy projects need only a
+runtime update and server restart.
+
+Twenty maintained regressions cover mode/schedule combinations, all three client
+identities, primary-record selection, dirty draft specifications, interrupted
+recovery and older invalid pending intents. The initial full run had 395 passes
+and 24 failures from an older positive fixture that reused one refresh record for
+two approvals. That fixture now uses fresh records; migration and retry fixtures
+were corrected for the same audit contract. The final rerun is recorded below.
+
+Native update testing found a fifth issue in the reload instructions: a running
+Zed workspace displayed an empty global skill list after payload replacement,
+despite valid links. Running `workspace: reload` restored all ten skills; the
+Cadre MCP server was green after reload. Installer guidance, both READMEs and
+getting-started/troubleshooting docs now include that action. This is a native
+cache-refresh requirement, not missing skill files. Native Zed reports 1.23.3.
+
+The candidate installed successfully into Codex and Claude at
+`3.9.2+codex.local-20261013T142048Z` and
+`3.9.2+claude.local-20261013T142048Z`, respectively, both enabled. All three
+installed servers match the tested MCP bundle SHA-256
+`5425f1efcba36c417749b17b5e3764c1c9d4873227e438d2213180885d1ad098`
+and initialize as 3.9.2 with 25 tools. Narrow Cadre permissions and unrelated
+settings are preserved. No model request or root project initialization was used
+for native verification. The installer-message-only follow-up passed all eight
+CLI tests against the rebuilt package.
+
+Evidence and retained matrix projects are under
+`~/.codex/tmp/cadre-workflow-routing-20261013/`. The runtime matrices use explicit
+synthetic approvals, not exhaustive model-driven native conversations. No tag,
+push, npm publication or GitHub release was performed.
+
+The follow-up matrix passed **48/48 cases** with zero failures or skips:
+24 source/in-memory complete lifecycles and 24 packaged stdio routing/restart
+cases. Each set covers three client identities, four approval modes and both
+scheduling modes. All 72 delivered tracks completed review and archive, including
+24 successor tracks. Missing/reused refresh records and revision-created tracks
+were rejected before and after MCP restart; valid consecutive refreshes and
+committed replay passed. The final native Zed process (PID 50416) owns Node child
+51105 running the tested packaged MCP bundle. The global locally packed CLI
+reports 3.9.2 and passes doctor with 39 templates and a self-contained runtime.
+
+Final verification passed **420/420 maintained tests** with zero failures,
+cancellations or skips (724,000 ms). This complete rerun includes all corrected
+fixtures and 20 new regressions. Frozen installation, strict TypeScript, package
+validation, pack dry run, all ten skill validators, full documentation checks and
+the focused eight-test CLI rerun passed. The CLI rerun covers the final
+installer-message change; MCP runtime bytes are unchanged by that message.
+Authoritative logs are `final-tests.log`, `matrix.log`, `cli-final.log`,
+`validate-final.log`, `pack-final.log`, `docs.log`, `skills.log`, `payloads.log`
+and `native-config.log` in the evidence directory above. No additional defect
+was found in the final pass, and no known blockers remain in this tested scope.
