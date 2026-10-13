@@ -31,8 +31,8 @@ schema-2 state and template set v5 remain unchanged.
 
 ## Maintained tests and package checks
 
-The final complete harness run passed **279/279 tests**, with no failures or skips.
-The preceding complete run passed 216 tests; 63 follow-on maintained cases are
+The latest complete harness run passed **317/317 tests**, with no failures, skips or cancellations. The earlier follow-on run passed 279/279 tests.
+An earlier complete run passed 216 tests; its 63 follow-on maintained cases are
 described below.
 The original recovery suite adds 37 cases. Subsequent extended verification adds
 45 maintained cases: eight authority tests, 27 interrupted-recovery tests and ten
@@ -176,7 +176,7 @@ documentation checks and built CLI doctor passed. Earlier failed runs exposed
 legacy fixture assumptions and catalog size; fixtures and labels were corrected
 without weakening freshness checks or raising the catalog limit. Two intermediate
 runs were cancelled after identifying fixture edits; the final complete run has
-no cancellations, failures or skips. No core source changed after that final run.
+no cancellations, failures or skips. That run preceded the additional blocked-review and reversal-proof fixes below.
 
 Evidence is retained under `~/.codex/tmp/cadre-all-four-fixes-20261012/`, including
 `test-final.log`, matrix JSON/driver files and packaged stdio results. Immutable
@@ -196,3 +196,70 @@ Before publishing, reinstall the final local build into all three clients and
 verify candidate listings, ten Zed skills, native server activation, payload hashes,
 and narrow MCP approvals as required by repository release instructions. No npm
 publication, GitHub release, tag, push, or final native activation is claimed here.
+
+
+## Blocked review and reversal proof fixes (2026-10-13)
+
+Continued verification reproduced three additional failures: a blocked loop could
+accept a remediation snapshot without explicit retry approval; final reversal
+reconciliation could change an unrelated journal node despite its original hash
+manifest; and an unrelated empty commit could be recorded as a product reversal.
+All three now have runtime rejection and maintained regressions.
+
+- Automatic remediation validates the persisted previous loop before accepting its
+  proposed checkpoint. Generic review resume retains and revalidates the exact
+  original authority, including after partial state promotion or stage loss.
+- Revert checks the complete original path/hash manifest and exactly matching
+  reversal record. New recovery stores the original temporary operation and
+  authored state under ignored staging, preserving receipt/template formats.
+  Each resume verifies the original hash binding and deterministic resulting state.
+- Reversal proof verifies retained execution commit provenance, distinct ordered
+  targets/reversals and actual reverse results, using a temporary Git index/object
+  directory. Text, binary, mode, rename, multi-commit and both merge mainlines are
+  tested; source index, object inventory and history remain unchanged by proof.
+  Conflicts require an exact approved `conflictResolutionTrees` result limited to
+  the target paths. Empty or wrong-result commits cannot reset delivery evidence.
+- The revert authority fixture now reads `candidate_inspect.files`. Its previous
+  `inspected.manifest` expression silently omitted hashes. New failures were
+  reproduced again with a complete valid original manifest before fixing them.
+
+Existing v5 projects need no schema/template migration. Install the patched
+runtime and restart its server to receive these checks. Committed historical
+operations remain zero-change replay. Valid older pending operations can retain
+proof when exact original state/stage remains available. Older partial intent or
+approval missing that evidence requires an explicitly approved evidence repair;
+retain its intent, receipt and Git changes rather than replacing hashes or
+repeating reversals.
+
+The final complete suite passed **317/317 tests** (387,381 ms), with zero failures,
+skips or cancellations. It adds 38 cases: eight blocked/recovery review checks,
+21 original reversal approval/recovery checks, and nine Git-result proof checks.
+The earlier complete regression run passed 315 tests before the two additional
+review-resume cases were added; the final run includes both and the final guards.
+
+The follow-up external matrix passed **78/78 cases**: 24 complete lifecycles,
+18 repeated-budget/active-retry/blocked-review cases, 12 original-approval/Git-proof
+rejections, and 24 interrupted multi-track archive cases across all four approval
+modes and both scheduling modes. All three former reproductions now assert actual
+rejection; these are successful safety checks, not acceptance-observation tests.
+The broader matrix began before the last review-resume extension; the final full
+suite and packaged checks below retest that extension on the final source.
+
+The rebuilt packaged stdio server passed **15/15 checks**: three blocked-review
+rejections, three valid refresh retry recoveries across three server processes,
+two reversal rejections after restart, six partial review/revert recoveries after
+candidate-stage loss across all three client identities, and one legacy blocked
+review intent rejection after restart. Valid flows finish review and archive;
+rejected flows retain their original state and recovery intent.
+
+Frozen install, type checking, source/package validation, pack dry run, docs
+content/lint/types/static build, CLI version and doctor checks pass. The built
+CLI remains 3.9.2 with 39 templates and a self-contained runtime. Published
+receipts, immutable templates and MCP tool schemas remain unchanged.
+
+Host-local drivers, retained external fixtures and logs are under
+`~/.codex/tmp/cadre-audit-fixes-20261013/`. Final evidence uses
+`full-tests-final.log`, `matrices.log` and `packaged-final.log`. The audit
+fixtures use explicit synthetic approvals and MCP client identities; exhaustive
+model-driven native client sessions are not claimed. Native installation/activation
+and publishing remain separate release gates.
