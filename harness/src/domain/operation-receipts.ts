@@ -9,6 +9,8 @@ import { requireJournalPreservation } from "./journal-preservation.js";
 import type { BeforeEvidence, PromotionFile } from "./promotion-evidence.js";
 import { requireRefreshPreservation } from "./refresh-preservation.js";
 import { requireProjectOverlay } from "./project-overlay.js";
+import { requireWorkflowAdmission } from "./workflow-admission.js";
+import { requireRefreshRecord } from "./refresh-record.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, fsyncSync, openSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -77,10 +79,15 @@ function transitionEvidence(root: string, kind: string, files: PromotionFile[], 
   if (kind === "review") return requireReviewPreservation(root, files, saved, base);
   if (kind === "refresh") {
     const evidence = [...requireJournalPreservation(root, files, saved, base), ...requireRefreshPreservation(root, files, saved, base)];
+    requireRefreshRecord(root, files);
     return [...new Map(evidence.map((file) => [file.path, file])).values()];
   }
-  if (kind === "revise") return requireJournalPreservation(root, files, saved, base);
-  if (saved?.length) throw new Error("Transition evidence belongs only to review, refresh or revision");
+  if (kind === "track" || kind === "revise") {
+    const evidence = [...requireWorkflowAdmission(root, kind, files, saved, base),
+      ...(kind === "revise" ? requireJournalPreservation(root, files, saved, base) : [])];
+    return [...new Map(evidence.map((file) => [file.path, file])).values()];
+  }
+  if (saved?.length) throw new Error("Transition evidence belongs only to track, review, refresh or revision");
   return [];
 }
 function write(root: string, file: ReceiptFile): void {

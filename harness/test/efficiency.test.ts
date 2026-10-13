@@ -346,9 +346,10 @@ test("legacy refresh migrates once at quiescence and preserves execution and his
   const { scope } = startExecution(root, "legacy-run");
   const journalPath = `.cadre/tracks/sample/executions/execution-${scope.executionId}.json`, journalBefore = readFileSync(join(root, journalPath), "utf8");
   assert.equal(JSON.parse(journalBefore).executionContract, undefined);
-  const files = ["project.json", "tracks/sample/state.json", "tracks/sample/dependency-context.json"];
+  const files = ["project.json", "tracks/sample/state.json", "tracks/sample/dependency-context.json", "refreshes/refresh-migration.md"];
   prepareCandidateStage(root, "refresh-migration", files);
-  for (const path of files) write(root, `.cadre/stage/refresh-migration/${path}`, readFileSync(join(root, ".cadre", path), "utf8"));
+  for (const path of files) write(root, `.cadre/stage/refresh-migration/${path}`, path === "refreshes/refresh-migration.md"
+    ? "# Approved migration\nPreserve execution and historical evidence.\n" : readFileSync(join(root, ".cadre", path), "utf8"));
   const input = { projectRoot: root, candidateId: "refresh-migration", workflow: "refresh" as const, files };
   const preview = previewCandidateApply(input), explained = structuredClone(project);
   for (const change of preview.stateChanges.find((item) => item.path === projectPath)!.changes) {

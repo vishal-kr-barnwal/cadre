@@ -25,6 +25,7 @@ Call `project_status` first with `view: "implementation"` and `trackId` for acti
 
 ## Route by current status
 
+- No canonical track: use `track`; revision cannot create its own approved baseline, including when resuming an older pending operation.
 - `drafting-spec`: follow the `track` specification procedure and resume its journal. The content is not yet an approved baseline, so do not create a revision artifact or increment a revision.
 - `drafting-plan`: if the approved specification changes, perform the semantic revision procedure below and remain `drafting-plan`; if only the unapproved plan changes, resume the `track` planning procedure without a revision artifact.
 - `planned`: perform the semantic revision and remain `planned`.

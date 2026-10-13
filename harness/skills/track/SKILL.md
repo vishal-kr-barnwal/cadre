@@ -46,6 +46,8 @@ Expected human decision count is one for a clear new track; do not create a spec
 
 The plan is the execution source of truth. Dependency changes or a modified approved spec require the Cadre revise workflow.
 
+When resuming `drafting-plan`, compare the proposed specification against its reachable approved commit, even if the working copy already contains requested edits. Preserve that approved content, track revision and dependencies during planning. Route changed approved scope through revise first; an interrupted older planning proposal that replaces it requires an approved repair.
+
 ## Memory contract
 
 Preserve phase history and existing handoffs. For active v3/v4/v5 tracks, keep the marked `cadre:memory` JSON block inside Pattern Seed synchronized with the proposed spec/plan revisions and exact approved pattern hashes. Every applicable pattern requires its safe `patterns/<slug>.md` path, SHA-256, and human-readable relevance/constraints; never invent or silently omit guidance. When a staged plan changes revisions, include the reassessed learning file in `expectedFiles`. Inspect `candidate_inspect.learning` and `memoryInputs` as well as `plans`; resolve invalid or stale memory before approval. Immediately before direct promotion, re-inspect and compare the complete approved digest, including unchanged memory inputs; changed inputs require reassessment and a corrected approval. Archive apply performs this check in the runtime. Completed and archived learning remains historical evidence, not a claim that old hashes describe current patterns.

@@ -49,8 +49,10 @@ function scopeRevision({root, load}: Fixture, extend: boolean): Record<string, s
 }
 
 function refreshFiles(root: string, nested: Record<string, string> = {}): Record<string, string> {
+  let number = 1;
+  while (existsSync(root + `/.cadre/refreshes/refresh-sample-${number}.md`)) number++;
   return {"project.json": read(root, ".cadre/project.json"),
-    "refreshes/refresh-sample.md": "# Refresh\nPreserve approved history and reassess affected scope.\n",
+    [`refreshes/refresh-sample-${number}.md`]: "# Refresh\nPreserve approved history and reassess affected scope.\n",
     ...Object.fromEntries(Object.entries(nested).map(([path, body]) => [`tracks/sample/${path}`, body]))};
 }
 

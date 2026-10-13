@@ -14,7 +14,10 @@ import { fixture, finishCurrent, read, write, git, commit, json } from "./helper
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const parent = ".cadre/tracks/sample/";
 async function retry(f: Fixture, reason: string) {
-  const {root, call, load} = f, state = load(), refreshPath = "refreshes/refresh-retry.md";
+  const {root, call, load} = f, state = load();
+  let number = 1;
+  while (existsSync(join(root, `.cadre/refreshes/refresh-retry-${number}.md`))) number++;
+  const refreshPath = `refreshes/refresh-retry-${number}.md`;
   const files = {"project.json": read(root, ".cadre/project.json"), "tracks/sample/state.json": json(state),
     [refreshPath]: `# Explicit human instruction\n${reason}\nPreserve all prior finding, attempt, and cumulative baseline evidence.\n`};
   prepareCandidateStage(root, "refresh-retry", Object.keys(files));

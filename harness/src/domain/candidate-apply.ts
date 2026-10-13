@@ -25,6 +25,8 @@ import { requireJournalPreservation } from "./journal-preservation.js";
 import { requireRefreshPreservation } from "./refresh-preservation.js";
 import { requireProjectOverlay } from "./project-overlay.js";
 import { isDeepStrictEqual } from "node:util";
+import { requireWorkflowAdmission } from "./workflow-admission.js";
+import { requireRefreshRecord } from "./refresh-record.js";
 
 export interface CandidateApplyInput {
   projectRoot: string;
@@ -99,8 +101,9 @@ export function previewCandidateApply(input: CandidateApplyInput) {
     const next = JSON.parse(overlay.get("project.json")!);
     if (JSON.stringify(next.setup) !== JSON.stringify(project.setup) || JSON.stringify(next.history ?? []) !== JSON.stringify(project.history ?? [])) throw new Error("Refresh must preserve setup approval and project history");
     next.schemaVersion = 2; next.runtimeVersion = CADRE_RUNTIME_VERSION; next.templateSetVersion = "v5";
-    next.lastRefresh = { ...(next.lastRefresh ?? {}), commit: reference };
-    next.history = [...(next.history ?? []), { action: "refresh", commit: reference }];
+    const refreshPath = requireRefreshRecord(root, [...original].map(([path, content]) => ({path: `.cadre/${path}`, content})));
+    next.lastRefresh = { ...(next.lastRefresh ?? {}), refreshPath, commit: reference };
+    next.history = [...(next.history ?? []), { action: "refresh", commit: reference, refreshPath }];
     overlay.set("project.json", json(next));
     const ignore = read(".gitignore");
     overlay.set(".gitignore", ignore.replace(/\s*$/, "\n") + ["/stage/", "/.build-cache/cadre/"].filter((line) => !ignore.split(/\r?\n/).includes(line)).map((line) => `${line}\n`).join(""));
@@ -185,6 +188,7 @@ export function previewCandidateApply(input: CandidateApplyInput) {
   }
   overlay.set("tracks.md", buildTracks(tracks.sort((a, b) => a.id.localeCompare(b.id))));
   const promoted: ReceiptFile[] = [...overlay].map(([path, content]) => ({ path: `.cadre/${path}`, content }));
+  if (input.workflow === "track" || input.workflow === "revise") requireWorkflowAdmission(root, input.workflow, promoted);
   if (input.workflow === "review") requireReviewPreservation(root, promoted);
   if (["refresh", "revise"].includes(input.workflow)) requireJournalPreservation(root, promoted);
   if (input.workflow === "refresh") requireRefreshPreservation(root, promoted);

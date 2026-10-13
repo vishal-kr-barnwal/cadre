@@ -83,7 +83,7 @@ export interface ProjectState {
     artifactProgress?: string[];
     operation?: OperationState | null;
   };
-  lastRefresh?: { commit?: string } | null;
+  lastRefresh?: { commit?: string; refreshPath?: string } | null;
   history?: unknown[];
   tracks?: unknown;
   [key: string]: unknown;
