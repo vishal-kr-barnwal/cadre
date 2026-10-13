@@ -37,6 +37,11 @@ See [release notes](/release-notes) for breaking API changes, verification resul
 and publication status, and [getting started](/getting-started) for installation
 and upgrade instructions.
 
+The [upcoming roadmap](/team-and-polyrepo) adds deeper GitHub / GitLab integration
+for multi-person coordination, a knowledge base built during work and reused as
+context, and polyrepo support. Each will be optional, independently opt-in and
+disabled by default.
+
 ## What Cadre Solves
 
 | Need | Cadre's approach |

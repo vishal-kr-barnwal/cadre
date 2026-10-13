@@ -41,6 +41,22 @@ every client/mode. Three-client installer, discovery and activation checks remai
 required before publishing 4.0.0; previous 3.9.x installation checks do not replace
 those release gates.
 
+### Upcoming roadmap
+
+Three optional capabilities are planned beyond 4.0.0:
+
+1. **Deeper GitHub / GitLab integration** for coordinating work across multiple
+   people, including shared work status, ownership and review handoffs.
+2. **A knowledge base built as work happens**, capturing decisions and learning
+   during delivery and using relevant knowledge as context for subsequent work.
+3. **Polyrepo support** for coordinating dependencies and delivery across
+   multiple repositories while retaining per-repository history and approvals.
+
+Each capability will be independently **opt-in and disabled by default**. The
+core single-repository workflow will remain usable without enabling any of them.
+These are upcoming roadmap items, not features shipped in 4.0.0; no delivery dates
+are committed. See the [roadmap](https://cadre-docs.pages.dev/team-and-polyrepo/).
+
 ### Older-project upgrade route
 
 1. Install the bridge: `npm install -g cadre-ai@3.9.0`, then `cadre-ai install --target all --scope user`. Reload the client.

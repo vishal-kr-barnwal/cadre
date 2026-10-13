@@ -1,15 +1,45 @@
 ---
-title: Polyrepo Mode — Coming Soon
-navTitle: Polyrepo (Coming Soon)
-description: Current single-repository boundary and the planned direction for coordinated multi-repository delivery.
+title: Roadmap — Coming Soon
+navTitle: Roadmap (Coming Soon)
+description: Optional GitHub/GitLab team coordination, a knowledge base built during delivery, and polyrepo support.
 section: Operations
 order: 120
 ---
 
-# Polyrepo Mode — Coming Soon
+# Roadmap — Coming Soon
 
-Cadre 3.5 operates on one Git repository and one `.cadre/` control plane at a
-time. Coordinated polyrepo delivery is planned, but it is not part of the
+Cadre's upcoming roadmap has three capabilities, in this order:
+
+1. **Deeper GitHub / GitLab integration** for work coordination across multiple
+   people.
+2. **A knowledge base built as work happens**, also used as context for delivery.
+3. **Polyrepo support** for coordinated work across multiple repositories.
+
+All three will be optional, independently opt-in and disabled by default. Teams
+will be able to use the core single-repository workflow without enabling any of
+these capabilities. They are planned beyond 4.0.0; no delivery dates are committed.
+
+## GitHub / GitLab Coordination
+
+Deeper integration will help multiple people coordinate shared work, ownership,
+status and review handoffs through GitHub or GitLab. Enabling this integration
+will be an explicit choice; the core workflow will not require a hosting-provider
+connection.
+
+## Knowledge Base During Delivery
+
+An optional knowledge base will capture decisions, findings and learning while
+work is being done, then make relevant knowledge available as context for later
+planning, implementation and review. This extends the existing phase learning and
+archive-derived patterns; those remain part of the current core workflow.
+The new knowledge-base capability and its use for context will be opt-in.
+
+## Polyrepo Support
+
+Optional polyrepo coordination will connect work and dependencies across multiple
+repositories while preserving repository-specific commits, review evidence and
+approvals. Cadre 4.0 currently operates on one Git repository and one `.cadre/`
+control plane at a time. Cross-repository coordination is not implemented in the
 current runtime or workflow set.
 
 ## Current Boundary
@@ -26,13 +56,12 @@ Today:
 
 Do not create an ad hoc multi-repository `repos.json`, copy one `.cadre/`
 directory across repositories, or treat old 2.x ship/land documentation as a
-supported 3.0 contract.
+supported current contract.
 
-## Planned Direction
+## Polyrepo Design Considerations
 
-Polyrepo mode is intended to preserve Cadre's existing guarantees while adding
-an explicit control-repository model. Any future design needs to make these
-boundaries concrete:
+Polyrepo mode is intended to preserve Cadre's existing guarantees. Its design
+will need to make these boundaries concrete:
 
 - repository identities, roots, remotes, and default branches;
 - which repository owns shared product/workflow context;
@@ -43,9 +72,9 @@ boundaries concrete:
 - review evidence for a change spanning several Git histories;
 - resumable coordination when only part of a repository group succeeds.
 
-The main agent must remain the sole state owner and integrator. Workers must
-remain bounded to assigned repositories/worktrees, and every cross-repository
-mutation must remain explicit, reviewable, and recoverable.
+State ownership and integration responsibility must remain explicit for each
+operation. Workers must remain bounded to assigned repositories/worktrees, and
+every cross-repository mutation must remain reviewable and recoverable.
 
 ## Until Polyrepo Ships
 
@@ -56,6 +85,6 @@ information, and coordinate their ordering outside Cadre.
 Do not claim atomic cross-repository delivery. Review, complete, and archive
 each repository's work against its own commits and verification evidence.
 
-This page will become the operational polyrepo guide when the runtime and skill
-contracts exist. Until then, “Coming Soon” is a product boundary, not a hidden
-or experimental mode.
+Operational setup instructions will be documented as each opt-in capability
+becomes available. “Coming Soon” describes planned work, not a hidden or
+experimental mode that can be enabled today.
