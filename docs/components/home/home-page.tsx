@@ -163,10 +163,10 @@ export function HomePage({ docs }: { docs: DocMeta[] }) {
               planning, implementation, verification, review, learning, and recovery.
             </p>
             <p className="text-muted-foreground">
-              Upcoming, independently opt-in capabilities include GitHub/GitLab
-              coordination for multiple people, a knowledge base built during work
-              and reused as context, and polyrepo support. Each will be disabled
-              by default. <Link className="underline underline-offset-4" href="/team-and-polyrepo">Explore the roadmap</Link>.
+              <Link className="underline underline-offset-4" href="/github-collaboration">GitHub Integration (Beta)</Link>
+              {" "}adds opt-in team coordination while local-only workflows remain
+              unchanged. GitLab support, a delivery knowledge base, and polyrepo
+              support are planned for future releases. <Link className="underline underline-offset-4" href="/team-and-polyrepo">Explore the roadmap</Link>.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-3">

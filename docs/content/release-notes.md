@@ -7,6 +7,14 @@ order: 230
 
 # Release Notes
 
+## Unreleased — GitHub Integration (Beta)
+
+The opt-in [GitHub Integration Beta](/github-collaboration) adds shared PR
+ownership, checkpoint pushes, phase synchronization and enforcement. Local-only
+workflows remain unchanged. This candidate has not been published as a new npm
+release. GitLab integration is planned for a future release; see the
+[roadmap](/team-and-polyrepo) for current status.
+
 ## 4.0.0 - 2026-10-14
 
 Cadre 4.0.0 is a breaking runtime/API release that removes parallel legacy
@@ -53,7 +61,7 @@ every client/mode. Final 4.0.0 installation and activation checks passed for
 Codex, Claude Code and Zed, including packaged server parity, narrow approval
 settings and discovery of all ten skills.
 
-### Upcoming roadmap
+### Roadmap at the 4.0.0 release
 
 Three optional capabilities are planned beyond 4.0.0:
 

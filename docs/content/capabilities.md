@@ -72,7 +72,9 @@ Cadre 4.0 does not currently provide:
 - a generic `cadre_workflow` packet API;
 - multi-repository orchestration.
 
-Deeper GitHub/GitLab multi-person coordination, a knowledge base built during
+[GitHub Integration (Beta)](/github-collaboration) is implemented in the opt-in
+candidate and leaves local-only workflows unchanged. It is not part of the
+published 4.0.0 package. Future GitLab integration, a knowledge base built during
 delivery and reused as context, and polyrepo support are on the
-[upcoming roadmap](team-and-polyrepo.md). Each will be independently opt-in and
-disabled by default. Existing phase learning and archive patterns remain core capabilities.
+[roadmap](team-and-polyrepo.md). Each is independently opt-in and disabled by
+default. Existing phase learning and archive patterns remain core capabilities.

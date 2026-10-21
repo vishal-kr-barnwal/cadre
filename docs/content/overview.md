@@ -37,13 +37,13 @@ See [release notes](/release-notes) for breaking API changes, verification resul
 and publication status, and [getting started](/getting-started) for installation
 and upgrade instructions.
 
-The source tree also includes [opt-in GitHub collaboration](/github-collaboration),
-which leaves local-only projects unchanged.
+The source tree includes [GitHub Integration (Beta)](/github-collaboration),
+with shared PR ownership, checkpoint pushes and enforcement. It is explicitly
+opt-in and leaves local-only workflows unchanged.
 
-The [upcoming roadmap](/team-and-polyrepo) adds deeper GitHub / GitLab integration
-for multi-person coordination, a knowledge base built during work and reused as
-context, and polyrepo support. Each will be optional, independently opt-in and
-disabled by default.
+The [roadmap](/team-and-polyrepo) includes future GitLab support, a knowledge base
+built during delivery and reused as context, and polyrepo support. These planned
+capabilities will also be independently opt-in and disabled by default.
 
 ## What Cadre Solves
 

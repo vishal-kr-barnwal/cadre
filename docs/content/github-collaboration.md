@@ -1,13 +1,13 @@
 ---
-title: GitHub Collaboration
-description: Opt-in PR ownership, checkpoint publication, phase synchronization, and GitHub enforcement.
+title: GitHub Integration (Beta)
+description: Opt-in GitHub Integration Beta with PR ownership, checkpoint pushes and enforcement; GitLab support is planned.
 section: Operations
 order: 115
 ---
 
-# GitHub Collaboration
+# GitHub Integration (Beta)
 
-Strict GitHub collaboration is explicitly opt-in. Projects without a GitHub
+**Status: Beta.** GitHub integration is explicitly opt-in. Projects without a GitHub
 policy keep the existing local workflow: no GitHub calls, no requirement to
 install `gh`, no automatic pushes, and no new approval gates.
 
@@ -16,6 +16,9 @@ The implementation in this source tree adds `github_status`,
 release or enable the feature in existing projects. CI must pin a published
 package version containing these commands or a candidate archive digest; an older
 released package cannot serve as the new validator.
+
+GitLab support is planned for a future release and is not implemented in this
+Beta. No release date is committed. Follow the [roadmap](/team-and-polyrepo).
 
 ## One Operation, One PR
 

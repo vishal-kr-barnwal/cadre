@@ -1,35 +1,38 @@
 ---
-title: Roadmap — Coming Soon
-navTitle: Roadmap (Coming Soon)
-description: Optional GitHub/GitLab team coordination, a knowledge base built during delivery, and polyrepo support.
+title: Roadmap
+navTitle: Roadmap
+description: GitHub Integration in Beta, with GitLab integration, a delivery knowledge base and polyrepo support planned.
 section: Operations
 order: 120
 ---
 
-# Roadmap — Coming Soon
+# Roadmap
 
-Cadre's upcoming roadmap has three capabilities, in this order:
+| Capability | Status |
+| --- | --- |
+| [GitHub Integration](/github-collaboration) | **Beta** — implemented in the opt-in candidate |
+| GitLab Integration | **Coming Soon** — planned future support |
+| Knowledge Base During Delivery | **Coming Soon** |
+| Polyrepo Support | **Coming Soon** |
 
-1. **Deeper GitHub / GitLab integration** for work coordination across multiple
-   people.
-2. **A knowledge base built as work happens**, also used as context for delivery.
-3. **Polyrepo support** for coordinated work across multiple repositories.
+All capabilities are optional, independently opt-in and disabled by default.
+Local-only workflows remain unchanged. GitHub Beta is not part of the published
+4.0.0 package; use a candidate containing the integration. No release dates are
+committed for future capabilities.
 
-All three will be optional, independently opt-in and disabled by default. Teams
-will be able to use the core single-repository workflow without enabling any of
-these capabilities. They are planned beyond 4.0.0; no delivery dates are committed.
+## GitHub Integration — Beta
 
-## GitHub / GitLab Coordination
+The [GitHub Integration Beta](/github-collaboration) supports shared PR ownership,
+checkpoint pushes, phase synchronization, review and dependency gates, and
+GitHub enforcement. CI requires an exact validator version containing the
+integration or a digest-pinned candidate archive. Enabling it is an explicit
+choice; local-only projects do not need a hosting-provider connection.
 
-The source tree now includes [opt-in GitHub collaboration](/github-collaboration)
-with shared PR ownership, checkpoint pushes and enforcement generation. It is
-unreleased and requires a published matching validator before CI activation.
-GitLab integration remains Coming Soon.
+## GitLab Integration — Coming Soon
 
-Deeper integration will help multiple people coordinate shared work, ownership,
-status and review handoffs through GitHub or GitLab. Enabling this integration
-will be an explicit choice; the core workflow will not require a hosting-provider
-connection.
+Future GitLab support will extend team coordination to GitLab merge requests,
+shared work status, ownership and review handoffs. GitLab integration is planned
+and is not implemented in the current Beta. It will also be explicitly opt-in.
 
 ## Knowledge Base During Delivery
 
