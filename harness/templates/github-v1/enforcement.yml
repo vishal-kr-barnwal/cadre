@@ -1,0 +1,38 @@
+name: Cadre GitHub enforcement
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, closed]
+  push:
+    branches: ["{{DEFAULT_BRANCH}}"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: cadre-github-${{ github.event.pull_request.number || 'audit' }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    name: cadre-github-enforcement
+    runs-on: ubuntu-latest
+    environment: cadre-github
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted default only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: "{{DEFAULT_BRANCH}}"
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Cadre validator
+        run: |
+          {{VALIDATOR_INSTALL}}
+      - name: Validate Cadre evidence and reconcile lifecycle
+        env:
+          GH_TOKEN: ${{ secrets.CADRE_GITHUB_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "Configure CADRE_GITHUB_TOKEN for trusted enforcement" >&2; exit 1; }
+          gh auth setup-git
+          "$RUNNER_TEMP/cadre-validator/node_modules/.bin/cadre-ai" github ci --event "$GITHUB_EVENT_PATH"

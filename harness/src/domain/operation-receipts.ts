@@ -1,4 +1,6 @@
 import { readGitBlobs } from "./git.js";
+import { githubCheckpoint, requireGitHubMutation, publishGitHubReceipt, requireGitHubDelivery } from "./github/runtime.js";
+import { readSession } from "./github/storage.js";
 import { recordedRecoveryInputs, mergeRecoveryInputs, type RecoveryInput } from "./recovery-inputs.js";
 import { requireReviewFreshness } from "./review-freshness.js";
 import { requireRevertFreshness, revertApprovalProofSchema } from "./revert-freshness.js";
@@ -113,6 +115,16 @@ function write(root: string, file: ReceiptFile): void {
 export function promoteOperation(rootInput: string, input: OperationPromotionInput,
   files: ReceiptFile[], afterWrite?: (path: string) => void) {
   const root = safeProjectRoot(rootInput);
+  const githubTracks = [...new Set(files.flatMap((file) => {
+    const id = /^\.cadre\/(?:tracks|archive)\/([^/]+)\//.exec(file.path)?.[1];
+    return id ? [id] : [];
+  }))];
+  requireGitHubMutation(root, input.kind, githubTracks, input.kind === "review",
+    readSession(root)?.pending?.checkpoint === `receipt:${input.operationId}`);
+  if (input.kind === "archive") requireGitHubDelivery(root, [...new Set(files.flatMap((file) => {
+    const id = /^\.cadre\/archive\/([^/]+)\//.exec(file.path)?.[1];
+    return id ? [id] : [];
+  }))]);
   if (new Set(files.map((file) => file.path)).size !== files.length) throw new Error("Duplicate operation artifacts");
   if (files.some((file) => /^\.cadre\/(?:stage|receipts|\.worktrees|wisps)\//.test(file.path))) throw new Error("Operation cannot promote temporary state or overwrite receipts");
   const recoveryFile = target(root, recoveryPath(input.operationId));
@@ -171,6 +183,9 @@ export function promoteOperation(rootInput: string, input: OperationPromotionInp
     if (transitionBefore.length) recovery.transitionBefore = transitionBefore;
     write(root, {path, content: json(recovery)});
   }
+  githubCheckpoint(root, `receipt:${input.operationId}`, [...recovery.files.map((file) => file.path), receiptPath(input.operationId)],
+    Object.fromEntries([...recovery.files.map((file) => [file.path, file.content === null ? null : receiptHash(file.content)]),
+      [receiptPath(input.operationId), receiptHash(receiptBody)]]));
   for (const file of recovery.files) { write(root, file); afterWrite?.(file.path); }
   write(root, { path: receiptPath(input.operationId), content: receiptBody });
   afterWrite?.(receiptPath(input.operationId));
@@ -231,6 +246,7 @@ function resolveOperationUncached(rootInput: string, ref: string): string {
 /** Cleanup touches ignored recovery state only. */
 export function reconcileOperation(root: string, id: string): string {
   const commit = resolveOperation(root, operationRef(id)), path = target(safeProjectRoot(root), recoveryPath(id));
+  publishGitHubReceipt(root, id);
   if (existsSync(path)) {
     const recovery = parseRecovery(readFileSync(path, "utf8"));
     const committed = git(root, ["show", `${commit}:${receiptPath(id)}`]);

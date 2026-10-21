@@ -1,4 +1,6 @@
 export const CADRE_MCP_TOOLS = {
+  githubStatus: "github_status",
+  githubOperation: "github_operation",
   workflowElicit: "workflow_elicit",
   templateGetMany: "template_get_many",
   styleguideResolve: "styleguide_resolve",

@@ -1716,7 +1716,7 @@ test("installer prepares a shared three-client payload", async () => {
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 22);
+    assert.equal(tools.tools.length, 24);
     assert.deepEqual(Object.keys(CADRE_MCP_OUTPUT_SCHEMAS).sort(), [...CADRE_MCP_TOOL_NAMES].sort());
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
@@ -1992,7 +1992,7 @@ test("compiled MCP exposes versioned templates and initializes projects without 
   await client.connect(transport);
   try {
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 22);
+    assert.equal(tools.tools.length, 24);
     assert.ok(Buffer.byteLength(JSON.stringify(tools.tools)) <= 80 * 1024);
     for (const name of [
       "workflow_elicit", "template_get_many", "styleguide_resolve", "context_read", "project_status",

@@ -5,6 +5,7 @@ import { runInstall } from "./install.js";
 import { runUninstall } from "./uninstall.js";
 import { TEMPLATE_IDS, templateCatalog } from "../src/domain/templates.js";
 import { CADRE_RUNTIME_VERSION } from "../src/domain/version.js";
+import { runGitHub } from "./github.js";
 
 function usage(): string {
   return [
@@ -14,6 +15,7 @@ function usage(): string {
     "  cadre-ai install [--target auto|codex|claude|zed|all] [--scope user] [--dry-run] [--replace-marketplace]",
     "  cadre-ai uninstall [--target codex|claude|zed|all] [--scope user] [--dry-run]",
     "  cadre-ai doctor",
+    "  cadre-ai github <status|configure|begin|renew|release|publish|reconcile-publication|sync|assess|ready|review|audit|recover|activate|cancel|check|ci> [options]",
     "  cadre-ai --version",
     "  cadre-ai help"
   ].join("\n");
@@ -61,6 +63,7 @@ export function runCli(args: string[]): number {
   if (command === "install") return runInstall(args.slice(1));
   if (command === "uninstall" || command === "remove") return runUninstall(args.slice(1));
   if (command === "doctor") return runDoctor();
+  if (command === "github") return runGitHub(args.slice(1));
   if (command === "--version" || command === "-v" || command === "version") {
     process.stdout.write(`${CADRE_RUNTIME_VERSION}\n`);
     return 0;
