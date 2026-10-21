@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Add explicitly opt-in GitHub Integration (Beta) through `gh`, resource reservations,
+  shared draft PRs, writer leases, phase synchronization and verified checkpoint
+  publication. Local-only workflows require no GitHub access or migration.
+- Add trusted GitHub Actions generation, approval-gated protection activation,
+  dependency/delivery checks, current-head review evidence and incident recovery.
+- Add `github_status`, `github_operation` and the `cadre-ai github` CLI.
+  GitHub assets use their own immutable `github-v1` template directory.
+- CI uses an exact published validator version or a digest-pinned candidate
+  archive, with credentials isolated to a default-branch-only environment.
+  This change does not publish a release or modify existing installations.
+- GitLab integration is planned for a future release; no date is committed.
+
 ## [4.0.0] - 2026-10-14
 
 Cadre 4.0.0 is a breaking runtime/API release that removes parallel legacy
@@ -46,7 +60,7 @@ every client/mode. Final 4.0.0 installation and activation checks passed for
 Codex, Claude Code and Zed, including packaged server parity, narrow approval
 settings and discovery of all ten skills.
 
-### Upcoming roadmap
+### Roadmap at the 4.0.0 release
 
 Three optional capabilities are planned beyond 4.0.0:
 

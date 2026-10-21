@@ -94,7 +94,8 @@ test("npm package carries every workflow and immutable template asset", () => {
   ]) {
     assert.ok(files.has(`skills/${skill}/SKILL.md`), `npm package is missing the ${skill} workflow`);
   }
-  assert.ok([...files].filter((path): path is string => typeof path === "string" && path.startsWith("templates/")).every(path => path.startsWith("templates/v6/")), "historical template sets must not ship");
+  assert.ok([...files].filter((path): path is string => typeof path === "string" && path.startsWith("templates/")).every(path => path.startsWith("templates/v6/") || path.startsWith("templates/github-v1/")), "historical template sets must not ship");
+  assert.ok(files.has("templates/github-v1/enforcement.yml"));
   for (const template of templateCatalog()) {
     const path = `templates/v6/${template.relativePath}`;
     assert.ok(files.has(path), `npm package is missing template ${template.id} at ${path}`);
@@ -151,7 +152,8 @@ test("global CLI installs and uninstalls Codex, Claude, and Zed from packaged as
   assert.equal(install.status, 0, install.stderr || install.stdout);
   const plugin = join(marketplace, "plugins", "cadre");
   assert.ok(existsSync(join(plugin, "dist", "cadre-mcp.mjs")));
-  assert.equal(existsSync(join(plugin, "dist", "cadre-cli.mjs")), false);
+  assert.equal(existsSync(join(plugin, "dist", "cadre-cli.mjs")), true);
+  assert.ok(existsSync(join(plugin, "templates", "github-v1", "enforcement.yml")));
   assert.ok(existsSync(join(plugin, "skills", "create", "SKILL.md")));
   assert.ok(existsSync(join(home, ".codex", "config.toml")));
   assert.ok(existsSync(join(home, ".claude", "settings.json")));

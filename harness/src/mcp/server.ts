@@ -1,4 +1,5 @@
 import { requireSupportedProjectFormat, supportsProjectFormat } from "../domain/project-format.js";
+import { githubStatus, githubOperation, githubRequestSchema } from "../domain/github/service.js";
 import { requireTrackExecutionAuthority } from "../domain/execution.js";
 import { deriveNextStep } from "../domain/next-step.js";
 import { contextInputSchema, readContext } from "../domain/context.js";
@@ -364,6 +365,23 @@ export function createCadreServer(): McpServer {
       for (const tool of registeredTools) delete tool.outputSchema;
     }
   };
+
+  registerTool(CADRE_MCP_TOOLS.githubStatus, {
+    title: "GitHub collaboration status", description: "Inspect optional GitHub collaboration without changing it.",
+    inputSchema: { projectRoot: z.string().min(1) },
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.githubStatus],
+    annotations: { readOnlyHint: true, openWorldHint: true }
+  }, async ({ projectRoot }) => {
+    try { return result(githubStatus(projectRoot)); } catch (error) { return failure(error); }
+  });
+  registerTool(CADRE_MCP_TOOLS.githubOperation, {
+    title: "Coordinate GitHub operation", description: "Reserve or join the owning PR, publish committed checkpoints, synchronize, assess, or validate activation. Begin/sync/activate return a digest before apply; never commit arbitrary files or merge a PR.",
+    inputSchema: githubRequestSchema,
+    outputSchema: CADRE_MCP_OUTPUT_SCHEMAS[CADRE_MCP_TOOLS.githubOperation],
+    annotations: { destructiveHint: false, openWorldHint: true }
+  }, async (input) => {
+    try { return result(githubOperation(input) as Record<string, unknown>); } catch (error) { return failure(error); }
+  });
 
   registerTool(CADRE_MCP_TOOLS.workflowElicit, {
     title: "Workflow decision",

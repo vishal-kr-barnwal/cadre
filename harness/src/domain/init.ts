@@ -11,6 +11,8 @@ import { safeProjectRoot } from "./paths.js";
 import { gitRoot } from "./git.js";
 import { operationRef, promoteOperation, committedReceiptForDigest, pendingOperationForDigest, resumeOperation } from "./operation-receipts.js";
 import { captureRepositoryBasis, type RepositoryBasis } from "./repository-basis.js";
+import { readConfig, readSession } from "./github/storage.js";
+import { readSafeArtifact } from "./memory.js";
 
 export { CADRE_RUNTIME_VERSION } from "./version.js";
 export { safeProjectRoot } from "./paths.js";
@@ -197,6 +199,15 @@ function buildProjectInitProposal(input: MaterializedProjectInit): ProjectInitPr
     ["archive/.gitkeep", ""],
     ["refreshes/.gitkeep", ""]
   ]);
+  // Optional GitHub bootstrap artifacts already belong to the reserved setup PR.
+  // Include their exact bytes in the ordinary approved initialization manifest.
+  if (readConfig(input.projectRoot)) {
+    const session = readSession(input.projectRoot);
+    if (!session?.operation) throw new Error("Join the GitHub setup reservation before initialization");
+    for (const path of ["github.json", `github/operations/${session.operation}.json`]) {
+      generated.set(path, readSafeArtifact(input.projectRoot, `.cadre/${path}`));
+    }
+  }
   const files = [...generated.entries()]
     .map(([path, content]) => ({ path, content, sha256: hash(content) }))
     .sort((left, right) => left.path.localeCompare(right.path));

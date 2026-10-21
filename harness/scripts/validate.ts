@@ -59,8 +59,8 @@ if (packageManifest.dependencies && Object.keys(packageManifest.dependencies).le
   errors.push("package: self-contained runtime must not have production dependencies");
 }
 if (!packageManifest.keywords?.includes("zed")) errors.push("package: keywords must include zed");
-if (CADRE_MCP_TOOL_NAMES.length !== 22 || new Set(CADRE_MCP_TOOL_NAMES).size !== 22) {
-  errors.push("MCP tools: expected 22 unique centralized tool names");
+if (CADRE_MCP_TOOL_NAMES.length !== 24 || new Set(CADRE_MCP_TOOL_NAMES).size !== 24) {
+  errors.push("MCP tools: expected 24 unique centralized tool names");
 }
 
 interface Marketplace {
@@ -307,7 +307,7 @@ try {
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const tools = await client.listTools();
   const catalogBytes = Buffer.byteLength(JSON.stringify(tools.tools));
-  if (tools.tools.length !== 22) errors.push(`MCP catalog: expected 25 tools, found ${tools.tools.length}`);
+  if (tools.tools.length !== 24) errors.push(`MCP catalog: expected 24 tools, found ${tools.tools.length}`);
   if (catalogBytes > 80 * 1024) errors.push(`MCP catalog: ${catalogBytes} bytes exceeds the 80 KiB limit`);
   for (const tool of tools.tools) {
     if (!tool.outputSchema) errors.push(`MCP catalog: ${tool.name} has no output schema`);

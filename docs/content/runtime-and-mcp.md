@@ -64,6 +64,7 @@ operation journal are promoted.
 | Execution lifecycle | `execution_start`, `execution_checkpoint`, `execution_status`, `execution_finish` |
 | Worktrees | `worktree_create`, `integration`, `worktree_cleanup` |
 | Project initialization | `project_init_candidate` |
+| Optional GitHub collaboration | `github_status`, `github_operation` |
 | Derived index | `tracks_render` |
 
 The complete tool-by-tool contract is in [MCP Reference](mcp-reference.md).
@@ -78,7 +79,7 @@ clients receive compact JSON text without a structured duplicate. Unknown or
 proxy client identities deliberately use the text fallback; MCP has no standard
 client capability for structured result consumption.
 
-All 22 tools advertise output schemas to structured clients. Text clients do not
+All 24 tools advertise output schemas to structured clients. Text clients do not
 receive output schemas, since MCP requires structured content when a schema is
 advertised. Server-side success-payload validation remains active in both modes.
 Errors retain `isError` and use one JSON text block for every client. This keeps native Claude diagnostics visible without duplicating the payload. No extra prose summary is emitted.

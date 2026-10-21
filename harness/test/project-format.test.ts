@@ -33,7 +33,7 @@ test("format admission preserves 3.9 contracts and rejects obsolete or unknown f
   for (const name of ["archive_batch_record", "setup_record_commit", "setup_record_git_initialized"]) {
     assert.equal((CADRE_MCP_TOOL_NAMES as readonly string[]).includes(name), false);
   }
-  assert.equal(CADRE_MCP_TOOL_NAMES.length, 22);
+  assert.equal(CADRE_MCP_TOOL_NAMES.length, 24);
 });
 
 test("older project diagnostics expose the complete approved bridge without changing metadata", () => {

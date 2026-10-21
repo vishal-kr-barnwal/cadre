@@ -12,7 +12,7 @@
   },
   {
     "section": "Operations",
-    "slugs": ["configuration", "tuning", "operations", "team-and-polyrepo", "troubleshooting"]
+    "slugs": ["configuration", "tuning", "operations", "github-collaboration", "team-and-polyrepo", "troubleshooting"]
   },
   {
     "section": "Contributor Guide",

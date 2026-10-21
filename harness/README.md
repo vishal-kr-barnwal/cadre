@@ -21,6 +21,15 @@ templates. A project keeps only approved, mutable delivery state under
 [Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Release notes](https://cadre-docs.pages.dev/release-notes/)
 
+## GitHub Integration (Beta)
+
+The opt-in GitHub Integration Beta adds shared PR ownership, phase synchronization, automatic
+checkpoint publication and generated GitHub enforcement. It is explicitly
+opt-in: local-only projects keep their workflows and require no GitHub access.
+CI requires an exact published validator version or a digest-pinned candidate archive.
+GitLab support is planned for a future release, with no committed date.
+See [GitHub Integration (Beta)](https://cadre-docs.pages.dev/github-collaboration/).
+
 ## What changes in 4.0.0
 
 - **One recovery contract:** initialization, implementation completion, clean
@@ -45,21 +54,21 @@ refresh. The dummy app passed 26 tests and 200,020 arithmetic comparisons. Nativ
 workflow coverage was Autonomous/sequential; it does not establish exhaustive
 coverage of every mode or client. See the [testing and release documentation](https://cadre-docs.pages.dev/testing-and-release/).
 
-## Upcoming roadmap
+## Roadmap
 
-Three optional capabilities are planned beyond 4.0.0:
+1. **GitHub Integration — Beta:** shared PR ownership, checkpoint pushes,
+   phase synchronization and GitHub enforcement in the opt-in candidate.
+2. **GitLab Integration — Coming Soon:** future support for team coordination
+   through GitLab merge requests; not implemented yet.
+3. **Knowledge Base — Coming Soon:** capture decisions and learning during
+   delivery and reuse relevant knowledge as context for subsequent work.
+4. **Polyrepo Support — Coming Soon:** coordinate dependencies and delivery
+   across repositories while retaining per-repository history and approvals.
 
-1. **Deeper GitHub / GitLab integration** for coordinating work across multiple
-   people, including shared work status, ownership and review handoffs.
-2. **A knowledge base built as work happens**, capturing decisions and learning
-   during delivery and using relevant knowledge as context for subsequent work.
-3. **Polyrepo support** for coordinating dependencies and delivery across
-   multiple repositories while retaining per-repository history and approvals.
-
-Each capability will be independently **opt-in and disabled by default**. The
-core single-repository workflow will remain usable without enabling any of them.
-These are upcoming roadmap items, not features shipped in 4.0.0; no delivery dates
-are committed. See the [roadmap](https://cadre-docs.pages.dev/team-and-polyrepo/).
+These capabilities are independently **opt-in and disabled by default**. Local-only
+workflows remain unchanged. GitHub Beta is not part of the published 4.0.0 package;
+use a candidate containing the integration. Future capabilities have no committed
+release dates. See the [roadmap](https://cadre-docs.pages.dev/team-and-polyrepo/).
 
 ## Capabilities
 
@@ -385,10 +394,12 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 22 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 24 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
+| `github_status` | No | Inspect explicitly opted-in GitHub coordination; local projects make no GitHub calls. |
+| `github_operation` | Approval-aware | Reserve/join PRs, publish checkpoints, synchronize, assess review and recover incidents. |
 | `workflow_elicit` | No | Return required workflow questions through native elicitation or a structured fallback. |
 | `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguide descriptors and hashes for an approved technology list. |
@@ -418,7 +429,7 @@ its declared fields, while apply accepts only an unchanged `proposalToken`.
 selects one result representation: structured JSON and output schemas for recognized structured clients, compact text for other clients. Server-side output validation remains strict in both cases. Template bodies appear once. The Node-18-compatible serialized tool catalog is kept below 80 KiB, including the context and handoff contracts. The MCP
 server cannot approve its own proposals or run arbitrary shell commands. Its
 Git surface is limited to derived Cadre worktree creation, non-squash
-integration, status, and verified cleanup. It never force-deletes a branch,
+integration, status, verified cleanup, and explicitly opted-in GitHub PR coordination. It never force-deletes a branch,
 resolves a conflict, edits product files, or commits on behalf of a worker.
 Multi-file state operations use atomic individual writes and converge from
 matching partial state; mismatched bytes, hashes, journals, or Git HEAD remain

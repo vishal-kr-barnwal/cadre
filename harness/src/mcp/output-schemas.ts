@@ -504,6 +504,8 @@ const workflowOutcomeSchema = z.strictObject({
 });
 
 export const CADRE_MCP_OUTPUT_SCHEMAS = {
+  [CADRE_MCP_TOOLS.githubStatus]: compatibleOutputSchema(z.object({ enabled: z.boolean() }).passthrough()),
+  [CADRE_MCP_TOOLS.githubOperation]: compatibleOutputSchema(z.object({}).passthrough()),
   [CADRE_MCP_TOOLS.contextRead]: compatibleOutputSchema(contextPageSchema),
   [CADRE_MCP_TOOLS.candidateApply]: compatibleOutputSchema(receiptResultSchema, z.strictObject({ commandStatus: z.literal("approval_required"), proposalToken: proposalTokenSchema, operationId: z.string(), files: z.array(artifactSchema),
     stateChanges: z.array(z.strictObject({ path: pathSchema, changes: z.array(z.strictObject({ field: z.string(), action: z.enum(["set", "append"]), value: z.unknown() })) })),

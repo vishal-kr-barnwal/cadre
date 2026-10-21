@@ -3,6 +3,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { safeProjectRoot } from "./paths.js";
+import { requireGitHubMutation } from "./github/runtime.js";
 
 export const CANDIDATE_STAGE_DIRECTORY = ".cadre/stage";
 export const MAX_CANDIDATE_FILE_BYTES = 1024 * 1024;
@@ -75,6 +76,9 @@ export function prepareCandidateStage(projectRootInput: string, candidateIdInput
   const projectRoot = safeProjectRoot(projectRootInput);
   const candidateId = normalizeCandidateId(candidateIdInput);
   const normalizedExpected = expectedFiles?.map(normalizeCandidatePath);
+  const stageWorkflow = candidateId.split("-")[0]!;
+  const stageTrack = /^(?:track|review|revise|revert)-(.+)$/.exec(candidateId)?.[1];
+  requireGitHubMutation(projectRoot, stageWorkflow, stageTrack ? [stageTrack] : []);
   if (normalizedExpected && new Set(normalizedExpected).size !== normalizedExpected.length) {
     throw new Error("Candidate expectedFiles contains duplicate paths");
   }

@@ -6,7 +6,7 @@ import { createZedSkillAdapters } from "./zed.js";
 
 const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredEntries = [
-  "skills", `templates/${TEMPLATE_SET_VERSION}`, "dist/cadre-mcp.mjs", ".mcp.json", ".mcp.codex.json", "LICENSE", "README.md"
+  "skills", `templates/${TEMPLATE_SET_VERSION}`, "templates/github-v1", "dist/cadre-mcp.mjs", "dist/cadre-cli.mjs", ".mcp.json", ".mcp.codex.json", "LICENSE", "README.md"
 ];
 const optionalEntries = ["hooks", "hooks.json", ".app.json", "assets", "commands", "agents"];
 
