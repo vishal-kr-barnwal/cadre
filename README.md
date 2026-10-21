@@ -22,6 +22,14 @@ and the current v6 template catalog. All ten workflows, four approval modes,
 both scheduling modes, and stable Codex, Claude Code and Zed integrations remain
 available. Install [cadre-ai from npm](https://www.npmjs.com/package/cadre-ai).
 
+## Optional GitHub collaboration (unreleased)
+
+This source tree adds shared PR ownership, phase synchronization, automatic
+checkpoint publication and generated GitHub enforcement. It is explicitly
+opt-in: local-only projects keep their workflows and require no GitHub access.
+CI requires an exact published validator version or a digest-pinned candidate archive.
+See [GitHub collaboration](https://cadre-docs.pages.dev/github-collaboration/).
+
 ## What changes in 4.0.0
 
 - **One recovery contract:** initialization, implementation completion, clean

@@ -1,0 +1,361 @@
+{
+  "repository": "vishal-kr-barnwal/cadre-strict-validation-20261021",
+  "checks": [
+    {
+      "name": "reservation preserved before bot publishes PR",
+      "details": {
+        "id": "refresh-5f2b831e26ff7a3ae08a0e1a",
+        "branch": "cadre/github/refresh-5f2b831e26ff7a3ae08a0e1a"
+      }
+    },
+    {
+      "name": "resumed owning PR",
+      "details": {
+        "pr": 1,
+        "url": "https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/1",
+        "branch": "cadre/github/refresh-5f2b831e26ff7a3ae08a0e1a"
+      }
+    },
+    {
+      "name": "ready and independently approved",
+      "details": {
+        "pr": 1,
+        "head": "923f60e7b817a41c5bac2e2558af971b1b03090c"
+      }
+    },
+    {
+      "name": "real merge commit created",
+      "details": {
+        "pr": 1,
+        "merged": true
+      }
+    },
+    {
+      "name": "strict mode activated after hosted enforcement success",
+      "details": {
+        "active": true,
+        "defaultBranch": "main"
+      }
+    },
+    {
+      "name": "reservation preserved before bot publishes PR",
+      "details": {
+        "id": "track-d2db261fd46d81a3ec32f2d7",
+        "branch": "cadre/github/track-d2db261fd46d81a3ec32f2d7"
+      }
+    },
+    {
+      "name": "resumed owning PR",
+      "details": {
+        "pr": 2,
+        "url": "https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/2",
+        "branch": "cadre/github/track-d2db261fd46d81a3ec32f2d7"
+      }
+    },
+    {
+      "name": "approved plan receipt automatically published",
+      "details": {
+        "head": "a99a23f3c8f8a3703bece3a6dec25b7d86d154e2"
+      }
+    },
+    {
+      "name": "implementation blocked before planning merge",
+      "details": {
+        "error": "Operation is locked by https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/2; continue that PR"
+      }
+    },
+    {
+      "name": "strict protection rejects owner direct push",
+      "details": {
+        "error": "remote: error: GH006: Protected branch update failed for refs/heads/main.        \nremote: \nremote: - Changes must be made through a pull request.        \nremote: \nremote: - Required status check \"fixture-ci\" is expected.        \nTo https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021.git\n ! [remote rejected] HEAD -> main (protected branch hook declined)\nerror: failed to push some refs to 'https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021.git'",
+        "defaultUnchanged": true
+      }
+    },
+    {
+      "name": "ready and independently approved",
+      "details": {
+        "pr": 2,
+        "head": "6489d1a77cce58f5f56f46d7ec5d9b679f1de024"
+      }
+    },
+    {
+      "name": "ready and independently approved",
+      "details": {
+        "pr": 2,
+        "head": "ec96d7d53afc01b5b37dcb36d86a13e4567a88bc"
+      }
+    },
+    {
+      "name": "real merge commit created",
+      "details": {
+        "pr": 2,
+        "merged": true
+      }
+    },
+    {
+      "name": "reservation preserved before bot publishes PR",
+      "details": {
+        "id": "implement-e17e650515433cc3d6a94e6f",
+        "branch": "cadre/github/implement-e17e650515433cc3d6a94e6f"
+      }
+    },
+    {
+      "name": "resumed owning PR",
+      "details": {
+        "pr": 3,
+        "url": "https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/3",
+        "branch": "cadre/github/implement-e17e650515433cc3d6a94e6f"
+      }
+    },
+    {
+      "name": "implementation branch contains merged plan",
+      "details": {
+        "head": "74ec201688402694f892ad8af9133e33b35d9ede"
+      }
+    },
+    {
+      "name": "unpublished execution start blocks next phase",
+      "details": {}
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "execution start",
+        "head": "e6e6a9eef935a291851210b75901bc6a86a57bf1"
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "phase one start",
+        "head": "5892328525ffa7f175af77e4c4a933b184f5c5bf"
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "task T1.1 verified implementation",
+        "head": "5e11f527848437613add021fd7ab44940e0429ee"
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "phase one manual verification",
+        "head": "b1b5da3d542edfe086addb4c4c88ad0bd7dce17f"
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "phase one completion",
+        "head": "aa8a68940ef524dcc89566d3694033788e98d071"
+      }
+    },
+    {
+      "name": "new phase blocked until updated default is synchronized",
+      "details": {
+        "error": [
+          {
+            "type": "text",
+            "text": "{\"error\":{\"code\":\"CADRE_ERROR\",\"message\":\"Default branch advanced; run GitHub reconcile/audit before continuing\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "aa8a68940ef524dcc89566d3694033788e98d071",
+        "base": "9d34a442fea5880c72866de535966a6af54d555d",
+        "head": "74e8b714704b1ec305bb2985180b6c29aa034410",
+        "parents": [
+          "aa8a68940ef524dcc89566d3694033788e98d071",
+          "9d34a442fea5880c72866de535966a6af54d555d"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "phase two start",
+        "head": "9dc0feca2b147b0de789e407d78fa045c58a4f79"
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "track manual verification",
+        "head": "112aa767691f7c6aa02f67ac6b95eac5e0668d95"
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "112aa767691f7c6aa02f67ac6b95eac5e0668d95",
+        "base": "9d34a442fea5880c72866de535966a6af54d555d",
+        "head": "112aa767691f7c6aa02f67ac6b95eac5e0668d95",
+        "parents": [
+          "9dc0feca2b147b0de789e407d78fa045c58a4f79"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint published",
+      "details": {
+        "label": "phase two completion",
+        "head": "6f4666d9fae7d4bd9aa57ddccc7a5d133ad28799"
+      }
+    },
+    {
+      "name": "execution finish receipt published",
+      "details": {
+        "head": "d41962dbd2b5a05e617a081dcfcbb0002b18294c"
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "d41962dbd2b5a05e617a081dcfcbb0002b18294c",
+        "base": "9d34a442fea5880c72866de535966a6af54d555d",
+        "head": "d41962dbd2b5a05e617a081dcfcbb0002b18294c",
+        "parents": [
+          "6f4666d9fae7d4bd9aa57ddccc7a5d133ad28799"
+        ]
+      }
+    },
+    {
+      "name": "canonical clean review receipt published",
+      "details": {
+        "head": "695bffb65a8878d93e3ff76ee3440ee4191f036a"
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "bac92a9881c099bdb1b011542fd0bd897012019c",
+        "base": "9d34a442fea5880c72866de535966a6af54d555d",
+        "head": "bac92a9881c099bdb1b011542fd0bd897012019c",
+        "parents": [
+          "695bffb65a8878d93e3ff76ee3440ee4191f036a"
+        ]
+      }
+    },
+    {
+      "name": "ready and independently approved",
+      "details": {
+        "pr": 3,
+        "head": "bac92a9881c099bdb1b011542fd0bd897012019c"
+      }
+    },
+    {
+      "name": "real merge commit created",
+      "details": {
+        "pr": 3,
+        "merged": true
+      }
+    },
+    {
+      "name": "complete implementation delivered by verified protected merge",
+      "details": {
+        "pr": 3,
+        "head": "bac92a9881c099bdb1b011542fd0bd897012019c",
+        "merge": "581fdd6b6f2782e388458687026f07b6cf509e84"
+      }
+    },
+    {
+      "name": "disabled protection blocks strict mutations",
+      "details": {
+        "error": "gh api failed: gh: Branch not protected (HTTP 404)"
+      }
+    },
+    {
+      "name": "active strict audit persists bypass incident",
+      "details": {
+        "incident": "Unverified default change 331775357fc47e696180ff136383086238e43b4c; review and adopt or revert through a reconciliation PR"
+      }
+    },
+    {
+      "name": "reservation preserved before bot publishes PR",
+      "details": {
+        "id": "reconcile-a0865d18f57f0133185cca75",
+        "branch": "cadre/github/reconcile-a0865d18f57f0133185cca75"
+      }
+    },
+    {
+      "name": "resumed owning PR",
+      "details": {
+        "pr": 5,
+        "url": "https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/5",
+        "branch": "cadre/github/reconcile-a0865d18f57f0133185cca75"
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "e304580d8c0bbf95ca8f9169357d549d9aa67cdd",
+        "base": "331775357fc47e696180ff136383086238e43b4c",
+        "head": "e304580d8c0bbf95ca8f9169357d549d9aa67cdd",
+        "parents": [
+          "331775357fc47e696180ff136383086238e43b4c"
+        ]
+      }
+    },
+    {
+      "name": "default synchronized and assessed",
+      "details": {
+        "before": "2de858fe33c6df9720356368aeef36dd4b8a2738",
+        "base": "331775357fc47e696180ff136383086238e43b4c",
+        "head": "2de858fe33c6df9720356368aeef36dd4b8a2738",
+        "parents": [
+          "e304580d8c0bbf95ca8f9169357d549d9aa67cdd"
+        ]
+      }
+    },
+    {
+      "name": "ready and independently approved",
+      "details": {
+        "pr": 5,
+        "head": "2de858fe33c6df9720356368aeef36dd4b8a2738"
+      }
+    },
+    {
+      "name": "real merge commit created",
+      "details": {
+        "pr": 5,
+        "merged": true
+      }
+    },
+    {
+      "name": "strict bypass recovered after protected reviewed merge",
+      "details": {
+        "recovered": true,
+        "pr": 5,
+        "audited": "9b2b2a446c1ed11f206dc107d5097198e59b0a0f"
+      }
+    },
+    {
+      "name": "strict operations resume after explicit recovery",
+      "details": {}
+    },
+    {
+      "name": "strict mode second writer blocked by owning PR lease",
+      "details": {
+        "pr": 2,
+        "observedError": "Continue the owning PR; writer vishal-kr-barnwal must release the lease, or wait for its expiry",
+        "source": "Live command output; parallel fixture report writes otherwise omitted this assertion"
+      }
+    }
+  ],
+  "baseline": "d3baf740a0a1aede0fa32d55d1b0cd3009075b55",
+  "current": {
+    "workflow": "reconcile",
+    "tracks": [],
+    "id": "reconcile-a0865d18f57f0133185cca75",
+    "branch": "cadre/github/reconcile-a0865d18f57f0133185cca75",
+    "pr": 5,
+    "url": "https://github.com/vishal-kr-barnwal/cadre-strict-validation-20261021/pull/5"
+  },
+  "executionId": "2026-10-21T06-38-29-941Z",
+  "bypass": "331775357fc47e696180ff136383086238e43b4c"
+}

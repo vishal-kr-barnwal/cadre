@@ -1,13 +1,13 @@
 ---
 title: MCP Reference
-description: Immutable v6 resources and the 22 Cadre MCP tools.
+description: Immutable v6 resources and the 24 Cadre MCP tools, including optional GitHub coordination.
 section: Reference
 order: 210
 ---
 
 # MCP Reference
 
-Cadre exposes immutable template resources and 22 narrow tools. Response format
+Cadre exposes immutable template resources and 24 narrow tools. Response format
 is selected from the MCP initialization client identity. Recognized Codex clients
 and Claude Code 2.0.21+ receive only `structuredContent` with `content: []` and
 advertised output schemas. Zed, older Claude Code, and unknown clients receive
@@ -22,7 +22,27 @@ The prepare token is available in the selected JSON representation; applied resu
 
 ## Template Resources
 
-The active catalog is readable at `cadre://templates/v6/<logical-id>`. Only v6 is packaged; existing schema-2/v5 projects remain supported without migration.
+The active catalog is readable at `cadre://templates/v6/<logical-id>`. Only the v6 project template set is packaged; existing schema-2/v5 projects remain supported without migration.
+
+The optional GitHub enforcement assets are separately versioned under
+`templates/github-v1/`; they do not replace the project template catalog.
+
+## github_status
+
+Read-only `{projectRoot}` inspection of optional GitHub mode, current default,
+operation reservations, PR references, incidents and pending publication.
+Local-only projects return `enabled: false` without invoking GitHub.
+
+## github_operation
+
+Purpose-built optional coordination with `projectRoot` and `action`:
+`begin`, `renew`, `release`, `cancel`, `publish`, `sync`, `assess`,
+`review`, `ready`, `audit`, `recover`, `reconcile-publication`, or `activate`.
+Action inputs include `workflow`, `tracks`, `evidence`, `pr` and
+`approvalDigest`. Begin, sync, review revalidation, recovery and activation
+preview an exact digest before apply. Publication pushes only committed work
+to the reserved PR branch; this tool cannot commit arbitrary files, force-push,
+resolve conflicts or merge PRs. See [GitHub collaboration](/github-collaboration).
 
 ## workflow_elicit
 

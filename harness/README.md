@@ -21,6 +21,14 @@ templates. A project keeps only approved, mutable delivery state under
 [Quickstart](https://cadre-docs.pages.dev/quickstart/) ·
 [Release notes](https://cadre-docs.pages.dev/release-notes/)
 
+## Optional GitHub collaboration (unreleased)
+
+This source tree adds shared PR ownership, phase synchronization, automatic
+checkpoint publication and generated GitHub enforcement. It is explicitly
+opt-in: local-only projects keep their workflows and require no GitHub access.
+CI requires an exact published validator version or a digest-pinned candidate archive.
+See [GitHub collaboration](https://cadre-docs.pages.dev/github-collaboration/).
+
 ## What changes in 4.0.0
 
 - **One recovery contract:** initialization, implementation completion, clean
@@ -385,10 +393,12 @@ Important sources of truth:
 
 ## MCP capabilities
 
-The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 22 tools:
+The `cadre` stdio server exposes active immutable resources at `cadre://templates/v6/...` and 24 tools:
 
 | Tool | Mutation | Purpose |
 | --- | --- | --- |
+| `github_status` | No | Inspect explicitly opted-in GitHub coordination; local projects make no GitHub calls. |
+| `github_operation` | Approval-aware | Reserve/join PRs, publish checkpoints, synchronize, assess review and recover incidents. |
 | `workflow_elicit` | No | Return required workflow questions through native elicitation or a structured fallback. |
 | `template_get_many` | No | Read an ordered template bundle in one call; immutable catalog contents are cached for the server lifetime. |
 | `styleguide_resolve` | No | Resolve default styleguide descriptors and hashes for an approved technology list. |
@@ -418,7 +428,7 @@ its declared fields, while apply accepts only an unchanged `proposalToken`.
 selects one result representation: structured JSON and output schemas for recognized structured clients, compact text for other clients. Server-side output validation remains strict in both cases. Template bodies appear once. The Node-18-compatible serialized tool catalog is kept below 80 KiB, including the context and handoff contracts. The MCP
 server cannot approve its own proposals or run arbitrary shell commands. Its
 Git surface is limited to derived Cadre worktree creation, non-squash
-integration, status, and verified cleanup. It never force-deletes a branch,
+integration, status, verified cleanup, and explicitly opted-in GitHub PR coordination. It never force-deletes a branch,
 resolves a conflict, edits product files, or commits on behalf of a worker.
 Multi-file state operations use atomic individual writes and converge from
 matching partial state; mismatched bytes, hashes, journals, or Git HEAD remain

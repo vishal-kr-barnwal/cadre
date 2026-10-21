@@ -21,6 +21,11 @@ these capabilities. They are planned beyond 4.0.0; no delivery dates are committ
 
 ## GitHub / GitLab Coordination
 
+The source tree now includes [opt-in GitHub collaboration](/github-collaboration)
+with shared PR ownership, checkpoint pushes and enforcement generation. It is
+unreleased and requires a published matching validator before CI activation.
+GitLab integration remains Coming Soon.
+
 Deeper integration will help multiple people coordinate shared work, ownership,
 status and review handoffs through GitHub or GitLab. Enabling this integration
 will be an explicit choice; the core workflow will not require a hosting-provider

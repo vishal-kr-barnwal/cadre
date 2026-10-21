@@ -5,6 +5,8 @@ description: Archive one or more completed Cadre tracks in one approved, resumab
 
 # Cadre Archive
 
+For explicitly opted-in GitHub projects only, read `references/github-collaboration.md` before mutations. Its PR ownership, phase synchronization and checkpoint publication rules supplement this workflow. Otherwise follow the local workflow unchanged; do not invoke GitHub tools.
+
 ## Cohesive commits and retained context
 
 Each approved operation produces one immutable receipt under `.cadre/receipts/` and a temporary recovery journal under `.cadre/stage/operations/`. Apply returns `receipt` (or the receipt fields directly): `operationId`, `receiptHash`, `trailers`, and `status: commit_pending`. Include the promoted files and receipt in one agent-created Git commit with both exact returned trailers. Commit execution stays with the agent. Use `candidate_apply` with `request: {mode: "reconcile", projectRoot, operationId}` after committing; reconciliation verifies a unique reachable commit and committed artifacts and changes temporary state only. Never add a follow-up record-SHA commit. An operation reference is `op:<operationId>`, not a Git revision to pass directly to shell Git. Resolve it through receipt reconciliation before Git range commands.
