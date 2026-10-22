@@ -76,8 +76,13 @@ test("npm package carries every workflow and immutable template asset", () => {
     timeout: 10_000
   });
   assert.equal(packed.status, 0, packed.stderr || packed.stdout);
-  const reports = JSON.parse(packed.stdout) as Array<{ files?: Array<{ path?: string }> }>;
-  const files = new Set(reports[0]?.files?.map((entry) => entry.path) ?? []);
+  type PackReport = { name: string; version: string; files: Array<{ path: string }> };
+  // npm 11 returns an array; npm 12 keys reports by package name.
+  const reports = JSON.parse(packed.stdout) as PackReport[] | Record<string, PackReport>;
+  const report = Array.isArray(reports) ? reports.find(entry => entry.name === "cadre-ai") : reports["cadre-ai"];
+  assert.ok(report, "npm pack must report the cadre-ai package");
+  assert.equal(report.version, CADRE_RUNTIME_VERSION);
+  const files = new Set(report.files.map(entry => entry.path));
 
   for (const path of [
     "dist/cadre-cli.mjs", "dist/cadre-mcp.mjs", ".codex-plugin/plugin.json",

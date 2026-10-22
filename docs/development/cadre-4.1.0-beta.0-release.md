@@ -55,6 +55,13 @@ allow rule, and Zed's 24 exact tool approvals and ten skill links.
 
 ## Publication evidence
 
+The initial tag-triggered run stopped before publication: 518/519 tests passed,
+but npm 12 changed `pack --json` from an array to a package-keyed object. The
+archive contained the bundles; the test parser incorrectly reported them missing.
+The packaging assertion now supports both formats, verified against npm 11.20.0
+and 12.2.1. The release workflow pins the locally validated npm 11.20.0. Runtime
+and package contents are unchanged by this correction.
+
 The tag-triggered GitHub Actions run and npm registry are authoritative for
 publication success. Verify that `beta` resolves to `4.1.0-beta.0` and `latest`
 remains `4.0.0` after the run. Installing the beta does not enable GitHub mode.
