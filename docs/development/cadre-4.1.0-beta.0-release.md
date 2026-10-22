@@ -25,8 +25,7 @@ distributed across Codex, Claude and Zed. They complete implementation, review
 and archive without a refresh, preserving project version labels and workflow
 bytes. GitHub mode remains separately opt-in.
 
-The full 511-test harness suite passed, followed by all eight newly added
-4.0.0 continuation cases (519 distinct passing cases in total).
+The final full harness suite passed all 519 tests locally and in GitHub Actions.
 Frozen dependency installation, TypeScript, package validation, pack dry run,
 doctor, release-channel tests and workflow actionlint passed. The documentation
 check passed content validation, lint, types, static export and SEO validation
@@ -62,6 +61,20 @@ The packaging assertion now supports both formats, verified against npm 11.20.0
 and 12.2.1. The release workflow pins the locally validated npm 11.20.0. Runtime
 and package contents are unchanged by this correction.
 
-The tag-triggered GitHub Actions run and npm registry are authoritative for
-publication success. Verify that `beta` resolves to `4.1.0-beta.0` and `latest`
-remains `4.0.0` after the run. Installing the beta does not enable GitHub mode.
+The [retry run](https://github.com/vishal-kr-barnwal/cadre/actions/runs/39722296587)
+passed all 519 tests and published with signed provenance. npm accepted the upload
+but processed it asynchronously for several minutes. The original 60-second
+post-publication visibility check timed out, leaving that run marked failed.
+Publication subsequently became available and was independently verified.
+
+The registry confirms `beta: 4.1.0-beta.0` and unchanged `latest: 4.0.0`.
+Downloaded the exact published package into a temporary directory and verified
+both plugin manifests, sole executable, absence of production dependencies,
+version output, doctor, self-contained runtime and all 39 required templates.
+The registry exposes a SLSA provenance attestation for this version.
+
+Future releases use a separate availability-verification job with a roughly
+15-minute processing window. Its success-after-delay and bounded stale-channel
+failure paths were exercised, and actionlint passed. Failed verification can be
+retried without rerunning a successful publish job. The published beta tag stays
+at its accepted source commit. Installing the beta does not enable GitHub mode.
