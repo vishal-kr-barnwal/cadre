@@ -122,7 +122,9 @@ trusted-publisher configuration. No npm token belongs in the repository.
   add the matching release-notes heading, and complete the release gates above.
 - Push the tag on the validated commit: `git push origin beta-4.1.0`.
 - The workflow checks the tag/version pair, runs harness checks, tests and package
-  validation, then publishes with `--tag beta --provenance` and verifies the channel.
+  validation, then publishes with `--tag beta --provenance`. A separate job waits
+  up to roughly 15 minutes for npm processing and verifies the channel. If it times
+  out, retry only the failed verification job; do not republish or move the tag.
 - Beta pushes leave npm's `latest` channel and production docs unchanged. Creating
   a GitHub prerelease is optional and does not publish a second time.
 - Never move an existing release tag or reuse a published npm version. Fix a failed

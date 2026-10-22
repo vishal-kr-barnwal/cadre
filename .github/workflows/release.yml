@@ -22,6 +22,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -56,23 +59,33 @@ jobs:
         env:
           NPM_CHANNEL: ${{ steps.release.outputs.channel }}
         run: npm publish --access public --provenance --tag "$NPM_CHANNEL"
+
+  verify-npm:
+    name: Verify npm availability
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Verify published version and channel
         env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          NPM_CHANNEL: ${{ steps.release.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.publish-npm.outputs.version }}
+          NPM_CHANNEL: ${{ needs.publish-npm.outputs.channel }}
         run: |
-          for attempt in 1 2 3 4 5 6; do
-            published="$(npm view "cadre-ai@$NPM_CHANNEL" version 2>/dev/null)" || published=""
+          for attempt in $(seq 1 60); do
+            published="$(npm view "cadre-ai@$NPM_CHANNEL" version --prefer-online --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" || published=""
             if [ "$published" = "$RELEASE_VERSION" ]; then exit 0; fi
-            echo "Waiting for npm registry visibility (attempt $attempt/6)"
-            sleep 10
+            echo "Waiting for npm registry visibility (attempt $attempt/60)"
+            sleep 15
           done
-          echo "Published version was not visible on the expected npm channel" >&2
+          echo "npm accepted publication, but registry visibility is still pending. Inspect npm and retry only this verification job; do not republish or move the release tag." >&2
           exit 1
 
   docs:
     name: Run docs pipeline
-    needs: publish-npm
+    needs: verify-npm
     if: github.event_name == 'release' && !github.event.release.prerelease && !startsWith(github.event.release.tag_name, 'beta-')
     uses: ./.github/workflows/docs.yml
     with:
