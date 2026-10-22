@@ -11,8 +11,8 @@ import { CADRE_MCP_TOOL_NAMES } from "../src/mcp/tool-names.js";
 import { CADRE_RUNTIME_VERSION, LEGACY_RUNTIME_VERSIONS, LEGACY_TEMPLATE_SET_VERSIONS } from "../src/domain/version.js";
 import type { ProjectState } from "../src/domain/state.js";
 
-test("format admission preserves 3.9 contracts and rejects obsolete or unknown formats", () => {
-  for (const runtimeVersion of ["3.9.0", "3.9.1", "3.9.2", CADRE_RUNTIME_VERSION]) {
+test("format admission preserves 3.9 and 4.0 contracts and rejects obsolete or unknown formats", () => {
+  for (const runtimeVersion of ["3.9.0", "3.9.1", "3.9.2", "4.0.0", CADRE_RUNTIME_VERSION]) {
     for (const templateSetVersion of ["v5", "v6"]) {
       const project = {schemaVersion: 2, runtimeVersion, templateSetVersion};
       const before = json(project);
@@ -48,16 +48,17 @@ test("older project diagnostics expose the complete approved bridge without chan
   assert.equal(json(project), before);
 });
 
-const versions = ["3.9.0", "3.9.1", "3.9.2"];
+const versions = ["3.9.0", "3.9.1", "3.9.2", "4.0.0"];
 for (const [versionIndex, runtimeVersion] of versions.entries()) for (const [modeIndex, approvalMode] of EXECUTION_APPROVAL_MODES.entries()) {
   for (const [scheduleIndex, requestedMode] of (["sequential", "parallel"] as const).entries()) {
     const client = ["codex", "claude-code", "zed"][(versionIndex + modeIndex + scheduleIndex) % 3]!;
-    test(`3.9 continuation without refresh: ${runtimeVersion}/${client}/${approvalMode}/${requestedMode}`, async (t) => {
+    test(`compatible continuation without refresh: ${runtimeVersion}/${client}/${approvalMode}/${requestedMode}`, async (t) => {
       const f = await fixture(t, client), {root, call, load} = f;
       const project = JSON.parse(read(root, ".cadre/project.json"));
-      project.runtimeVersion = runtimeVersion; project.templateSetVersion = "v5";
+      const templateSetVersion = runtimeVersion === "4.0.0" ? "v6" : "v5";
+      project.runtimeVersion = runtimeVersion; project.templateSetVersion = templateSetVersion;
       write(root, ".cadre/project.json", json(project));
-      write(root, ".cadre/workflow.md", readFileSync(resolve("templates/v5/init/workflow.md"), "utf8"));
+      write(root, ".cadre/workflow.md", readFileSync(resolve(`templates/${templateSetVersion}/init/workflow.md`), "utf8"));
       git(root, "add", ".cadre"); git(root, "commit", "-m", `fixture: preserve ${runtimeVersion} project contract`);
       const before = read(root, ".cadre/project.json"), workflow = read(root, ".cadre/workflow.md");
       const status = await call("project_status", {projectRoot: root, view: "project"});
@@ -67,7 +68,7 @@ for (const [versionIndex, runtimeVersion] of versions.entries()) for (const [mod
       assert.equal(read(root, ".cadre/project.json"), before);
       await reviewAndArchive(f);
       const after = JSON.parse(read(root, ".cadre/project.json"));
-      assert.equal(after.runtimeVersion, runtimeVersion); assert.equal(after.templateSetVersion, "v5");
+      assert.equal(after.runtimeVersion, runtimeVersion); assert.equal(after.templateSetVersion, templateSetVersion);
       assert.deepEqual(after.setup, project.setup);
       assert.deepEqual(after.history.slice(0, -1), project.history);
       assert.equal(after.history.at(-1).action, "archive");

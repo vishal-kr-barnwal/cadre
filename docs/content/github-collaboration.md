@@ -11,11 +11,11 @@ order: 115
 policy keep the existing local workflow: no GitHub calls, no requirement to
 install `gh`, no automatic pushes, and no new approval gates.
 
-The implementation in this source tree adds `github_status`,
-`github_operation`, and `cadre-ai github`. It does not publish a new npm
-release or enable the feature in existing projects. CI must pin a published
-package version containing these commands or a candidate archive digest; an older
-released package cannot serve as the new validator.
+Install the beta with `npm install -g cadre-ai@beta`, then run the normal client
+installer. Version `4.1.0-beta.0` adds `github_status`, `github_operation`, and
+`cadre-ai github`. Installing it does not enable GitHub mode in existing projects.
+CI must pin an exact version such as `4.1.0-beta.0`, or a candidate archive digest;
+the stable 4.0.0 package cannot serve as the new validator.
 
 GitLab support is planned for a future release and is not implemented in this
 Beta. No release date is committed. Follow the [roadmap](/team-and-polyrepo).

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [4.1.0-beta.0] - 2026-10-22
 
 - Add explicitly opt-in GitHub Integration (Beta) through `gh`, resource reservations,
   shared draft PRs, writer leases, phase synchronization and verified checkpoint
@@ -11,7 +11,8 @@
   GitHub assets use their own immutable `github-v1` template directory.
 - CI uses an exact published validator version or a digest-pinned candidate
   archive, with credentials isolated to a default-branch-only environment.
-  This change does not publish a release or modify existing installations.
+- Publish beta tags to npm’s `beta` channel without moving `latest` or deploying
+  production docs. Existing 4.0.0 local-only project state remains compatible.
 - GitLab integration is planned for a future release; no date is committed.
 
 ## [4.0.0] - 2026-10-14

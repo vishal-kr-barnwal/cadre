@@ -1,5 +1,5 @@
-export const CADRE_RUNTIME_VERSION = "4.0.0";
-export const COMPATIBLE_RUNTIME_VERSIONS = ["3.9.0", "3.9.1", "3.9.2"] as const;
+export const CADRE_RUNTIME_VERSION = "4.1.0-beta.0";
+export const COMPATIBLE_RUNTIME_VERSIONS = ["3.9.0", "3.9.1", "3.9.2", "4.0.0"] as const;
 
 /** These releases share the receipt-based project contract; labels need no rewrite. */
 export function isCompatibleRuntimeVersion(version: unknown): boolean {

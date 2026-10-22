@@ -1,6 +1,6 @@
 {
   "name": "cadre",
-  "version": "4.0.0",
+  "version": "4.1.0-beta.0",
   "description": "A human-governed, Git-aware product delivery harness for Codex, Claude Code, and Zed Agent.",
   "author": {
     "name": "Cadre contributors"

@@ -26,7 +26,9 @@ templates. A project keeps only approved, mutable delivery state under
 The opt-in GitHub Integration Beta adds shared PR ownership, phase synchronization, automatic
 checkpoint publication and generated GitHub enforcement. It is explicitly
 opt-in: local-only projects keep their workflows and require no GitHub access.
-CI requires an exact published validator version or a digest-pinned candidate archive.
+Install the beta with `npm install -g cadre-ai@beta` (4.1.0-beta.0). Stable installs
+continue using 4.0.0. CI requires an exact validator version, such as
+`4.1.0-beta.0`, or a digest-pinned candidate archive.
 GitLab support is planned for a future release, with no committed date.
 See [GitHub Integration (Beta)](https://cadre-docs.pages.dev/github-collaboration/).
 
@@ -67,7 +69,7 @@ coverage of every mode or client. See the [testing and release documentation](ht
 
 These capabilities are independently **opt-in and disabled by default**. Local-only
 workflows remain unchanged. GitHub Beta is not part of the published 4.0.0 package;
-use a candidate containing the integration. Future capabilities have no committed
+install the beta channel to try it. Future capabilities have no committed
 release dates. See the [roadmap](https://cadre-docs.pages.dev/team-and-polyrepo/).
 
 ## Capabilities

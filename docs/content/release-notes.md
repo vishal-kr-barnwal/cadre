@@ -7,12 +7,14 @@ order: 230
 
 # Release Notes
 
-## Unreleased — GitHub Integration (Beta)
+## 4.1.0-beta.0 - 2026-10-22
 
 The opt-in [GitHub Integration Beta](/github-collaboration) adds shared PR
 ownership, checkpoint pushes, phase synchronization and enforcement. Local-only
-workflows remain unchanged. This candidate has not been published as a new npm
-release. GitLab integration is planned for a future release; see the
+workflows remain unchanged, and existing 4.0.0 project state remains compatible.
+Install this prerelease with `npm install -g cadre-ai@beta`; stable installs keep
+using the `latest` channel. Tag `beta-4.1.0` publishes `4.1.0-beta.0` through the
+beta release workflow. GitLab integration is planned for a future release; see the
 [roadmap](/team-and-polyrepo) for current status.
 
 ## 4.0.0 - 2026-10-14
