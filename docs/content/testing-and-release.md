@@ -108,3 +108,27 @@ See `docs/development/cadre-4.0.0-release.md` for the release validation record.
 
 Publishing, tagging, pushing, and external release creation require explicit
 user authorization; local validation does not imply it.
+
+
+## Beta Tag Publishing
+
+The existing `release.yml` workflow publishes pushed `beta-*` tags using npm
+trusted publishing. Keep its workflow filename aligned with the package's npm
+trusted-publisher configuration. No npm token belongs in the repository.
+
+- `beta-4.1.0` requires candidate version `4.1.0-beta.0`.
+- A later `beta-4.1.0-beta.1` requires candidate version `4.1.0-beta.1`.
+- Update the runtime, harness/docs packages and both plugin manifests together,
+  add the matching release-notes heading, and complete the release gates above.
+- Push the tag on the validated commit: `git push origin beta-4.1.0`.
+- The workflow checks the tag/version pair, runs harness checks, tests and package
+  validation, then publishes with `--tag beta --provenance` and verifies the channel.
+- Beta pushes leave npm's `latest` channel and production docs unchanged. Creating
+  a GitHub prerelease is optional and does not publish a second time.
+- Never move an existing release tag or reuse a published npm version. Fix a failed
+  candidate and validate a new beta version when its contents need to change.
+
+Users opt in with `npm install -g cadre-ai@beta` and then run the normal installer.
+GitHub collaboration still requires separate project-level opt-in. For native
+installer validation without changing personal installations, use a disposable
+home and client configuration directories for all installer and client processes.
