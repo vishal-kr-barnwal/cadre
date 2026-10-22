@@ -33,8 +33,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
-      - name: Update npm
-        run: npm install -g npm@latest
+      - name: Install validated npm version
+        run: npm install -g npm@11.20.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify version and select npm channel
